@@ -1,0 +1,450 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: Wed, 6 May 2026 13:45:00 +1000
+Subject: [PATCH] Lever M-recover: scaffolding for in-driver recovery state machine
+
+Per-pdev struct + module parameters + sysfs counters + workqueue plumbing
+for AORUS Lever M-recover (Phase 4, 2026-05-06). This is Commit 1 of 3 in
+patch series 0016 — scaffolding ONLY, no behaviour change.
+
+Empirical justification:
+  archive/boot-recovery-fail-2026-05-06-125648/ — proved that the L4
+  helper (Lever R Tier 1 v3, aorus-egpu-wpr2-recovery.service) is
+  structurally race-prone with userspace bind-retriers. Recovery
+  succeeds reliably ONLY when no other userspace authority concurrently
+  accesses /dev/nvidia0. Single-arbiter is unavoidable; only the driver
+  has unconditional priority.
+
+Mechanism (delivered by commits 2-3 building on this scaffolding):
+  - Boot-time WPR2-stuck: probe-time MMIO check at BAR0+0x88a828
+    (NV_HUBMMU_PRI_MMU_WPR2_ADDR_HI), schedule workqueue to call
+    pci_reset_bus() on upstream Thunderbolt switch downstream port,
+    return -EPROBE_DEFER for kernel re-probe
+  - Runtime AER: error_detected returns NEED_RESET; kernel does bus
+    reset; slot_reset/resume callbacks re-init driver state
+
+This Commit 1 (scaffolding) deliverables:
+  - struct tb_egpu_lever_m_recover with workqueue + atomic counters
+  - 3 module params: NVreg_TbEgpuLeverMRecoverEnable (kill switch),
+    NVreg_TbEgpuLeverMMaxAttempts (default 3),
+    NVreg_TbEgpuLeverMResetSettleMs (default 500ms)
+  - 4 sysfs counters: tb_egpu_lever_m_{fires,successes,surrenders,
+    last_fire_jiffies} (read-only, 0444)
+  - Hooked into nv_pci_probe (init) and nv_pci_remove_helper (stop)
+    next to existing Q-watchdog calls
+  - Work handler is a no-op stub; behaviour identical to Lever M-base
+
+See docs/lever-M-recover-design.md for full design.
+
+Sovereign layer: L1 (NVIDIA fork) — this is the architectural destination
+that retires aorus-egpu-wpr2-recovery.service per
+docs/service-retirement-roadmap.md upon n>=10 PROVEN cold-cold-boot
+reproductions through this in-driver path.
+
+Tasks: #62
+---
+diff --git a/kernel-open/common/inc/nv-linux.h b/kernel-open/common/inc/nv-linux.h
+index 1ce779f9..004c8883 100644
+--- a/kernel-open/common/inc/nv-linux.h
++++ b/kernel-open/common/inc/nv-linux.h
+@@ -1441,6 +1441,13 @@ typedef struct nv_linux_state_s {
+      * heartbeat kthread state. Forward-declared opaque pointer to
+      * avoid pulling nv-qwatchdog.h into common headers. */
+     struct tb_egpu_qwatchdog *qwd;
++
++    /* AORUS Lever M-recover (Phase 4, 2026-05-06): per-device in-driver
++     * recovery state — workqueue + sysfs counters + retry budget.
++     * Forward-declared opaque pointer; full struct in
++     * nv-lever-m-recover.h. NULL if NVreg_TbEgpuLeverMRecoverEnable=0
++     * at module load (kill switch). */
++    struct tb_egpu_lever_m_recover *lever_m;
+ } nv_linux_state_t;
+ 
+ extern nv_linux_state_t *nv_linux_devices;
+diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
+index 22d53e38..c0210ef5 100644
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -27,7 +27,8 @@
+ #include "nv-msi.h"
+ #include "nv-hypervisor.h"
+ #include "nv-reg.h"
+-#include "nv-qwatchdog.h"  /* AORUS Lever Q-watchdog (Phase 1c B4, 2026-05-05) */
++#include "nv-qwatchdog.h"          /* AORUS Lever Q-watchdog (Phase 1c B4, 2026-05-05) */
++#include "nv-lever-m-recover.h"   /* AORUS Lever M-recover (Phase 4, 2026-05-06) */
+ 
+ #if defined(NV_VGPU_KVM_BUILD)
+ #include "nv-vgpu-vfio-interface.h"
+@@ -2203,6 +2204,13 @@ nv_pci_probe
+      * watchdog, falling back to the existing Q-active wrapper. */
+     (void)tb_egpu_qwatchdog_init(nvl);
+ 
++    /* AORUS Lever M-recover (Phase 4, 2026-05-06): allocate per-pdev
++     * state for in-driver recovery. Commit 1 scaffolding only —
++     * struct + workqueue + sysfs counters. Behaviour change comes in
++     * commits 2 (probe-time WPR2 detection) and 3 (AER callback path).
++     * Failure non-fatal; driver continues without recovery state. */
++    (void)tb_egpu_lever_m_recover_init(nvl);
++
+     nv_kmem_cache_free_stack(sp);
+ 
+     return 0;
+@@ -2283,6 +2291,11 @@ static void nv_pci_remove_helper(struct pci_dev *pci_dev, bool block_if_gpu_in_u
+      * NVreg_TbEgpuWatchdogIntervalMs (clamped max 60s). */
+     tb_egpu_qwatchdog_stop(nvl);
+ 
++    /* AORUS Lever M-recover (Phase 4, 2026-05-06): tear down recovery
++     * state. cancel_work_sync inside drains any pending recovery work
++     * before nvl is freed. */
++    tb_egpu_lever_m_recover_stop(nvl);
++
+ #if NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_disable_feature
+ #if defined(CONFIG_IOMMU_SVA) && \
+     (defined(NV_IOASID_GET_PRESENT) || defined(NV_MM_PASID_DROP_PRESENT))
+diff --git a/kernel-open/nvidia/nvidia-sources.Kbuild b/kernel-open/nvidia/nvidia-sources.Kbuild
+index 98ffaadd..79a085b2 100644
+--- a/kernel-open/nvidia/nvidia-sources.Kbuild
++++ b/kernel-open/nvidia/nvidia-sources.Kbuild
+@@ -12,6 +12,7 @@ NVIDIA_SOURCES += nvidia/nv-ipc-soc.c
+ NVIDIA_SOURCES += nvidia/nv.c
+ NVIDIA_SOURCES += nvidia/nv-pci.c
+ NVIDIA_SOURCES += nvidia/nv-qwatchdog.c
++NVIDIA_SOURCES += nvidia/nv-lever-m-recover.c
+ NVIDIA_SOURCES += nvidia/nv-dmabuf.c
+ NVIDIA_SOURCES += nvidia/nv-nano-timer.c
+ NVIDIA_SOURCES += nvidia/nv-acpi.c
+diff --git a/version.mk b/version.mk
+index 4df36e7f..41dcf6f5 100644
+--- a/version.mk
++++ b/version.mk
+@@ -1,4 +1,4 @@
+-NVIDIA_VERSION = 595.71.05-aorus.5
++NVIDIA_VERSION = 595.71.05-aorus.6
+ NVIDIA_NVID_VERSION = 595.71.05
+ NVIDIA_NVID_EXTRA = 
+ 
+diff --git a/kernel-open/nvidia/nv-lever-m-recover.c b/kernel-open/nvidia/nv-lever-m-recover.c
+new file mode 100644
+index 00000000..286e7510
+--- /dev/null
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -0,0 +1,252 @@
++/*
++ * nv-lever-m-recover.c — AORUS Lever M-recover scaffolding
++ *  (Phase 4 / Lever M-recover, 2026-05-06)
++ *
++ * In-driver recovery state machine for two failure paths:
++ *
++ *   1. Boot-time WPR2-stuck (cold-cold-boot WPR2 persists across power
++ *      cycle, blocking GSP boot). Detected at probe time via direct
++ *      MMIO read of NV_HUBMMU0_PRI_BASE + NV_HUBMMU_PRI_MMU_WPR2_ADDR_HI
++ *      (BAR0 offset 0x88a828 on Blackwell GB100/GB202). Triggers
++ *      pci_reset_bus() on the upstream Thunderbolt switch downstream
++ *      port (0000:03:00.0 on this hardware), then EPROBE_DEFER for
++ *      kernel re-probe.
++ *
++ *   2. Runtime AER errors (PCIe link drop / link errors). Detected via
++ *      the pci_error_handlers callback machinery already scaffolded in
++ *      Lever M-base (patch 0007). error_detected returns NEED_RESET;
++ *      kernel does the bus reset; slot_reset/resume callbacks run our
++ *      re-init logic.
++ *
++ * THIS COMMIT (1 of 3) is scaffolding only — per-pdev struct, module
++ * params, sysfs counters, workqueue plumbing. The work handler is a
++ * no-op stub. error_detected still returns DISCONNECT (Lever M-base
++ * behaviour). Probe path is unmodified.
++ *
++ * Empirical justification:
++ *   archive/boot-recovery-fail-2026-05-06-125648/ — the L4 helper
++ *   (Lever R Tier 1 v3) is structurally race-prone with userspace
++ *   bind-retriers (nvidia-persistenced opens /dev/nvidia0 every ~10s,
++ *   each open triggers _kgspBootGspRm against unsettled GSP state).
++ *   Single-arbiter recovery is only achievable in the driver itself.
++ *
++ * Sovereign layer:
++ *   L1 — this is THE destination. Retires aorus-egpu-wpr2-recovery
++ *   (L4 helper) per docs/service-retirement-roadmap.md upon n>=10
++ *   PROVEN cold-cold-boot reproductions through this in-driver path.
++ *
++ * Tier 2 features (kobject_uevent state emission, more granular
++ * counters) layered on top after PROVEN.
++ *
++ * See docs/lever-M-recover-design.md for full design.
++ */
++
++#include "nv-lever-m-recover.h"
++#include "nv-linux.h"
++#include "nv-pci-types.h"
++
++#include <linux/module.h>
++#include <linux/workqueue.h>
++#include <linux/atomic.h>
++#include <linux/jiffies.h>
++#include <linux/sysfs.h>
++#include <linux/slab.h>
++#include <linux/device.h>
++
++/* Module parameters — kill switch + tunables. Default-on so the lever
++ * is engaged by default once landed; revert path is to set
++ * NVreg_TbEgpuLeverMRecoverEnable=0 at module load.
++ *
++ * In Commit 1 (scaffolding) Enable=1 has no behavioural effect since
++ * the work handler is a no-op stub. The flag becomes load-bearing in
++ * Commit 2 (probe-time WPR2 detection) and Commit 3 (AER path).
++ */
++unsigned int NVreg_TbEgpuLeverMRecoverEnable = 1;
++module_param(NVreg_TbEgpuLeverMRecoverEnable, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuLeverMRecoverEnable,
++    "AORUS Lever M-recover: enable in-driver recovery (1=on default, 0=fall back to Lever M-base DISCONNECT behaviour)");
++
++unsigned int NVreg_TbEgpuLeverMMaxAttempts = 3;
++module_param(NVreg_TbEgpuLeverMMaxAttempts, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuLeverMMaxAttempts,
++    "AORUS Lever M-recover: max bus-reset attempts before surrendering (default 3)");
++
++unsigned int NVreg_TbEgpuLeverMResetSettleMs = 500;
++module_param(NVreg_TbEgpuLeverMResetSettleMs, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuLeverMResetSettleMs,
++    "AORUS Lever M-recover: settle delay (ms) after bus reset before re-checking (default 500)");
++
++/* No-op work handler stub — Commit 2 fills in the actual recovery
++ * sequence. For Commit 1 we just log that the workqueue plumbing fired,
++ * increment the counter, and return. Useful for sanity-checking the
++ * scaffolding in isolation. */
++static void tb_egpu_lever_m_reset_work_handler(struct work_struct *work)
++{
++    struct tb_egpu_lever_m_recover *lm =
++        container_of(work, struct tb_egpu_lever_m_recover, reset_work);
++
++    atomic_inc(&lm->fire_count);
++    lm->last_fire_jiffies = jiffies;
++
++    nv_printf(NV_DBG_INFO,
++        "AORUS Lever M-recover: reset_work fired (Commit 1 scaffolding stub; "
++        "no actual recovery action yet — Commits 2+3 deliver the real work). "
++        "fire_count=%d\n",
++        atomic_read(&lm->fire_count));
++
++    atomic_set(&lm->in_progress, 0);
++}
++
++/* sysfs counter exposure — per-device, read-only.
++ *
++ * Userspace can read:
++ *   /sys/bus/pci/devices/0000:04:00.0/tb_egpu_lever_m_fires
++ *   /sys/bus/pci/devices/0000:04:00.0/tb_egpu_lever_m_successes
++ *   /sys/bus/pci/devices/0000:04:00.0/tb_egpu_lever_m_surrenders
++ *   /sys/bus/pci/devices/0000:04:00.0/tb_egpu_lever_m_last_fire_jiffies
++ *
++ * Pattern reused from Lever Q-watchdog patch 0015. Persists for the
++ * device's driver-bound lifetime; reset by module reload or device
++ * remove.
++ */
++static ssize_t tb_egpu_lever_m_fires_show(struct device *dev,
++                                         struct device_attribute *attr,
++                                         char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->lever_m)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%d\n", atomic_read(&nvl->lever_m->fire_count));
++}
++
++static ssize_t tb_egpu_lever_m_successes_show(struct device *dev,
++                                             struct device_attribute *attr,
++                                             char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->lever_m)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%d\n", atomic_read(&nvl->lever_m->success_count));
++}
++
++static ssize_t tb_egpu_lever_m_surrenders_show(struct device *dev,
++                                              struct device_attribute *attr,
++                                              char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->lever_m)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%d\n", atomic_read(&nvl->lever_m->surrender_count));
++}
++
++static ssize_t tb_egpu_lever_m_last_fire_jiffies_show(struct device *dev,
++                                                     struct device_attribute *attr,
++                                                     char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->lever_m)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%lu\n", nvl->lever_m->last_fire_jiffies);
++}
++
++static DEVICE_ATTR(tb_egpu_lever_m_fires, 0444,
++                   tb_egpu_lever_m_fires_show, NULL);
++static DEVICE_ATTR(tb_egpu_lever_m_successes, 0444,
++                   tb_egpu_lever_m_successes_show, NULL);
++static DEVICE_ATTR(tb_egpu_lever_m_surrenders, 0444,
++                   tb_egpu_lever_m_surrenders_show, NULL);
++static DEVICE_ATTR(tb_egpu_lever_m_last_fire_jiffies, 0444,
++                   tb_egpu_lever_m_last_fire_jiffies_show, NULL);
++
++int tb_egpu_lever_m_recover_init(nv_linux_state_t *nvl)
++{
++    struct tb_egpu_lever_m_recover *lm;
++    nv_state_t *nv = NV_STATE_PTR(nvl);
++
++    if (!NVreg_TbEgpuLeverMRecoverEnable)
++    {
++        NV_DEV_PRINTF(NV_DBG_INFO, nv,
++            "AORUS Lever M-recover: disabled at module load "
++            "(NVreg_TbEgpuLeverMRecoverEnable=0); state not allocated\n");
++        nvl->lever_m = NULL;
++        return 0;
++    }
++
++    lm = kzalloc(sizeof(*lm), GFP_KERNEL);
++    if (!lm)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "AORUS Lever M-recover: kzalloc failed; "
++            "continuing without in-driver recovery\n");
++        return -ENOMEM;
++    }
++
++    INIT_WORK(&lm->reset_work, tb_egpu_lever_m_reset_work_handler);
++    atomic_set(&lm->in_progress, 0);
++    atomic_set(&lm->fire_count, 0);
++    atomic_set(&lm->success_count, 0);
++    atomic_set(&lm->surrender_count, 0);
++    lm->last_fire_jiffies = 0;
++    lm->attempt_count     = 0;
++
++    nvl->lever_m = lm;
++
++    /* Register sysfs counters. Failure is non-fatal — recovery still
++     * works (when implemented in commits 2+3), just without userspace-
++     * visible cumulative counters. */
++    if (nvl->pci_dev)
++    {
++        if (device_create_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_fires) != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "AORUS Lever M-recover: device_create_file(fires) failed\n");
++        if (device_create_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_successes) != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "AORUS Lever M-recover: device_create_file(successes) failed\n");
++        if (device_create_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_surrenders) != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "AORUS Lever M-recover: device_create_file(surrenders) failed\n");
++        if (device_create_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_last_fire_jiffies) != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "AORUS Lever M-recover: device_create_file(last_fire_jiffies) failed\n");
++    }
++
++    NV_DEV_PRINTF(NV_DBG_INFO, nv,
++        "AORUS Lever M-recover: scaffolding initialised "
++        "(MaxAttempts=%u, SettleMs=%u; work handler is no-op stub in Commit 1)\n",
++        NVreg_TbEgpuLeverMMaxAttempts, NVreg_TbEgpuLeverMResetSettleMs);
++
++    return 0;
++}
++
++void tb_egpu_lever_m_recover_stop(nv_linux_state_t *nvl)
++{
++    struct tb_egpu_lever_m_recover *lm;
++
++    if (!nvl)
++        return;
++
++    /* Remove sysfs entries before tearing down state, mirroring qwd
++     * pattern. */
++    if (nvl->pci_dev)
++    {
++        device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_fires);
++        device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_successes);
++        device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_surrenders);
++        device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_last_fire_jiffies);
++    }
++
++    lm = nvl->lever_m;
++    if (!lm)
++        return;
++
++    /* Flush any pending work item. cancel_work_sync waits for the
++     * handler to return; safe even if no work was queued. */
++    cancel_work_sync(&lm->reset_work);
++
++    kfree(lm);
++    nvl->lever_m = NULL;
++}
+diff --git a/kernel-open/nvidia/nv-lever-m-recover.h b/kernel-open/nvidia/nv-lever-m-recover.h
+new file mode 100644
+index 00000000..e1771073
+--- /dev/null
++++ b/kernel-open/nvidia/nv-lever-m-recover.h
+@@ -0,0 +1,62 @@
++/*
++ * nv-lever-m-recover.h — AORUS Lever M-recover scaffolding
++ *  (Phase 4, design 2026-05-06)
++ *
++ * Per-device state for in-driver recovery via the kernel's
++ * pci_error_handlers framework + upstream-bridge bus reset. This header
++ * publishes the opaque struct + init/stop prototypes so nv-pci.c can
++ * embed a forward-declared pointer in nv_linux_state_t without pulling
++ * the implementation surface into common headers.
++ *
++ * Scope of THIS scaffolding (Commit 1 of patch 0016):
++ *   - per-pdev struct allocation + free
++ *   - module parameters (kill switch, max attempts, settle delay)
++ *   - sysfs counters (fires, successes, surrenders, last_fire_jiffies)
++ *   - workqueue allocation (one work_struct per pdev)
++ *   - NO behaviour change — the work handler is a no-op stub
++ *
++ * Subsequent commits (2, 3) add probe-time WPR2 detection, the actual
++ * pci_reset_bus() recovery action, and the runtime AER callback path.
++ *
++ * See docs/lever-M-recover-design.md for the full design.
++ */
++
++#ifndef _NV_LEVER_M_RECOVER_H_
++#define _NV_LEVER_M_RECOVER_H_
++
++#include <linux/atomic.h>
++#include <linux/workqueue.h>
++#include <linux/types.h>
++
++struct nv_linux_state_s;
++typedef struct nv_linux_state_s nv_linux_state_t;
++
++struct tb_egpu_lever_m_recover
++{
++    /* Recovery action serialised via this work item. Triggered by either
++     * the probe-time WPR2 detection path (commit 2) or the runtime AER
++     * error_detected callback (commit 3). For now: no-op stub. */
++    struct work_struct  reset_work;
++
++    /* Re-entry guard. Set on schedule_work, cleared at end of handler.
++     * Prevents recovery storms if multiple triggers fire simultaneously. */
++    atomic_t            in_progress;
++
++    /* Cumulative counters for visibility. Read-only via sysfs. */
++    atomic_t            fire_count;       /* schedule_work invocations */
++    atomic_t            success_count;    /* recoveries that completed */
++    atomic_t            surrender_count;  /* MaxAttempts exhaustions */
++
++    /* Last fire timestamp (jiffies) — userspace can compute "is recovery
++     * happening NOW" by comparing to current jiffies. */
++    unsigned long       last_fire_jiffies;
++
++    /* Per-pdev attempt counter — current burst, resets on success. */
++    unsigned int        attempt_count;
++};
++
++/* Lifecycle */
++int  tb_egpu_lever_m_recover_init(nv_linux_state_t *nvl);
++void tb_egpu_lever_m_recover_stop(nv_linux_state_t *nvl);
++
++#endif /* _NV_LEVER_M_RECOVER_H_ */

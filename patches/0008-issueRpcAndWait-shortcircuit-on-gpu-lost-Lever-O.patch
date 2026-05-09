@@ -1,0 +1,42 @@
+diff --git a/src/nvidia/src/kernel/vgpu/rpc.c b/src/nvidia/src/kernel/vgpu/rpc.c
+index 77954e1b..3a27f37d 100644
+--- a/src/nvidia/src/kernel/vgpu/rpc.c
++++ b/src/nvidia/src/kernel/vgpu/rpc.c
+@@ -1841,6 +1841,37 @@ static NV_STATUS _issueRpcAndWait(OBJGPU *pGpu, OBJRPC *pRpc)
+     NV_ASSERT_OR_RETURN(!gpumgrGetBcEnabledStatus(pGpu), NV_ERR_INVALID_STATE);
+     NV_CHECK(LEVEL_ERROR, rmDeviceGpuLockIsOwner(pGpu->gpuInstance));
+ 
++    //
++    // AORUS Lever O patch (2026-05-04, J-2 architectural complement to N):
++    // After PDB_PROP_GPU_IS_LOST is set (by gpuSetDisconnectedProperties from
++    // osHandleGpuLost retry exhaustion), every subsequent GSP RPC goes through
++    // the full send -> poll -> sanity-check-fail cycle, holding the GPU lock for
++    // ~5s each. In test lite-2026-05-04-145232 this blocked the AER recovery
++    // workqueue (preventing Lever M-base from firing) and starved the host of
++    // forward progress for ~7s until iwlwifi and other peripherals timed out,
++    // taking the system down.
++    //
++    // Lever N covers rpcRmApiFree_GSP specifically (the cleanup path which has
++    // 107 NV_ASSERT(status == NV_OK) sites and so must return NV_OK).
++    // Lever O covers the remaining 50+ RPC paths (alloc, control, register,
++    // unregister, etc.) by short-circuiting at the common funnel and returning
++    // NV_ERR_GPU_IS_LOST (the canonical status code, defined in
++    // nvstatuscodes.h:44 with value 0x0000000F).
++    //
++    // Logged once per failure event to avoid log spam; the cleanup chain
++    // calls into _issueRpcAndWait many times.
++    //
++    if (pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST))
++    {
++        static int s_tb_egpu_lever_o_logged = 0;
++        if (!s_tb_egpu_lever_o_logged) {
++            s_tb_egpu_lever_o_logged = 1;
++            NV_PRINTF(LEVEL_ERROR,
++                "AORUS Lever O (_issueRpcAndWait): GPU lost, RPCs returning NV_ERR_GPU_IS_LOST without sending\n");
++        }
++        return NV_ERR_GPU_IS_LOST;
++    }
++
+     if (bProfileRPC)
+     {
+         // Create a new entry for our RPC profiler

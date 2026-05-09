@@ -1,0 +1,838 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: 2026-05-08
+Subject: [PATCH] AORUS Lever M-recover Commit 3 (Patch 0024) — H1/H2/H3/H4 hardened
+
+Patch 0024 implements the Commit 3 recovery action with all four
+hardening fixes baked in from line 1 (per the 2026-05-06 storm postmortem).
+
+H1 MaxAttempts gate: atomic_inc_return on attempt_count compared against
+    NVreg_TbEgpuLeverMMaxAttempts BEFORE scheduling work. Surrender path
+    increments surrender_count + emits TB_EGPU_GPU_STATE=PERMANENT_FAIL
+    uevent. attempt_count resets on successful slot_reset/resume OR
+    after NVreg_TbEgpuLeverMSurrenderResetSec idle (5 min default).
+
+H2 Rate-limit gate: refuses to schedule a new attempt if the previous
+    fire was less than NVreg_TbEgpuLeverMMinAttemptIntervalMs ago
+    (30 s default). Defends against AER bursts and recovery storms.
+
+H3 Kill-switch persistence: driver reads
+    /var/lib/aorus-egpu/lever-m-killswitch at module init via
+    kernel_read_file_from_path; if present and content is '0', forces
+    NVreg_TbEgpuLeverMRecoverEnable to 0 even if the user passed
+    Enable=1 cmdline. Userspace CLI (aorus-egpu-lever-m enable/disable/status)
+    plus a udev rule at module-add time provide defense-in-depth.
+
+H4 Smarter error_detected: NEEDS_RESET path engages when Enable=1 +
+    attempts<Max + rate-limit OK; surrender / rate-limit / disabled
+    paths return DISCONNECT and let the existing M-base cleanup chain
+    run. nv_pci_slot_reset / nv_pci_resume callbacks handle the
+    kernel-driven recovery branch — verify PMC_BOOT_0 (RECOVERED or
+    DISCONNECT), then on resume increment success_count, reset
+    attempt_count to 0, emit READY uevent.
+
+Trigger sharpened (post-storm): post-rmInit-FAIL with WPR2!=0, NOT
+    probe-time. Hooked at nv_start_device after rm_init_adapter
+    returns failure, just before rc=-EIO. Probe-time check from
+    Patch 0017 is preserved as a no-op-detection sanity check
+    (per docs convention — falsified-but-illustrative).
+
+Default OFF (NVreg_TbEgpuLeverMRecoverEnable=0). Validate Enable=1
+    cmdline override in test phases BEFORE flipping the default to 1.
+
+Userspace artefacts (in repo):
+  usr/local/sbin/aorus-egpu-lever-m                    — kill-switch CLI
+  usr/local/sbin/aorus-egpu-lever-m-killswitch-restore — udev RUN+= helper
+  etc/udev/rules.d/82-aorus-egpu-lever-m-killswitch.rules
+
+Test plan (from design doc):
+  Phase 1: build verification (modinfo new params)
+  Phase 2: cold-boot baseline with Enable=0 (regression check)
+  Phase 3: NVreg_TbEgpuLeverMTestForceTrigger=1 — exercise recovery path
+  Phase 4: discrete H1/H2/H3/H4 hardening tests
+  Phase 5: n>=10 PROVEN cold-cold-boot recoveries → retire
+           aorus-egpu-wpr2-recovery.service
+
+References: docs/lever-m-recover-commit3-hardening-design.md
+            docs/lever-M-recover-design.md
+            archive/commit3-recovery-loop-2026-05-06-161429/
+Hypothesis ledger: H13, H15.
+---
+--- a/kernel-open/nvidia/nv-lever-m-recover.h
++++ b/kernel-open/nvidia/nv-lever-m-recover.h
+@@ -27,6 +27,7 @@
+ #include <linux/atomic.h>
+ #include <linux/workqueue.h>
+ #include <linux/types.h>
++#include <linux/pci.h>
+ 
+ struct nv_linux_state_s;
+ typedef struct nv_linux_state_s nv_linux_state_t;
+@@ -34,10 +35,16 @@
+ struct tb_egpu_lever_m_recover
+ {
+     /* Recovery action serialised via this work item. Triggered by either
+-     * the probe-time WPR2 detection path (commit 2) or the runtime AER
+-     * error_detected callback (commit 3). For now: no-op stub. */
++     * the post-rmInit-FAIL hook (Commit 3) or the AER error_detected
++     * NEED_RESET path (Commit 3 H4). Handler now performs real
++     * pci_reset_bus on the upstream bridge. */
+     struct work_struct  reset_work;
+ 
++    /* pdev refcounted at trigger time (pci_dev_get); released at handler
++     * completion (pci_dev_put). Lets the work handler reach the device
++     * without traversing nvl from container_of. */
++    struct pci_dev     *pdev_for_work;
++
+     /* Re-entry guard. Set on schedule_work, cleared at end of handler.
+      * Prevents recovery storms if multiple triggers fire simultaneously. */
+     atomic_t            in_progress;
+@@ -47,14 +54,25 @@
+     atomic_t            success_count;    /* recoveries that completed */
+     atomic_t            surrender_count;  /* MaxAttempts exhaustions */
+ 
+-    /* Last fire timestamp (jiffies) — userspace can compute "is recovery
+-     * happening NOW" by comparing to current jiffies. */
++    /* Last fire timestamp (jiffies) — also used by H2 rate-limit gate
++     * (NVreg_TbEgpuLeverMMinAttemptIntervalMs). */
+     unsigned long       last_fire_jiffies;
+ 
+-    /* Per-pdev attempt counter — current burst, resets on success. */
+-    unsigned int        attempt_count;
++    /* Per-pdev attempt counter — current burst, resets to 0 on
++     * successful slot_reset/resume (H1), or after
++     * NVreg_TbEgpuLeverMSurrenderResetSec idle since last_fire_jiffies. */
++    atomic_t            attempt_count;
+ };
+ 
++/* Module parameter externs — defined in nv-lever-m-recover.c, referenced
++ * from nv-pci.c (H4 error_detected gates) and from this file. */
++extern unsigned int NVreg_TbEgpuLeverMRecoverEnable;
++extern unsigned int NVreg_TbEgpuLeverMMaxAttempts;
++extern unsigned int NVreg_TbEgpuLeverMResetSettleMs;
++extern unsigned int NVreg_TbEgpuLeverMMinAttemptIntervalMs;
++extern unsigned int NVreg_TbEgpuLeverMSurrenderResetSec;
++extern unsigned int NVreg_TbEgpuLeverMTestForceTrigger;
++
+ /* Lifecycle */
+ int  tb_egpu_lever_m_recover_init(nv_linux_state_t *nvl);
+ void tb_egpu_lever_m_recover_stop(nv_linux_state_t *nvl);
+@@ -114,6 +132,27 @@
+  */
+ void tb_egpu_lever_m_diag_dump(nv_linux_state_t *nvl, const char *site);
+ 
++/* Commit 3 (Patch 0024): post-rmInit-FAIL trigger.
++ *
++ * Called from nv_start_device() immediately after rm_init_adapter
++ * returns failure. Reads WPR2 status; if non-zero AND Lever M-recover
++ * is enabled, runs the H1/H2 gates and schedules the recovery work.
++ * Returns 0 in all cases (caller continues to its existing failure
++ * path; recovery happens asynchronously via the workqueue). */
++int  tb_egpu_lever_m_trigger_post_rminit_fail(nv_linux_state_t *nvl);
++
++/* Commit 3: emit a uevent to userspace with TB_EGPU_GPU_STATE=<state>.
++ * `state` should be one of "READY", "RECOVERING", "PERMANENT_FAIL".
++ * Used by udev rules / userspace subscribers to react to recovery
++ * lifecycle events. */
++void tb_egpu_lever_m_emit_uevent(struct pci_dev *pdev, const char *state);
++
++/* Commit 3 (H4): pci_error_handlers slot_reset / resume helpers.
++ * Called from nv-pci.c thin dispatchers (nv_pci_slot_reset / nv_pci_resume)
++ * registered in nv_pci_err_handlers. */
++pci_ers_result_t tb_egpu_lever_m_slot_reset(struct pci_dev *pdev);
++void              tb_egpu_lever_m_slot_reset_resume(struct pci_dev *pdev);
++
+ /* AORUS Mode B telemetry S1 (2026-05-08): trigger-event AER capture.
+  * Reactive helper called from Q-watchdog detection and AER error_detected
+  * callback. Walks GPU -> bridge -> root_port (via aorus_walk_to_root_port
+--- a/kernel-open/nvidia/nv-lever-m-recover.c
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -57,6 +57,11 @@
+ #include <linux/types.h>
+ #include <linux/pci.h>
+ #include <linux/pci_regs.h>
++#include <linux/fs.h>      /* kernel_read_file_from_path */
++#include <linux/kernel_read_file.h>
++#include <linux/vmalloc.h>
++#include <linux/delay.h>   /* msleep */
++#include <linux/kobject.h> /* kobject_uevent_env */
+ 
+ /* WPR2 status register: NV_HUBMMU0_PRI_BASE + NV_HUBMMU_PRI_MMU_WPR2_ADDR_HI
+  * for Blackwell GB100/GB202 (per published headers
+@@ -66,29 +71,52 @@
+ #define TB_EGPU_LEVER_M_WPR2_REG_OFFSET   0x88a828u
+ #define TB_EGPU_LEVER_M_WPR2_VAL_MASK     0xfffffff0u    /* bits 31:4 */
+ 
+-/* Module parameters — kill switch + tunables. Default-on so the lever
+- * is engaged by default once landed; revert path is to set
+- * NVreg_TbEgpuLeverMRecoverEnable=0 at module load.
+- *
+- * In Commit 1 (scaffolding) Enable=1 has no behavioural effect since
+- * the work handler is a no-op stub. The flag becomes load-bearing in
+- * Commit 2 (probe-time WPR2 detection) and Commit 3 (AER path).
++/* Module parameters — kill switch + tunables. Default-OFF in Commit 3
++ * (Patch 0024) per the storm postmortem: validate Enable=1 cmdline
++ * override BEFORE flipping the default, then only after n>=10 PROVEN
++ * cold-cold-boot recoveries. The kill-switch file at
++ * /var/lib/aorus-egpu/lever-m-killswitch (read at module init) is the
++ * persistent layer; this module param is the runtime layer.
+  */
+-unsigned int NVreg_TbEgpuLeverMRecoverEnable = 1;
++unsigned int NVreg_TbEgpuLeverMRecoverEnable = 0;
+ module_param(NVreg_TbEgpuLeverMRecoverEnable, uint, 0644);
+ MODULE_PARM_DESC(NVreg_TbEgpuLeverMRecoverEnable,
+-    "AORUS Lever M-recover: enable in-driver recovery (1=on default, 0=fall back to Lever M-base DISCONNECT behaviour)");
++    "AORUS Lever M-recover: enable in-driver recovery (0=off default Patch 0024, 1=engage; killswitch file at /var/lib/aorus-egpu/lever-m-killswitch overrides to 0 if present and content is '0')");
+ 
+ unsigned int NVreg_TbEgpuLeverMMaxAttempts = 3;
+ module_param(NVreg_TbEgpuLeverMMaxAttempts, uint, 0644);
+ MODULE_PARM_DESC(NVreg_TbEgpuLeverMMaxAttempts,
+-    "AORUS Lever M-recover: max bus-reset attempts before surrendering (default 3)");
++    "AORUS Lever M-recover: max bus-reset attempts per burst before surrendering (H1; default 3). Counter resets on successful recovery or after NVreg_TbEgpuLeverMSurrenderResetSec idle.");
+ 
+ unsigned int NVreg_TbEgpuLeverMResetSettleMs = 500;
+ module_param(NVreg_TbEgpuLeverMResetSettleMs, uint, 0644);
+ MODULE_PARM_DESC(NVreg_TbEgpuLeverMResetSettleMs,
+     "AORUS Lever M-recover: settle delay (ms) after bus reset before re-checking (default 500)");
+ 
++/* H2 (rate limit) — refuse to schedule another attempt if the previous
++ * fire was less than this many ms ago. Defends against AER storms and
++ * recovery storms (the 2026-05-06 21-attempt-in-4-min incident). */
++unsigned int NVreg_TbEgpuLeverMMinAttemptIntervalMs = 30000;
++module_param(NVreg_TbEgpuLeverMMinAttemptIntervalMs, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuLeverMMinAttemptIntervalMs,
++    "AORUS Lever M-recover (H2): min interval (ms) between recovery attempts (default 30000 = 30s). Earlier triggers are rate-limited and DISCONNECT'd.");
++
++/* H1 (burst boundary) — if the last fire was longer than this many
++ * seconds ago, treat the new trigger as a fresh burst and reset
++ * attempt_count to 0. Prevents one-fire-per-day from accumulating. */
++unsigned int NVreg_TbEgpuLeverMSurrenderResetSec = 300;
++module_param(NVreg_TbEgpuLeverMSurrenderResetSec, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuLeverMSurrenderResetSec,
++    "AORUS Lever M-recover (H1): seconds of idle after last fire before attempt_count resets to 0 (default 300 = 5min)");
++
++/* Test-only: deliberately force the post-rmInit-FAIL trigger to fire
++ * even when WPR2 is clear. Used in Phase 3 to exercise the recovery
++ * path without waiting for natural occurrence. Default 0 (disabled). */
++unsigned int NVreg_TbEgpuLeverMTestForceTrigger = 0;
++module_param(NVreg_TbEgpuLeverMTestForceTrigger, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuLeverMTestForceTrigger,
++    "AORUS Lever M-recover (test only): force post-rmInit-FAIL trigger to fire even when WPR2 is clear (default 0; set 1 to exercise recovery in Phase 3)");
++
+ /* G3-H (2026-05-07): Match Windows AER configuration.
+  *
+  * Empirical (windows-test/powershell-cmds.txt 2026-05-07):
+@@ -113,27 +141,163 @@
+ MODULE_PARM_DESC(NVreg_TbEgpuUncMaskClearEnable,
+     "AORUS G3-H: clear GPU AER UncMask at probe to match Windows (1=on default, 0=off)");
+ 
+-/* No-op work handler stub — Commit 2 fills in the actual recovery
+- * sequence. For Commit 1 we just log that the workqueue plumbing fired,
+- * increment the counter, and return. Useful for sanity-checking the
+- * scaffolding in isolation. */
++/* H3 (kill-switch persistence) — read the persistent kill-switch file
++ * at /var/lib/aorus-egpu/lever-m-killswitch.
++ *
++ * Returns:
++ *   0 — file present and content begins with '0' → kill switch ENGAGED
++ *   1 — file present and content begins with '1' → kill switch released
++ *  -1 — file absent or unreadable → no override (use module param as-is)
++ *
++ * Read with hard 16-byte cap to defend against pathological files.
++ * kernel_read_file_from_path allocates via vmalloc; we vfree it.
++ */
++static int tb_egpu_lever_m_read_killswitch_file(void)
++{
++    void   *buf = NULL;
++    size_t  file_size = 0;
++    ssize_t bytes;
++    int     result = -1;
++    char    first;
++
++    bytes = kernel_read_file_from_path(
++        "/var/lib/aorus-egpu/lever-m-killswitch",
++        0, &buf, 16, &file_size, READING_UNKNOWN);
++
++    if (bytes < 0 || !buf)
++        return -1;
++
++    if (bytes > 0)
++    {
++        first = ((char *)buf)[0];
++        if (first == '0')
++            result = 0;
++        else if (first == '1')
++            result = 1;
++    }
++
++    vfree(buf);
++    return result;
++}
++
++/* H4 (uevent emission) — emit TB_EGPU_GPU_STATE=<state> uevent on the
++ * pdev's kobject. Used to notify userspace subscribers (udev rules,
++ * services) of recovery lifecycle transitions. */
++void tb_egpu_lever_m_emit_uevent(struct pci_dev *pdev, const char *state)
++{
++    char  envbuf[64];
++    char *envp[2] = { envbuf, NULL };
++
++    if (!pdev || !state)
++        return;
++
++    /* scnprintf is bounded; envbuf is more than enough for the longest
++     * state string ("PERMANENT_FAIL"). */
++    (void)scnprintf(envbuf, sizeof(envbuf), "TB_EGPU_GPU_STATE=%s", state);
++
++    (void)kobject_uevent_env(&pdev->dev.kobj, KOBJ_CHANGE, envp);
++}
++EXPORT_SYMBOL(tb_egpu_lever_m_emit_uevent);
++
++/* Forward decls — referenced by the work handler. Definitions follow. */
++static int  tb_egpu_lever_m_apply_killswitch_file(void);
++
++/* The recovery work handler.
++ *
++ * Triggered via schedule_work from either:
++ *   - tb_egpu_lever_m_trigger_post_rminit_fail() (post-rmInit-FAIL path)
++ *   - the H4 NEED_RESET path in nv_pci_error_detected (kernel-driven)
++ *
++ * Performs an upstream-bridge bus reset. The kernel's pci_error_handlers
++ * machinery delivers slot_reset / resume callbacks AFTER the reset
++ * completes; success accounting + uevent emission happen there.
++ *
++ * Refcount: pdev_for_work was pinned at trigger via pci_dev_get; we
++ * pci_dev_put it before returning.
++ */
+ static void tb_egpu_lever_m_reset_work_handler(struct work_struct *work)
+ {
+     struct tb_egpu_lever_m_recover *lm =
+         container_of(work, struct tb_egpu_lever_m_recover, reset_work);
++    struct pci_dev *pdev   = lm->pdev_for_work;
++    struct pci_dev *bridge = NULL;
++    int rc;
+ 
+-    atomic_inc(&lm->fire_count);
+-    lm->last_fire_jiffies = jiffies;
++    if (!pdev) {
++        nv_printf(NV_DBG_ERRORS,
++            "AORUS Lever M-recover: reset_work fired but pdev_for_work=NULL; "
++            "skipping (recovery aborted)\n");
++        atomic_set(&lm->in_progress, 0);
++        return;
++    }
+ 
+-    nv_printf(NV_DBG_INFO,
+-        "AORUS Lever M-recover: reset_work fired (Commit 1 scaffolding stub; "
+-        "no actual recovery action yet — Commits 2+3 deliver the real work). "
+-        "fire_count=%d\n",
+-        atomic_read(&lm->fire_count));
++    bridge = pci_upstream_bridge(pdev);
++    if (!bridge) {
++        nv_printf(NV_DBG_ERRORS,
++            "AORUS Lever M-recover: reset_work — no upstream bridge for %s; "
++            "cannot bus-reset; surrendering\n",
++            pci_name(pdev));
++        atomic_inc(&lm->surrender_count);
++        tb_egpu_lever_m_emit_uevent(pdev, "PERMANENT_FAIL");
++        goto out_put;
++    }
++
++    nv_printf(NV_DBG_ERRORS,
++        "AORUS Lever M-recover: bus-reset starting on bridge %s "
++        "(GPU=%s; attempt=%d/%u; settle=%ums)\n",
++        pci_name(bridge), pci_name(pdev),
++        atomic_read(&lm->attempt_count), NVreg_TbEgpuLeverMMaxAttempts,
++        NVreg_TbEgpuLeverMResetSettleMs);
++
++    tb_egpu_lever_m_emit_uevent(pdev, "RECOVERING");
++
++    /* Serialise vs the kernel's PCI rescan/remove paths. */
++    pci_lock_rescan_remove();
++    rc = pci_reset_bus(bridge);
++    pci_unlock_rescan_remove();
++
++    /* Settle before any verification; gives the link time to retrain. */
++    msleep(NVreg_TbEgpuLeverMResetSettleMs);
+ 
++    if (rc != 0) {
++        nv_printf(NV_DBG_ERRORS,
++            "AORUS Lever M-recover: pci_reset_bus(%s) FAILED rc=%d; "
++            "emitting PERMANENT_FAIL\n",
++            pci_name(bridge), rc);
++        atomic_inc(&lm->surrender_count);
++        tb_egpu_lever_m_emit_uevent(pdev, "PERMANENT_FAIL");
++        goto out_put;
++    }
++
++    nv_printf(NV_DBG_ERRORS,
++        "AORUS Lever M-recover: pci_reset_bus(%s) OK; awaiting slot_reset/"
++        "resume callbacks for verification + counter reset\n",
++        pci_name(bridge));
++
++out_put:
++    pci_dev_put(pdev);
++    lm->pdev_for_work = NULL;
+     atomic_set(&lm->in_progress, 0);
+ }
+ 
++/* Helper — apply the kill-switch file override to NVreg_TbEgpuLeverMRecoverEnable.
++ * Called from per-device init AND from any path that wants the persistent
++ * file to win over a runtime sysfs param flip. Idempotent. */
++static int tb_egpu_lever_m_apply_killswitch_file(void)
++{
++    int file_state = tb_egpu_lever_m_read_killswitch_file();
++
++    if (file_state == 0 && NVreg_TbEgpuLeverMRecoverEnable != 0)
++    {
++        nv_printf(NV_DBG_ERRORS,
++            "AORUS Lever M-recover: kill-switch file engaged "
++            "(/var/lib/aorus-egpu/lever-m-killswitch=0); "
++            "overriding NVreg_TbEgpuLeverMRecoverEnable to 0\n");
++        NVreg_TbEgpuLeverMRecoverEnable = 0;
++    }
++    return file_state;
++}
++
+ /* sysfs counter exposure — per-device, read-only.
+  *
+  * Userspace can read:
+@@ -657,11 +821,272 @@
+     return true;
+ }
+ 
++/* Commit 3 (Patch 0024): post-rmInit-FAIL trigger.
++ *
++ * Called from nv_start_device() right after rm_init_adapter returns
++ * failure. Reads WPR2 via the same mechanism as the probe-time check
++ * (Commit 2), then runs the H1/H2 gates and schedules the recovery
++ * work item.
++ *
++ * Returns 0 in all cases. Caller continues to its existing failure
++ * path (rc = -EIO; goto failed_release_irq) regardless. Recovery
++ * happens asynchronously on the kernel-global workqueue.
++ *
++ * H1 logic:
++ *   - if SurrenderResetSec idle elapsed since last_fire_jiffies:
++ *       reset attempt_count to 0 (this is a fresh burst)
++ *   - atomic_inc_return; if > MaxAttempts: surrender + emit
++ *     PERMANENT_FAIL; do NOT schedule
++ *
++ * H2 logic:
++ *   - if elapsed_ms < MinAttemptIntervalMs: rate-limit; do NOT
++ *     schedule, do NOT increment attempt_count (we never "tried")
++ *
++ * Re-entry guard:
++ *   - in_progress flag set when we schedule_work; cleared at handler
++ *     completion. If already set, skip (the previous attempt is still
++ *     running; let it finish).
++ */
++int tb_egpu_lever_m_trigger_post_rminit_fail(nv_linux_state_t *nvl)
++{
++    struct tb_egpu_lever_m_recover *lm;
++    nv_state_t *nv;
++    struct pci_dev *pdev;
++    u64 bar0_phys;
++    void __iomem *tmp_map;
++    u64 page_aligned_phys;
++    u32 page_offset;
++    u32 wpr2_raw = 0, wpr2_val = 0;
++    bool wpr2_stuck = false;
++    unsigned long elapsed_ms;
++    int attempts;
++
++    if (!nvl)
++        return 0;
++
++    if (!NVreg_TbEgpuLeverMRecoverEnable || !nvl->lever_m)
++        return 0;   /* M-base fallback: leave existing path in place */
++
++    lm   = nvl->lever_m;
++    nv   = NV_STATE_PTR(nvl);
++    pdev = nvl->pci_dev;
++    bar0_phys = nv->bars[NV_GPU_BAR_INDEX_REGS].cpu_address;
++
++    if (!pdev || bar0_phys == 0)
++        return 0;
++
++    /* Step 1: read WPR2 (or honour TestForceTrigger). */
++    page_aligned_phys = (bar0_phys + TB_EGPU_LEVER_M_WPR2_REG_OFFSET) & PAGE_MASK;
++    page_offset       = (bar0_phys + TB_EGPU_LEVER_M_WPR2_REG_OFFSET) & ~PAGE_MASK;
++
++    tmp_map = ioremap(page_aligned_phys, PAGE_SIZE);
++    if (tmp_map)
++    {
++        wpr2_raw = ioread32(tmp_map + page_offset);
++        iounmap(tmp_map);
++        wpr2_val = wpr2_raw & TB_EGPU_LEVER_M_WPR2_VAL_MASK;
++    }
++    wpr2_stuck = (wpr2_val != 0);
++
++    if (NVreg_TbEgpuLeverMTestForceTrigger && !wpr2_stuck)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "AORUS Lever M-recover: TestForceTrigger=1 — forcing trigger "
++            "even though WPR2 is clear (raw=0x%08x)\n", wpr2_raw);
++        wpr2_stuck = true;
++    }
++
++    if (!wpr2_stuck)
++    {
++        NV_DEV_PRINTF(NV_DBG_INFO, nv,
++            "AORUS Lever M-recover: post-rmInit-FAIL but WPR2 clear "
++            "(raw=0x%08x); not the WPR2-stuck failure mode; not triggering\n",
++            wpr2_raw);
++        return 0;
++    }
++
++    /* Step 2: re-entry guard. */
++    if (atomic_xchg(&lm->in_progress, 1) != 0)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "AORUS Lever M-recover: trigger fired but in_progress=1; "
++            "previous attempt still running; skipping\n");
++        return 0;
++    }
++
++    /* Step 3: H1 burst-boundary reset — if idle longer than
++     * SurrenderResetSec, treat as a fresh burst. */
++    if (lm->last_fire_jiffies != 0 &&
++        time_after(jiffies,
++                   lm->last_fire_jiffies +
++                   msecs_to_jiffies(NVreg_TbEgpuLeverMSurrenderResetSec * 1000U)))
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "AORUS Lever M-recover: idle > %us since last fire; "
++            "resetting attempt_count to 0 (fresh burst)\n",
++            NVreg_TbEgpuLeverMSurrenderResetSec);
++        atomic_set(&lm->attempt_count, 0);
++    }
++
++    /* Step 4: H2 rate-limit gate. */
++    if (lm->last_fire_jiffies != 0)
++    {
++        elapsed_ms = jiffies_to_msecs(jiffies - lm->last_fire_jiffies);
++        if (elapsed_ms < NVreg_TbEgpuLeverMMinAttemptIntervalMs)
++        {
++            NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++                "AORUS Lever M-recover (H2): rate-limited "
++                "(last fire %lums ago, min %ums); deferring\n",
++                elapsed_ms, NVreg_TbEgpuLeverMMinAttemptIntervalMs);
++            atomic_set(&lm->in_progress, 0);
++            return 0;
++        }
++    }
++
++    /* Step 5: H1 MaxAttempts gate. */
++    attempts = atomic_inc_return(&lm->attempt_count);
++    if (attempts > (int)NVreg_TbEgpuLeverMMaxAttempts)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "AORUS Lever M-recover (H1): surrender after %d attempts "
++            "(max=%u); emitting PERMANENT_FAIL\n",
++            attempts, NVreg_TbEgpuLeverMMaxAttempts);
++        atomic_inc(&lm->surrender_count);
++        tb_egpu_lever_m_emit_uevent(pdev, "PERMANENT_FAIL");
++        atomic_set(&lm->in_progress, 0);
++        return 0;
++    }
++
++    /* Step 6: schedule the work. */
++    atomic_inc(&lm->fire_count);
++    lm->last_fire_jiffies = jiffies;
++
++    if (lm->pdev_for_work)
++    {
++        /* Defensive: stale pdev_for_work from a previous trigger that
++         * didn't properly clean up. Drop the old refcount. */
++        pci_dev_put(lm->pdev_for_work);
++        lm->pdev_for_work = NULL;
++    }
++    lm->pdev_for_work = pci_dev_get(pdev);
++
++    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++        "AORUS Lever M-recover: scheduling recovery (attempt=%d/%u, "
++        "WPR2=0x%08x, ForceTrigger=%u, fires=%d)\n",
++        attempts, NVreg_TbEgpuLeverMMaxAttempts, wpr2_raw,
++        NVreg_TbEgpuLeverMTestForceTrigger,
++        atomic_read(&lm->fire_count));
++
++    schedule_work(&lm->reset_work);
++    return 0;
++}
++EXPORT_SYMBOL(tb_egpu_lever_m_trigger_post_rminit_fail);
++
++/* Commit 3 (H4): pci_error_handlers slot_reset helper.
++ *
++ * Called from nv_pci_slot_reset() in nv-pci.c after the kernel has
++ * driven a bus reset (in response to NEED_RESET from error_detected).
++ * Verifies the GPU is alive on the bus by reading PMC_BOOT_0; if
++ * 0xffffffff, the bus is still down and we DISCONNECT (giving up the
++ * recovery attempt). Otherwise RECOVERED — the kernel will then call
++ * the resume callback. */
++pci_ers_result_t tb_egpu_lever_m_slot_reset(struct pci_dev *pdev)
++{
++    nv_linux_state_t *nvl;
++    nv_state_t *nv;
++    void __iomem *tmp_map;
++    u64 bar0_phys;
++    u32 pmc_boot_0 = 0xffffffffu;
++
++    if (!pdev)
++        return PCI_ERS_RESULT_DISCONNECT;
++
++    nvl = pci_get_drvdata(pdev);
++    if (!nvl)
++        return PCI_ERS_RESULT_DISCONNECT;
++
++    nv = NV_STATE_PTR(nvl);
++    bar0_phys = nv->bars[NV_GPU_BAR_INDEX_REGS].cpu_address;
++    if (bar0_phys == 0)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "AORUS Lever M-recover: slot_reset — bar0_phys=0; cannot verify; "
++            "DISCONNECT\n");
++        return PCI_ERS_RESULT_DISCONNECT;
++    }
++
++    tmp_map = ioremap(bar0_phys, PAGE_SIZE);
++    if (tmp_map)
++    {
++        pmc_boot_0 = ioread32(tmp_map);
++        iounmap(tmp_map);
++    }
++
++    if (pmc_boot_0 == 0xffffffffu)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "AORUS Lever M-recover: slot_reset — PMC_BOOT_0=0xffffffff "
++            "(bus still down); DISCONNECT\n");
++        if (nvl->lever_m)
++        {
++            atomic_inc(&nvl->lever_m->surrender_count);
++            tb_egpu_lever_m_emit_uevent(pdev, "PERMANENT_FAIL");
++        }
++        return PCI_ERS_RESULT_DISCONNECT;
++    }
++
++    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++        "AORUS Lever M-recover: slot_reset — PMC_BOOT_0=0x%08x; RECOVERED\n",
++        pmc_boot_0);
++    return PCI_ERS_RESULT_RECOVERED;
++}
++EXPORT_SYMBOL(tb_egpu_lever_m_slot_reset);
++
++/* Commit 3 (H4): pci_error_handlers resume helper.
++ *
++ * Called from nv_pci_resume() in nv-pci.c after slot_reset returned
++ * RECOVERED. This is where we declare success: increment success_count,
++ * reset attempt_count to 0, emit TB_EGPU_GPU_STATE=READY uevent.
++ *
++ * Patch 0024 v1 does NOT re-enter rm_init_adapter from this callback —
++ * doing so safely requires preserving CUDA context state across reset,
++ * which is M-preserve scope. v1 successful recovery is "GPU is alive
++ * on the bus again"; userspace must rebind to use it.
++ */
++void tb_egpu_lever_m_slot_reset_resume(struct pci_dev *pdev)
++{
++    nv_linux_state_t *nvl;
++
++    if (!pdev)
++        return;
++
++    nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->lever_m)
++        return;
++
++    atomic_inc(&nvl->lever_m->success_count);
++    atomic_set(&nvl->lever_m->attempt_count, 0);
++
++    nv_printf(NV_DBG_ERRORS,
++        "AORUS Lever M-recover: resume — success_count=%d, attempt_count "
++        "reset to 0; emitting READY\n",
++        atomic_read(&nvl->lever_m->success_count));
++
++    tb_egpu_lever_m_emit_uevent(pdev, "READY");
++}
++EXPORT_SYMBOL(tb_egpu_lever_m_slot_reset_resume);
++
+ int tb_egpu_lever_m_recover_init(nv_linux_state_t *nvl)
+ {
+     struct tb_egpu_lever_m_recover *lm;
+     nv_state_t *nv = NV_STATE_PTR(nvl);
+ 
++    /* H3 (kill-switch persistence): the file at
++     * /var/lib/aorus-egpu/lever-m-killswitch can force NVreg_TbEgpuLever-
++     * MRecoverEnable to 0 even if the module param says 1. Read it once
++     * per device init; idempotent across multiple devices. */
++    (void)tb_egpu_lever_m_apply_killswitch_file();
++
+     /* G3-H: clear GPU AER UncMask at probe to match Windows behavior.
+      * Runs regardless of NVreg_TbEgpuLeverMRecoverEnable since unmasking
+      * is independent of the recovery state machine — even with M-recover
+@@ -715,7 +1140,8 @@
+     atomic_set(&lm->success_count, 0);
+     atomic_set(&lm->surrender_count, 0);
+     lm->last_fire_jiffies = 0;
+-    lm->attempt_count     = 0;
++    atomic_set(&lm->attempt_count, 0);
++    lm->pdev_for_work     = NULL;
+ 
+     nvl->lever_m = lm;
+ 
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -2830,33 +2830,133 @@
+ // times in rapid succession; we want one bright marker per failure event,
+ // not log spam.
+ //
++/* AORUS Lever M-recover Commit 3 (Patch 0024) — H4 truth-table
++ * implementation of error_detected.
++ *
++ *   | Enable | attempts<Max | rate-limit OK | result        |
++ *   |--------|--------------|---------------|---------------|
++ *   |   0    |      —       |       —       | DISCONNECT    |  (M-base)
++ *   |   1    |     YES      |      YES      | NEED_RESET    |  (recover)
++ *   |   1    |      NO      |       —       | DISCONNECT    |  (surrender + PERMANENT_FAIL)
++ *   |   1    |     YES      |       NO      | DISCONNECT    |  (rate-limited; defer)
++ *
++ * On NEED_RESET the kernel performs the bus reset itself and then
++ * delivers slot_reset / resume callbacks (handled below). On
++ * DISCONNECT the kernel marks the device permanently failed and the
++ * existing Lever I/J-2/N cleanup chain runs.
++ */
+ static pci_ers_result_t
+ nv_pci_error_detected(struct pci_dev *pci_dev, pci_channel_state_t state)
+ {
+     static int s_tb_egpu_lever_m_logged = 0;
++    nv_linux_state_t *nvl;
++    struct tb_egpu_lever_m_recover *lm = NULL;
++    unsigned long elapsed_ms;
++    int attempts;
++    pci_ers_result_t result = PCI_ERS_RESULT_DISCONNECT;
++    const char *result_str = "DISCONNECT";
++    const char *reason = "M-base (Enable=0)";
+ 
+     if (!s_tb_egpu_lever_m_logged)
+     {
+         s_tb_egpu_lever_m_logged = 1;
+         nv_printf(NV_DBG_ERRORS,
+                   "AORUS Lever M-base: AER error_detected fired on %04x:%02x:%02x.%x "
+-                  "(channel state=%d). Returning DISCONNECT to trigger clean teardown; "
+-                  "Levers I/J-2/N will handle the GPU-lost cleanup chain.\n",
++                  "(channel state=%d).\n",
+                   NV_PCI_DOMAIN_NUMBER(pci_dev), NV_PCI_BUS_NUMBER(pci_dev),
+                   NV_PCI_SLOT_NUMBER(pci_dev), PCI_FUNC(pci_dev->devfn),
+                   (int)state);
+ 
+         /* AORUS Mode B telemetry S1 (2026-05-08): on first AER fire, dump
+-         * full AER + DPC + link state. Reactive — fires only when this
+-         * callback runs. Gated on log-once latch. */
++         * full AER + DPC + link state. */
+         tb_egpu_dump_aer_trigger_event(pci_dev, "error-handler", NULL);
+     }
+ 
+-    return PCI_ERS_RESULT_DISCONNECT;
++    nvl = pci_get_drvdata(pci_dev);
++    if (nvl)
++        lm = nvl->lever_m;
++
++    if (!NVreg_TbEgpuLeverMRecoverEnable || !lm)
++    {
++        /* M-base behaviour (Enable=0 OR per-device state not allocated). */
++        result = PCI_ERS_RESULT_DISCONNECT;
++        reason = "M-base (Enable=0 or lever_m=NULL)";
++        goto log_and_return;
++    }
++
++    /* H1 burst-boundary: idle long enough since last fire? Treat as
++     * fresh burst. */
++    if (lm->last_fire_jiffies != 0 &&
++        time_after(jiffies,
++                   lm->last_fire_jiffies +
++                   msecs_to_jiffies(NVreg_TbEgpuLeverMSurrenderResetSec * 1000U)))
++    {
++        atomic_set(&lm->attempt_count, 0);
++    }
++
++    /* H2 rate-limit gate (cheaper to check than H1, so check first). */
++    if (lm->last_fire_jiffies != 0)
++    {
++        elapsed_ms = jiffies_to_msecs(jiffies - lm->last_fire_jiffies);
++        if (elapsed_ms < NVreg_TbEgpuLeverMMinAttemptIntervalMs)
++        {
++            result = PCI_ERS_RESULT_DISCONNECT;
++            reason = "rate-limited (H2)";
++            goto log_and_return;
++        }
++    }
++
++    /* H1 MaxAttempts gate. */
++    attempts = atomic_inc_return(&lm->attempt_count);
++    if (attempts > (int)NVreg_TbEgpuLeverMMaxAttempts)
++    {
++        atomic_inc(&lm->surrender_count);
++        tb_egpu_lever_m_emit_uevent(pci_dev, "PERMANENT_FAIL");
++        result = PCI_ERS_RESULT_DISCONNECT;
++        reason = "surrender (H1 MaxAttempts exhausted)";
++        goto log_and_return;
++    }
++
++    /* All gates passed: ask kernel to drive the bus reset; success
++     * accounting happens in slot_reset/resume. Update last_fire here so
++     * concurrent fires see the rate-limit. */
++    atomic_inc(&lm->fire_count);
++    lm->last_fire_jiffies = jiffies;
++    tb_egpu_lever_m_emit_uevent(pci_dev, "RECOVERING");
++    result = PCI_ERS_RESULT_NEED_RESET;
++    result_str = "NEED_RESET";
++    reason = "scheduling bus reset (H4 path)";
++
++log_and_return:
++    if (result != PCI_ERS_RESULT_NEED_RESET) {
++        /* Default: keep result_str in sync with result. */
++        result_str = "DISCONNECT";
++    }
++    nv_printf(NV_DBG_ERRORS,
++        "AORUS Lever M-recover: error_detected -> %s (%s; attempts=%d/%u)\n",
++        result_str, reason,
++        lm ? atomic_read(&lm->attempt_count) : -1,
++        NVreg_TbEgpuLeverMMaxAttempts);
++
++    return result;
++}
++
++/* Thin dispatchers for the slot_reset / resume callbacks; bodies live
++ * in nv-lever-m-recover.c so the recovery logic stays in one TU. */
++static pci_ers_result_t nv_pci_slot_reset(struct pci_dev *pci_dev)
++{
++    return tb_egpu_lever_m_slot_reset(pci_dev);
++}
++
++static void nv_pci_resume(struct pci_dev *pci_dev)
++{
++    tb_egpu_lever_m_slot_reset_resume(pci_dev);
+ }
+ 
+ static const struct pci_error_handlers nv_pci_err_handlers = {
+     .error_detected = nv_pci_error_detected,
++    .slot_reset     = nv_pci_slot_reset,
++    .resume         = nv_pci_resume,
+ };
+ 
+ struct pci_driver nv_pci_driver = {
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -1547,6 +1547,13 @@
+         NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
+                       "rm_init_adapter failed, device minor number %d\n",
+                       nvl->minor_num);
++        /* AORUS Lever M-recover Commit 3 (Patch 0024): post-rmInit-FAIL
++         * trigger. Reads WPR2; if non-zero (and Lever M-recover is
++         * enabled + gates pass), schedules an async upstream-bridge bus
++         * reset on the kernel-global workqueue. Returns immediately;
++         * recovery happens out of this thread. The existing failure
++         * path below still runs unchanged. */
++        (void)tb_egpu_lever_m_trigger_post_rminit_fail(nvl);
+         rc = -EIO;
+         goto failed_release_irq;
+     }

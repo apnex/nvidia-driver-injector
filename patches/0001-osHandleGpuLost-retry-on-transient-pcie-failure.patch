@@ -1,0 +1,44 @@
+diff --git a/src/nvidia/arch/nvalloc/unix/src/osinit.c b/src/nvidia/arch/nvalloc/unix/src/osinit.c
+index 25a7b6c3..13bb59f2 100644
+--- a/src/nvidia/arch/nvalloc/unix/src/osinit.c
++++ b/src/nvidia/arch/nvalloc/unix/src/osinit.c
+@@ -347,6 +347,7 @@ osHandleGpuLost
+     nv_state_t *nv = NV_GET_NV_STATE(pGpu);
+     nv_priv_t *nvp = NV_GET_NV_PRIV(nv);
+     NvU32 pmc_boot_0;
++    NvU32 retry;
+ 
+     // Determine if we've already run the handler
+     if (!pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_CONNECTED))
+@@ -354,7 +355,30 @@ osHandleGpuLost
+         return NV_OK;
+     }
+ 
+-    pmc_boot_0 = NV_PRIV_REG_RD32(nv->regs->map_u, NV_PMC_BOOT_0);
++    //
++    // AORUS Lever I patch (2026-05-03):
++    // Retry NV_PMC_BOOT_0 read up to 10 times with 100us delay between
++    // attempts before falling through to lost-declaration path. The
++    // unpatched single-read commits to permanent GPU-lost on a single
++    // transient PCIe failure (issue #979).
++    //
++    for (retry = 0; retry < 10; retry++)
++    {
++        pmc_boot_0 = NV_PRIV_REG_RD32(nv->regs->map_u, NV_PMC_BOOT_0);
++        if (pmc_boot_0 == nvp->pmc_boot_0)
++        {
++            if (retry > 0)
++            {
++                NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++                              "AORUS Lever I: PCIe transient cleared after %u retries (%u us) - GPU not lost\n",
++                              retry, retry * 100);
++            }
++            return NV_OK;
++        }
++        if (retry < 9)
++            osDelayUs(100);
++    }
++
+     if (pmc_boot_0 != nvp->pmc_boot_0)
+     {
+         //

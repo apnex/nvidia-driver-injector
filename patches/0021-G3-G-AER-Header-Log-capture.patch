@@ -1,0 +1,171 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: Wed, 7 May 2026 18:30:00 +1000
+Subject: [PATCH] G3-G+G2 — capture AER Header Log + ASPM + LBMS/LABS for Gen3 root cause
+
+Targets H17.G3 (Gen3 GSP_LOCKDOWN root cause) per task #106.
+
+Empirical context (archive/gen3-fail-2026-05-07-165158/):
+  At Gen3 cap, GPU_AER_Cor=0x00002000 (Advisory Non-Fatal) is set at
+  probe-end with the link active and stable at Gen3. Bridge AER is
+  clean. Cor=0x2000 is also set under G3-E (Gen3 + Hardware Autonomous
+  Speed Disable bit 5) — falsifying the autonomous-shift hypothesis.
+
+Two telemetry extensions in this patch:
+
+G3-G — AER detail dump on non-zero status:
+  - PCI_ERR_UNCOR_MASK   (0x08): which Unc bits are demoted to Advisory
+                                 Non-Fatal Cor (explaining Cor=0x2000)
+  - PCI_ERR_CAP          (0x18): First Error Pointer + ECRC config
+  - PCI_ERR_HEADER_LOG   (0x1C, 4 DWORDs): the offending TLP
+
+  Print on a follow-up [DIAG-AER] line ONLY when GPU AER status is
+  non-zero. Keeps clean-boot logs uncluttered.
+
+G3-G2 — ASPM + Link Bandwidth Management Status on the [DIAG] line:
+  - LnkCtl.ASPMC: ASPM enable (0=Disabled, 1=L0s, 2=L1, 3=L0s+L1).
+    L1 entry/exit triggers retraining which at Gen3 must repeat the
+    equalisation phase — a candidate Gen3 GSP_LOCKDOWN trigger.
+  - LnkCtl.CLKREQ_EN: Clock Power Management. With ASPM L1 enabled,
+    lets device disable refclk during L1 → longer wake; potential
+    correlate with retraining failures.
+  - LnkSta.LBMS: Link Bandwidth Management Status (bit 14). Set when
+    bandwidth changes via explicit Target Link Speed write.
+  - LnkSta.LABS: Link Autonomous Bandwidth Status (bit 15). Set when
+    hardware-initiated bandwidth change occurs.
+
+  Captured at every [DIAG] site (probe-end, startdev-entry, pre-rmInit,
+  post-rmInit-OK/FAIL) on both GPU and bridge. Distinguishes:
+  - ASPM transitions during GSP boot (LBMS=1 or LABS=1 between sites)
+  - Persistently-stuck ASPM state (ASPM=N constant across sites)
+  - Bridge vs GPU initiating bandwidth changes (which side's LBMS sets first)
+
+Decision matrix this enables:
+  - HdrLog non-zero with FirstErrPtr=14 (Completion Timeout) → DMA
+    throughput / TB tunnel buffer issue at Gen3
+  - HdrLog non-zero with FirstErrPtr=20 (Unsupported Request) → bridge
+    or TB switch rejecting TLP at Gen3
+  - HdrLog non-zero with FirstErrPtr=12 (Poisoned TLP) → signal
+    integrity / data corruption on the wire
+  - LBMS=1 mid-boot but ASPM=0 → kernel/driver wrote LnkCtl2; identify
+    actor via ftrace
+  - LABS=1 → hardware autonomously changed speed despite our cap +
+    bit 5; investigate TB switch silicon bug
+  - HdrLog all-zero with Cor=0x2000 → AER capture isn't logging
+    advisory-only events; need different observability path
+
+All reads are passive config-space (no MMIO, no DMA).
+
+Tasks: #106
+---
+--- a/kernel-open/nvidia/nv-lever-m-recover.c
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -244,35 +244,61 @@
+      * GPU and parent bridge. Targets H16 (PCIe link transient) which
+      * persists even with iommu=off. PCIe capability register reads are
+      * passive (config-space only, no MMIO, no DMA) so this telemetry
+-     * does NOT perturb the bug per feedback_observability_perturbs_bug. */
++     * does NOT perturb the bug per feedback_observability_perturbs_bug.
++     *
++     * G3-G extension (2026-05-07): when AER status is non-zero, dump
++     * Header Log + Uncor Mask + Cap/Control on a follow-up line. The
++     * Header Log captures the first TLP that triggered an Uncorrectable
++     * error; Uncor Mask shows which Unc bits are demoted to Advisory
++     * Non-Fatal Cor (explaining Cor=0x2000 source). Task #106.
++     *
++     * G3-G2 extension (2026-05-07): also capture ASPM control bits and
++     * Link Bandwidth Management Status (LBMS/LABS) on the [DIAG] line
++     * itself. ASPM L1 entry/exit triggers retraining which at Gen3 must
++     * repeat the equalisation phase — a candidate Gen3 GSP_LOCKDOWN
++     * trigger. LBMS/LABS distinguish explicit (kernel/driver wrote
++     * LnkCtl2) from autonomous (hardware-initiated) bandwidth changes. */
+     {
+         u16 gpu_lnksta = 0xffff, br_lnksta = 0xffff;
++        u16 gpu_lnkctl = 0xffff, br_lnkctl = 0xffff;
+         u32 gpu_aer_unc = 0, gpu_aer_cor = 0;
++        u32 gpu_aer_unc_msk = 0, gpu_aer_capctl = 0;
++        u32 gpu_aer_hdr[4] = {0, 0, 0, 0};
+         u32 br_aer_unc = 0, br_aer_cor = 0;
+-        int aer_pos;
++        int gpu_aer_pos = 0, br_aer_pos = 0;
+ 
+         if (pdev) {
+             (void)pcie_capability_read_word(pdev, PCI_EXP_LNKSTA, &gpu_lnksta);
+-            aer_pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_ERR);
+-            if (aer_pos) {
+-                (void)pci_read_config_dword(pdev, aer_pos + PCI_ERR_UNCOR_STATUS, &gpu_aer_unc);
+-                (void)pci_read_config_dword(pdev, aer_pos + PCI_ERR_COR_STATUS, &gpu_aer_cor);
++            (void)pcie_capability_read_word(pdev, PCI_EXP_LNKCTL, &gpu_lnkctl);
++            gpu_aer_pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_ERR);
++            if (gpu_aer_pos) {
++                (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_UNCOR_STATUS, &gpu_aer_unc);
++                (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_COR_STATUS, &gpu_aer_cor);
++                (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_UNCOR_MASK, &gpu_aer_unc_msk);
++                (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_CAP, &gpu_aer_capctl);
++                (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_HEADER_LOG + 0,  &gpu_aer_hdr[0]);
++                (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_HEADER_LOG + 4,  &gpu_aer_hdr[1]);
++                (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_HEADER_LOG + 8,  &gpu_aer_hdr[2]);
++                (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_HEADER_LOG + 12, &gpu_aer_hdr[3]);
+             }
+         }
+         if (parent) {
+             (void)pcie_capability_read_word(parent, PCI_EXP_LNKSTA, &br_lnksta);
+-            aer_pos = pci_find_ext_capability(parent, PCI_EXT_CAP_ID_ERR);
+-            if (aer_pos) {
+-                (void)pci_read_config_dword(parent, aer_pos + PCI_ERR_UNCOR_STATUS, &br_aer_unc);
+-                (void)pci_read_config_dword(parent, aer_pos + PCI_ERR_COR_STATUS, &br_aer_cor);
++            (void)pcie_capability_read_word(parent, PCI_EXP_LNKCTL, &br_lnkctl);
++            br_aer_pos = pci_find_ext_capability(parent, PCI_EXT_CAP_ID_ERR);
++            if (br_aer_pos) {
++                (void)pci_read_config_dword(parent, br_aer_pos + PCI_ERR_UNCOR_STATUS, &br_aer_unc);
++                (void)pci_read_config_dword(parent, br_aer_pos + PCI_ERR_COR_STATUS, &br_aer_cor);
+             }
+         }
+ 
+         NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
+             "AORUS Lever M-recover [DIAG]: site=%-18s bar0=0x%llx "
+             "PMC_BOOT_0=%s%08x WPR2=%s%08x WPR2_up=%s parent=%s "
+-            "GPU_LnkSta=0x%04x(Speed=%u Width=x%u Active=%c) "
+-            "Br_LnkSta=0x%04x(Speed=%u Width=x%u Active=%c) "
++            "GPU_LnkSta=0x%04x(Speed=%u Width=x%u Active=%c LBMS=%c LABS=%c) "
++            "GPU_LnkCtl=0x%04x(ASPM=%u ClkPM=%c) "
++            "Br_LnkSta=0x%04x(Speed=%u Width=x%u Active=%c LBMS=%c LABS=%c) "
++            "Br_LnkCtl=0x%04x(ASPM=%u ClkPM=%c) "
+             "GPU_AER_Unc=0x%08x Cor=0x%08x Br_AER_Unc=0x%08x Cor=0x%08x\n",
+             site,
+             (unsigned long long)bar0_phys,
+@@ -284,11 +310,35 @@
+             (gpu_lnksta & PCI_EXP_LNKSTA_CLS),
+             (gpu_lnksta & PCI_EXP_LNKSTA_NLW) >> 4,
+             (gpu_lnksta & PCI_EXP_LNKSTA_DLLLA) ? 'Y' : 'N',
++            (gpu_lnksta & PCI_EXP_LNKSTA_LBMS) ? '1' : '0',
++            (gpu_lnksta & PCI_EXP_LNKSTA_LABS) ? '1' : '0',
++            gpu_lnkctl,
++            (gpu_lnkctl & PCI_EXP_LNKCTL_ASPMC),
++            (gpu_lnkctl & PCI_EXP_LNKCTL_CLKREQ_EN) ? '1' : '0',
+             br_lnksta,
+             (br_lnksta & PCI_EXP_LNKSTA_CLS),
+             (br_lnksta & PCI_EXP_LNKSTA_NLW) >> 4,
+             (br_lnksta & PCI_EXP_LNKSTA_DLLLA) ? 'Y' : 'N',
++            (br_lnksta & PCI_EXP_LNKSTA_LBMS) ? '1' : '0',
++            (br_lnksta & PCI_EXP_LNKSTA_LABS) ? '1' : '0',
++            br_lnkctl,
++            (br_lnkctl & PCI_EXP_LNKCTL_ASPMC),
++            (br_lnkctl & PCI_EXP_LNKCTL_CLKREQ_EN) ? '1' : '0',
+             gpu_aer_unc, gpu_aer_cor, br_aer_unc, br_aer_cor);
++
++        /* G3-G follow-up: Header Log + masks ONLY when GPU-side AER
++         * status is non-zero. Keeps clean-boot logs uncluttered. */
++        if (gpu_aer_pos && (gpu_aer_unc || gpu_aer_cor)) {
++            NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++                "AORUS Lever M-recover [DIAG-AER]: site=%-18s "
++                "GPU_AER_UncMsk=0x%08x CapCtl=0x%08x "
++                "HdrLog=%08x_%08x_%08x_%08x "
++                "FirstErrPtr=%u\n",
++                site,
++                gpu_aer_unc_msk, gpu_aer_capctl,
++                gpu_aer_hdr[0], gpu_aer_hdr[1], gpu_aer_hdr[2], gpu_aer_hdr[3],
++                (gpu_aer_capctl & 0x1f));
++        }
+     }
+ }
+ 

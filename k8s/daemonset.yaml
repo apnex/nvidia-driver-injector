@@ -1,0 +1,110 @@
+# DaemonSet to deploy nvidia-driver-injector on every GPU node in a cluster.
+#
+# Apply:
+#   kubectl apply -f k8s/daemonset.yaml
+#
+# This loads the patched nvidia.ko into each matching node's host kernel.
+# Pairs naturally with NVIDIA's device-plugin DaemonSet (separate); together
+# they replace the GPU Operator's Driver+Toolkit pair for hardware that needs
+# our specific 30-patch series.
+#
+# Node selection:
+#   nodes must have label `apnex.com.au/aorus-egpu=true` to opt in. Set with:
+#     kubectl label node <NODE> apnex.com.au/aorus-egpu=true
+#
+# Prerequisites on each selected node:
+#   - kernel cmdline tuned per the aorus-5090-egpu host-bring-up
+#     (iommu=off, thunderbolt.host_reset=false, pci=resource_alignment=...)
+#   - kernel-devel installed (host /lib/modules/<kver>/build populated)
+#   - eGPU enumerated; bridge-link-cap LnkCtl2 cap applied
+#   - nvidia NOT auto-loaded by any other mechanism on the node
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-driver-injector
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: nvidia-driver-injector
+    app.kubernetes.io/component: kernel-driver
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nvidia-driver-injector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nvidia-driver-injector
+        app.kubernetes.io/component: kernel-driver
+    spec:
+      # Only run on opted-in GPU nodes.
+      nodeSelector:
+        apnex.com.au/aorus-egpu: "true"
+      # Tolerate common GPU node taints.
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+      # Use host PID + network — needed so insmod into host kernel works
+      # cleanly and modules show up in host's /proc/modules.
+      hostPID: true
+      hostNetwork: true
+      containers:
+        - name: driver
+          image: apnex/nvidia-driver-injector:595.71.05-aorus.12
+          imagePullPolicy: IfNotPresent
+          # Privileged — must load kernel modules + write PCI sysfs.
+          # This is the same security posture as NVIDIA's own driver pods.
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: lib-modules
+              mountPath: /lib/modules
+            - name: usr-src
+              mountPath: /usr/src
+              readOnly: true
+            - name: dev
+              mountPath: /dev
+            - name: sys
+              mountPath: /sys
+          # Liveness: verify the patched build is still loaded. If something
+          # unloaded nvidia (rare), restart the pod to reload.
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - 'grep -q "^nvidia " /proc/modules && [ -r /sys/module/nvidia/version ]'
+            initialDelaySeconds: 120     # build can take ~60-90s on first run
+            periodSeconds: 60
+            failureThreshold: 3
+          # Readiness: nvidia loaded + GPU bound.
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - 'grep -q "^nvidia " /proc/modules && ls /sys/bus/pci/drivers/nvidia/0000:04:00.0 >/dev/null 2>&1'
+            initialDelaySeconds: 90
+            periodSeconds: 15
+      volumes:
+        - name: lib-modules
+          hostPath:
+            path: /lib/modules
+        - name: usr-src
+          hostPath:
+            path: /usr/src
+        - name: dev
+          hostPath:
+            path: /dev
+        - name: sys
+          hostPath:
+            path: /sys
+  # Reasonable rolling update — pods are independent per node.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1

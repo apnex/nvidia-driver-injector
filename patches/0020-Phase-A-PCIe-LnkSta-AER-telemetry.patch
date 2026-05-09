@@ -1,0 +1,114 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: Wed, 7 May 2026 15:15:00 +1000
+Subject: [PATCH] Phase A telemetry — extend [DIAG] with PCIe LnkSta + AER status
+
+Targets H16 (PCIe link transient triggering GSP_LOCKDOWN independently
+of IOMMU) per docs/iommu-gsp-lockdown-analysis.md.
+
+Extends tb_egpu_lever_m_diag_dump() to read at each of the 4 existing
+sites:
+  - GPU PCIe LnkSta (Speed, Width, LinkActive)
+  - Upstream bridge PCIe LnkSta (same fields)
+  - GPU AER UnCorrectable + Correctable error status registers
+  - Upstream bridge AER UnCorrectable + Correctable error status
+
+All reads via pcie_capability_read_word + pci_read_config_dword —
+config-space only, NO MMIO, NO DMA. Passive observability per
+feedback_observability_perturbs_bug; should not perturb the bug.
+
+Decision matrix this enables (per docs/iommu-gsp-lockdown-analysis.md
+"What this gives us"):
+  - LnkSta.LinkActive=N at post-rmInit-FAIL → real link transient
+  - LinkActive=Y but PMC_BOOT_0=0xff → MMIO-only failure, different mech
+  - AER UncErr non-zero → kernel saw an AER event we can hook into
+  - AER UncErr zero → transient is below AER threshold; must use other detection
+
+Bumps version 595.71.05-aorus.8 → aorus.10 (skipping aorus.9 which had
+Commit 3 action; this patch builds on top of aorus.8 = 0001-0018 only).
+
+Tasks: #105 (H16 investigation)
+---
+diff --git a/kernel-open/nvidia/nv-lever-m-recover.c b/kernel-open/nvidia/nv-lever-m-recover.c
+index 9b306d76..ab42c4a7 100644
+--- a/kernel-open/nvidia/nv-lever-m-recover.c
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -240,19 +240,56 @@ void tb_egpu_lever_m_diag_dump(nv_linux_state_t *nvl, const char *site)
+     /* Parent bridge — Commit 3's pci_reset_bus() target candidate. */
+     parent = pdev ? pci_upstream_bridge(pdev) : NULL;
+ 
+-    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
+-        "AORUS Lever M-recover [DIAG]: site=%-18s bar0=0x%llx "
+-        "PMC_BOOT_0=%s%08x WPR2_ADDR_HI=%s%08x WPR2_VAL=0x%08x WPR2_up=%s "
+-        "parent_bridge=%s\n",
+-        site,
+-        (unsigned long long)bar0_phys,
+-        pmc_ok ? "0x" : "MAPFAIL:",
+-        pmc_boot_0,
+-        wpr2_ok ? "0x" : "MAPFAIL:",
+-        wpr2_raw,
+-        wpr2_raw & TB_EGPU_LEVER_M_WPR2_VAL_MASK,
+-        ((wpr2_raw & TB_EGPU_LEVER_M_WPR2_VAL_MASK) != 0) ? "YES" : "no",
+-        parent ? pci_name(parent) : "NULL");
++    /* Phase A telemetry (2026-05-07): read PCIe LnkSta + AER status on
++     * GPU and parent bridge. Targets H16 (PCIe link transient) which
++     * persists even with iommu=off. PCIe capability register reads are
++     * passive (config-space only, no MMIO, no DMA) so this telemetry
++     * does NOT perturb the bug per feedback_observability_perturbs_bug. */
++    {
++        u16 gpu_lnksta = 0xffff, br_lnksta = 0xffff;
++        u32 gpu_aer_unc = 0, gpu_aer_cor = 0;
++        u32 br_aer_unc = 0, br_aer_cor = 0;
++        int aer_pos;
++
++        if (pdev) {
++            (void)pcie_capability_read_word(pdev, PCI_EXP_LNKSTA, &gpu_lnksta);
++            aer_pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_ERR);
++            if (aer_pos) {
++                (void)pci_read_config_dword(pdev, aer_pos + PCI_ERR_UNCOR_STATUS, &gpu_aer_unc);
++                (void)pci_read_config_dword(pdev, aer_pos + PCI_ERR_COR_STATUS, &gpu_aer_cor);
++            }
++        }
++        if (parent) {
++            (void)pcie_capability_read_word(parent, PCI_EXP_LNKSTA, &br_lnksta);
++            aer_pos = pci_find_ext_capability(parent, PCI_EXT_CAP_ID_ERR);
++            if (aer_pos) {
++                (void)pci_read_config_dword(parent, aer_pos + PCI_ERR_UNCOR_STATUS, &br_aer_unc);
++                (void)pci_read_config_dword(parent, aer_pos + PCI_ERR_COR_STATUS, &br_aer_cor);
++            }
++        }
++
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "AORUS Lever M-recover [DIAG]: site=%-18s bar0=0x%llx "
++            "PMC_BOOT_0=%s%08x WPR2=%s%08x WPR2_up=%s parent=%s "
++            "GPU_LnkSta=0x%04x(Speed=%u Width=x%u Active=%c) "
++            "Br_LnkSta=0x%04x(Speed=%u Width=x%u Active=%c) "
++            "GPU_AER_Unc=0x%08x Cor=0x%08x Br_AER_Unc=0x%08x Cor=0x%08x\n",
++            site,
++            (unsigned long long)bar0_phys,
++            pmc_ok ? "0x" : "MAPFAIL:", pmc_boot_0,
++            wpr2_ok ? "0x" : "MAPFAIL:", wpr2_raw,
++            ((wpr2_raw & TB_EGPU_LEVER_M_WPR2_VAL_MASK) != 0) ? "YES" : "no",
++            parent ? pci_name(parent) : "NULL",
++            gpu_lnksta,
++            (gpu_lnksta & PCI_EXP_LNKSTA_CLS),
++            (gpu_lnksta & PCI_EXP_LNKSTA_NLW) >> 4,
++            (gpu_lnksta & PCI_EXP_LNKSTA_DLLLA) ? 'Y' : 'N',
++            br_lnksta,
++            (br_lnksta & PCI_EXP_LNKSTA_CLS),
++            (br_lnksta & PCI_EXP_LNKSTA_NLW) >> 4,
++            (br_lnksta & PCI_EXP_LNKSTA_DLLLA) ? 'Y' : 'N',
++            gpu_aer_unc, gpu_aer_cor, br_aer_unc, br_aer_cor);
++    }
+ }
+ 
+ /* Commit 2: probe-time WPR2-stuck detection.
+diff --git a/version.mk b/version.mk
+index bc59c1a4..3c01cdfb 100644
+--- a/version.mk
++++ b/version.mk
+@@ -1,4 +1,4 @@
+-NVIDIA_VERSION = 595.71.05-aorus.8
++NVIDIA_VERSION = 595.71.05-aorus.10
+ NVIDIA_NVID_VERSION = 595.71.05
+ NVIDIA_NVID_EXTRA = 
+ 

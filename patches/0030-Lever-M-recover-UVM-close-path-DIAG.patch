@@ -1,0 +1,332 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: 2026-05-08
+Subject: [PATCH] AORUS Patch 0030 — UVM close-path DIAG instrumentation
+
+Companion to Patch 0029 — extends close-path observability into the
+UVM module so we can answer 'is the architecture.md Problem 4 close-
+path bug class still load-bearing on the current driver stack?' with
+empirical evidence, the same way Patch 0029 + tools/close-path-probe.sh
+answered the /dev/nvidia0-side question.
+
+PART A — pdev-based DIAG dump in nvidia.ko:
+
+  tb_egpu_lever_m_diag_dump_pdev(struct pci_dev *, const char *site)
+  EXPORT_SYMBOL'd. Same state capture as tb_egpu_lever_m_diag_dump
+  (PMC_BOOT_0 + WPR2 + LnkSta + AER on GPU + bridge) but takes a
+  pdev directly instead of nv_linux_state_t. Output uses [UVM-DIAG]
+  tag to distinguish from the /dev/nvidia0-side [DIAG] events.
+  Reads BAR0 from pci_resource_start(pdev, 0); the kernel's PCI
+  resource table is authoritative here.
+
+PART B — UVM-side instrumentation in nvidia-uvm.ko (uvm.c):
+
+  Global atomic_t aorus_uvm_fd_count tracks /dev/nvidia-uvm fd count.
+  Helper aorus_uvm_close_path_diag(site, fd_count, is_last_close)
+  emits a one-line [CLOSE] marker; on LAST-CLOSE, additionally calls
+  tb_egpu_lever_m_diag_dump_pdev + tb_egpu_dump_aer_trigger_event for
+  full state + AER capture.
+
+  GPU pdev lookup: pci_get_domain_bus_and_slot(0, 0x04, PCI_DEVFN(0,0)).
+  Hardcoded to project topology (only NVIDIA device on this host).
+  pci_dev_put after each use.
+
+  Sites:
+    - uvm-open-entry      — at end of uvm_open after success;
+                            pre-increment count==0 ⇒ first-after-LAST-CLOSE
+    - uvm-release-entry   — at top of uvm_release before any teardown
+    - uvm-pre-destroy     — VA_SPACE branch only, just before
+                            uvm_va_space_destroy (the actual
+                            destabilising teardown)
+    - uvm-post-destroy    — VA_SPACE branch only, just after
+                            uvm_va_space_destroy
+    - uvm-release-exit    — at end of uvm_release; post-decrement
+                            count==0 ⇒ canonical LAST-CLOSE
+
+  fd count tracking is at uvm_open success path (only count opens
+  that returned NV_OK — kernel only calls release for those) and at
+  uvm_release exit path (kernel guarantees release matches a prior
+  successful open). Mismatched counts impossible by construction.
+
+PART C — version.mk bump to aorus.12 to mark this build distinct
+  from aorus.11 (Patch 0029 close-path DIAG).
+
+Risk per feedback_observability_perturbs_bug: same passive
+instrumentation pattern as Patch 0029 (ioremap+ioread32+iounmap +
+PCI config-space reads only). pdev lookup adds one
+pci_get_domain_bus_and_slot call per LAST-CLOSE site, which is a
+kernel-internal lookup; no MMIO. Patch 0029 passive pattern verified
+non-perturbing 2026-05-08; same expected here.
+
+Refs: docs/architecture.md Problem 4; H22 ledger entry
+      (close-path bug class mitigated /dev/nvidia0-side n=3);
+      memory/project_close_path_mitigated_2026_05_08.md.
+---
+--- a/kernel-open/nvidia/nv-lever-m-recover.h
++++ b/kernel-open/nvidia/nv-lever-m-recover.h
+@@ -158,6 +158,12 @@
+  * call on every successful adapter init (idempotent on cold boot). */
+ void tb_egpu_lever_m_record_post_rminit_ok(nv_linux_state_t *nvl);
+ 
++/* Patch 0030 (2026-05-08): pdev-based DIAG dump for cross-module callers
++ * (UVM module specifically). Same state capture as tb_egpu_lever_m_diag_dump
++ * but takes pci_dev directly rather than nv_linux_state_t. Output uses an
++ * [UVM-DIAG] tag to distinguish from /dev/nvidia0-side [DIAG] events. */
++void tb_egpu_lever_m_diag_dump_pdev(struct pci_dev *pdev, const char *site);
++
+ /* Patch 0029 (2026-05-08): close-path DIAG marker.
+  *
+  * Extends the open-side DIAG infrastructure (probe-end / startdev-entry
+--- a/kernel-open/nvidia/nv-lever-m-recover.c
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -809,6 +809,111 @@
+     }
+ }
+ 
++/* Patch 0030 (2026-05-08): pdev-based DIAG dump for cross-module callers.
++ *
++ * Callable from nvidia-uvm.ko (and any other future module that doesn't
++ * have nv_linux_state_t access) for state capture at UVM lifecycle
++ * points. Reads BAR0 directly from pdev->resource[0].start (kernel's
++ * PCI resource table) instead of nvl->bars, then performs the same
++ * PMC_BOOT_0 + WPR2 + LnkSta + AER captures as tb_egpu_lever_m_diag_dump.
++ * Output uses an [UVM-DIAG] tag so dmesg distinguishes from the
++ * /dev/nvidia0-side [DIAG] events.
++ *
++ * The pdev argument is the GPU's pci_dev. UVM looks it up via
++ * pci_get_domain_bus_and_slot() since it doesn't have nvl access.
++ */
++void tb_egpu_lever_m_diag_dump_pdev(struct pci_dev *pdev, const char *site)
++{
++    struct pci_dev *parent;
++    void __iomem *map_pmc;
++    void __iomem *map_wpr2;
++    u64           bar0_phys;
++    u64           wpr2_page_aligned;
++    u32           wpr2_page_offset;
++    u32           pmc_boot_0 = 0xdeadbeefu;
++    u32           wpr2_raw   = 0xdeadbeefu;
++    bool          pmc_ok = false, wpr2_ok = false;
++    u16 gpu_lnksta = 0xffff, br_lnksta = 0xffff;
++    u32 gpu_aer_unc = 0, gpu_aer_cor = 0;
++    u32 br_aer_unc = 0, br_aer_cor = 0;
++    int gpu_aer_pos = 0, br_aer_pos = 0;
++
++    if (!pdev) {
++        nv_printf(NV_DBG_ERRORS,
++            "AORUS Lever M-recover [UVM-DIAG]: site=%s pdev=NULL — cannot read\n",
++            site);
++        return;
++    }
++
++    bar0_phys = pci_resource_start(pdev, 0);
++    if (bar0_phys == 0) {
++        nv_printf(NV_DBG_ERRORS,
++            "AORUS Lever M-recover [UVM-DIAG]: site=%s bar0=0 — skipping\n",
++            site);
++        return;
++    }
++
++    /* PMC_BOOT_0 */
++    map_pmc = ioremap(bar0_phys, PAGE_SIZE);
++    if (map_pmc) {
++        pmc_boot_0 = ioread32(map_pmc);
++        iounmap(map_pmc);
++        pmc_ok = true;
++    }
++
++    /* WPR2_ADDR_HI */
++    wpr2_page_aligned = (bar0_phys + TB_EGPU_LEVER_M_WPR2_REG_OFFSET) & PAGE_MASK;
++    wpr2_page_offset  = (bar0_phys + TB_EGPU_LEVER_M_WPR2_REG_OFFSET) & ~PAGE_MASK;
++    map_wpr2 = ioremap(wpr2_page_aligned, PAGE_SIZE);
++    if (map_wpr2) {
++        wpr2_raw = ioread32(map_wpr2 + wpr2_page_offset);
++        iounmap(map_wpr2);
++        wpr2_ok = true;
++    }
++
++    /* LnkSta + AER on GPU + parent bridge. Pure config-space reads. */
++    parent = pci_upstream_bridge(pdev);
++    (void)pcie_capability_read_word(pdev, PCI_EXP_LNKSTA, &gpu_lnksta);
++    gpu_aer_pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_ERR);
++    if (gpu_aer_pos) {
++        (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_UNCOR_STATUS, &gpu_aer_unc);
++        (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_COR_STATUS,   &gpu_aer_cor);
++    }
++    if (parent) {
++        (void)pcie_capability_read_word(parent, PCI_EXP_LNKSTA, &br_lnksta);
++        br_aer_pos = pci_find_ext_capability(parent, PCI_EXT_CAP_ID_ERR);
++        if (br_aer_pos) {
++            (void)pci_read_config_dword(parent, br_aer_pos + PCI_ERR_UNCOR_STATUS, &br_aer_unc);
++            (void)pci_read_config_dword(parent, br_aer_pos + PCI_ERR_COR_STATUS,   &br_aer_cor);
++        }
++    }
++
++    nv_printf(NV_DBG_ERRORS,
++        "AORUS Lever M-recover [UVM-DIAG]: site=%-18s pdev=%s bar0=0x%llx "
++        "PMC_BOOT_0=%s%08x WPR2=%s%08x WPR2_up=%s parent=%s "
++        "GPU_LnkSta=0x%04x(Speed=%u Width=x%u Active=%c) "
++        "Br_LnkSta=0x%04x(Speed=%u Width=x%u Active=%c) "
++        "GPU_AER_Unc=0x%08x Cor=0x%08x Br_AER_Unc=0x%08x Cor=0x%08x\n",
++        site, pci_name(pdev),
++        (unsigned long long)bar0_phys,
++        pmc_ok ? "0x" : "MAPFAIL:", pmc_boot_0,
++        wpr2_ok ? "0x" : "MAPFAIL:", wpr2_raw,
++        ((wpr2_raw & TB_EGPU_LEVER_M_WPR2_VAL_MASK) != 0) ? "YES" : "no",
++        parent ? pci_name(parent) : "NULL",
++        gpu_lnksta,
++        (gpu_lnksta & PCI_EXP_LNKSTA_CLS),
++        (gpu_lnksta & PCI_EXP_LNKSTA_NLW) >> 4,
++        (gpu_lnksta & PCI_EXP_LNKSTA_DLLLA) ? 'Y' : 'N',
++        br_lnksta,
++        (br_lnksta & PCI_EXP_LNKSTA_CLS),
++        (br_lnksta & PCI_EXP_LNKSTA_NLW) >> 4,
++        (br_lnksta & PCI_EXP_LNKSTA_DLLLA) ? 'Y' : 'N',
++        gpu_aer_unc, gpu_aer_cor, br_aer_unc, br_aer_cor);
++
++    (void)gpu_aer_pos; (void)br_aer_pos;
++}
++EXPORT_SYMBOL(tb_egpu_lever_m_diag_dump_pdev);
++
+ /* Commit 2: probe-time WPR2-stuck detection.
+  *
+  * Reads the GSP MMU WPR2 status register via a temporary ioremap of a
+--- a/kernel-open/nvidia-uvm/uvm.c
++++ b/kernel-open/nvidia-uvm/uvm.c
+@@ -31,6 +31,59 @@
+ #include "uvm_va_space_mm.h"
+ #include "uvm_va_range.h"
+ #include "uvm_va_block.h"
++
++/* AORUS Patch 0030 (2026-05-08): UVM close-path DIAG instrumentation.
++ *
++ * Imports the pdev-based DIAG dump from nvidia.ko. Used to capture
++ * GPU state across UVM open/close lifecycle points so we can answer
++ * "is the UVM close-path bug class (architecture.md Problem 4) still
++ * load-bearing on the current driver stack?" with empirical evidence
++ * — the same way Patch 0029's close-path-probe.sh answered the
++ * /dev/nvidia0-side question. */
++#include <linux/pci.h>
++#include <linux/atomic.h>
++extern void tb_egpu_lever_m_diag_dump_pdev(struct pci_dev *pdev, const char *site);
++extern void tb_egpu_dump_aer_trigger_event(struct pci_dev *gpu_pdev,
++                                          const char *trigger,
++                                          void *out);
++
++/* Global UVM fd refcount — incremented in uvm_open, decremented in
++ * uvm_release. LAST-CLOSE detection: when the post-decrement value is 0,
++ * trigger full DIAG+AER state capture. Atomic so no lock needed. */
++static atomic_t aorus_uvm_fd_count = ATOMIC_INIT(0);
++
++/* Look up the GPU's pci_dev. Hardcoded BDF 0000:04:00.0 per project
++ * topology (only NVIDIA device on this host). Returns NULL if absent.
++ * Caller does NOT need to pci_dev_put — pci_get_domain_bus_and_slot
++ * increments refcount but for our DIAG snapshot use we only need the
++ * pointer momentarily. We pci_dev_put after each use to be safe. */
++static struct pci_dev *aorus_uvm_get_gpu_pdev(void)
++{
++    return pci_get_domain_bus_and_slot(0, 0x04, PCI_DEVFN(0, 0));
++}
++
++/* DIAG marker — always emits a one-line log with site + fd_count.
++ * On is_last_close (post-decrement count==0 OR pre-increment count==0),
++ * additionally calls the pdev-based DIAG dump and AER snapshot. */
++static void aorus_uvm_close_path_diag(const char *site, int fd_count, bool is_last_close)
++{
++    struct pci_dev *pdev;
++
++    pr_info("AORUS UVM [CLOSE]: site=%-18s fd_count=%d%s\n",
++            site, fd_count, is_last_close ? " (LAST-CLOSE)" : "");
++
++    if (is_last_close) {
++        pdev = aorus_uvm_get_gpu_pdev();
++        if (pdev) {
++            tb_egpu_lever_m_diag_dump_pdev(pdev, site);
++            tb_egpu_dump_aer_trigger_event(pdev, site, NULL);
++            pci_dev_put(pdev);
++        } else {
++            pr_info("AORUS UVM [CLOSE]: site=%s — no pdev for 0000:04:00.0; skipping DIAG\n",
++                    site);
++        }
++    }
++}
+ #include "uvm_tools.h"
+ #include "uvm_common.h"
+ #include "uvm_fd_type.h"
+@@ -175,6 +228,16 @@
+     filp->private_data = NULL;
+     filp->f_mapping = mapping;
+ 
++    /* AORUS Patch 0030: uvm-open-entry DIAG site. We increment the
++     * fd_count only at success — the kernel only calls uvm_release for
++     * fds that this function returned NV_OK for. If pre-increment
++     * fd_count was 0, this open is "first-after-LAST-CLOSE" — capture
++     * full DIAG+AER state. */
++    {
++        int prev = atomic_inc_return(&aorus_uvm_fd_count) - 1;
++        aorus_uvm_close_path_diag("uvm-open-entry", prev + 1, prev == 0);
++    }
++
+     return NV_OK;
+ }
+ 
+@@ -252,13 +315,36 @@
+     void *ptr;
+     uvm_fd_type_t fd_type = uvm_fd_type(filp, &ptr);
+ 
++    /* AORUS Patch 0030: uvm-release-entry DIAG site. Pre-decrement
++     * fd_count is the "current" count. If it's 1, this release is
++     * about to drive the count to 0 — LAST-CLOSE. Capture full DIAG
++     * before any teardown work runs. */
++    {
++        int pre_count = atomic_read(&aorus_uvm_fd_count);
++        aorus_uvm_close_path_diag("uvm-release-entry", pre_count, pre_count == 1);
++    }
++
+     switch (fd_type) {
+         case UVM_FD_UNINITIALIZED:
+             uvm_kvfree(filp->f_mapping);
+             break;
+ 
+         case UVM_FD_VA_SPACE:
++            /* AORUS Patch 0030: pre-destroy DIAG — captures state
++             * immediately before uvm_va_space_destroy runs (the actual
++             * destabilising teardown). */
++            {
++                int pre_count = atomic_read(&aorus_uvm_fd_count);
++                aorus_uvm_close_path_diag("uvm-pre-destroy", pre_count, pre_count == 1);
++            }
+             uvm_release_va_space(filp, (uvm_va_space_t *)ptr);
++            /* AORUS Patch 0030: post-destroy DIAG — captures state
++             * AFTER uvm_va_space_destroy. Diff vs pre-destroy reveals
++             * the close-path's hardware/firmware footprint. */
++            {
++                int pre_count = atomic_read(&aorus_uvm_fd_count);
++                aorus_uvm_close_path_diag("uvm-post-destroy", pre_count, pre_count == 1);
++            }
+             break;
+ 
+         case UVM_FD_MM:
+@@ -273,6 +359,15 @@
+             UVM_ASSERT_MSG(0, "Unexpected fd type: %d\n", fd_type);
+     }
+ 
++    /* AORUS Patch 0030: uvm-release-exit DIAG site. Now decrement
++     * fd_count — kernel guarantees this release matches a prior
++     * successful open. Post-decrement count==0 is the
++     * canonical-LAST-CLOSE state. */
++    {
++        int post = atomic_dec_return(&aorus_uvm_fd_count);
++        aorus_uvm_close_path_diag("uvm-release-exit", post, post == 0);
++    }
++
+     return 0;
+ }
+ 
+--- a/version.mk
++++ b/version.mk
+@@ -1,4 +1,4 @@
+-NVIDIA_VERSION = 595.71.05-aorus.11
++NVIDIA_VERSION = 595.71.05-aorus.12
+ NVIDIA_NVID_VERSION = 595.71.05
+ NVIDIA_NVID_EXTRA = 
+ 

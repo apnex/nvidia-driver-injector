@@ -1,0 +1,159 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: 2026-05-08
+Subject: [PATCH] AORUS Patch 0028 — attempt_count resets at post-rmInit-OK, not slot_reset_resume
+
+Fixes a design deviation in Step 7 of Patch 0024 that left the H1
+MaxAttempts gate unreachable in real-world recovery storms.
+
+Design intent (docs/lever-m-recover-commit3-hardening-design.md § H1):
+  attempt_count resets to 0 ONLY on successful recovery (slot_reset
+  + verify GSP boots). NOT on probe-end alone, NOT on workqueue
+  completion.
+
+Step 7 in Patch 0024 reset attempt_count inside slot_reset_resume,
+which fires after pci_reset_bus + PMC_BOOT_0 readback succeeds.
+That's only HALF of "successful recovery" — slot_reset can return
+RECOVERED yet rm_init_adapter still fail on the next call (e.g. WPR2
+still stuck after the bus reset). In production, this is exactly the
+21-attempt storm pattern observed 2026-05-06 16:14:29: each cycle
+reset attempt_count 0->1->0, the gate never engaged, the storm ran.
+
+Fix (two parts):
+
+1. Remove atomic_set(&attempt_count, 0) from
+   tb_egpu_lever_m_slot_reset_resume(). Keep success_count++ and
+   TB_EGPU_GPU_STATE=READY uevent — those are still correct semantics
+   for "bus reset cycle completed."
+
+2. Add tb_egpu_lever_m_record_post_rminit_ok() helper called from
+   nv.c's existing post-rmInit-OK site. Resets attempt_count to 0
+   here — this is the verified-end-to-end-recovery moment. Safe
+   to call on every cold-boot init (idempotent: attempt_count is
+   already 0 in the no-recovery-needed case).
+
+Behaviour after this patch:
+
+  - Real-world storm scenario: each failed full-recovery accumulates
+    attempt_count. Fire 1: bus reset OK, rm_init fails, attempt=1.
+    Fire 2: attempt=2. Fire 3: attempt=3. Fire 4: attempt=4 >
+    MaxAttempts=3 → surrender + PERMANENT_FAIL. Storm stops.
+
+  - Successful end-to-end recovery: attempt_count resets at
+    post-rmInit-OK so the next burst starts fresh.
+
+  - 5-min-idle burst boundary (NVreg_TbEgpuLeverMSurrenderResetSec):
+    still works as before, in the trigger function.
+
+Discovered while preparing Phase 4 H1 MaxAttempts test: under
+Patch 0024+0027 behaviour, every force_trigger fire produced a
+successful slot_reset + resume cycle, attempt_count went 0->1->0,
+and the gate could not be reached.
+
+Refs: H15 hypothesis ledger entry; storm forensic
+      archive/commit3-recovery-loop-2026-05-06-161429/.
+---
+--- a/kernel-open/nvidia/nv-lever-m-recover.h
++++ b/kernel-open/nvidia/nv-lever-m-recover.h
+@@ -153,6 +153,11 @@
+ pci_ers_result_t tb_egpu_lever_m_slot_reset(struct pci_dev *pdev);
+ void              tb_egpu_lever_m_slot_reset_resume(struct pci_dev *pdev);
+ 
++/* Patch 0028 (2026-05-08): hook for nv.c's post-rmInit-OK site.
++ * Resets attempt_count to 0 — verified end-to-end recovery. Safe to
++ * call on every successful adapter init (idempotent on cold boot). */
++void tb_egpu_lever_m_record_post_rminit_ok(nv_linux_state_t *nvl);
++
+ /* AORUS Mode B telemetry S1 (2026-05-08): trigger-event AER capture.
+  * Reactive helper called from Q-watchdog detection and AER error_detected
+  * callback. Walks GPU -> bridge -> root_port (via aorus_walk_to_root_port
+--- a/kernel-open/nvidia/nv-lever-m-recover.c
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -1111,8 +1111,20 @@
+ /* Commit 3 (H4): pci_error_handlers resume helper.
+  *
+  * Called from nv_pci_resume() in nv-pci.c after slot_reset returned
+- * RECOVERED. This is where we declare success: increment success_count,
+- * reset attempt_count to 0, emit TB_EGPU_GPU_STATE=READY uevent.
++ * RECOVERED. This increments success_count (counting bus reset cycles
++ * that completed) and emits TB_EGPU_GPU_STATE=READY.
++ *
++ * Patch 0028 (2026-05-08): attempt_count is NO LONGER reset here.
++ * slot_reset_resume only proves the GPU is alive on the bus — but
++ * rm_init_adapter can still fail on the next call (e.g. WPR2 still
++ * stuck). Per design § H1, attempt_count must reset only on
++ * "successful recovery (slot_reset + verify GSP boots)" — slot_reset
++ * is half of that. The other half is verified at the post-rmInit-OK
++ * site in nv.c, which calls tb_egpu_lever_m_record_post_rminit_ok()
++ * below. Without this fix the H1 MaxAttempts gate is unreachable in
++ * the real-world storm scenario (the very pattern we lived through
++ * 2026-05-06): each failed full-recovery cycles attempt_count 0->1->0
++ * and the gate never engages.
+  *
+  * Patch 0024 v1 does NOT re-enter rm_init_adapter from this callback —
+  * doing so safely requires preserving CUDA context state across reset,
+@@ -1131,17 +1143,48 @@
+         return;
+ 
+     atomic_inc(&nvl->lever_m->success_count);
+-    atomic_set(&nvl->lever_m->attempt_count, 0);
+ 
+     nv_printf(NV_DBG_ERRORS,
+-        "AORUS Lever M-recover: resume — success_count=%d, attempt_count "
+-        "reset to 0; emitting READY\n",
++        "AORUS Lever M-recover: resume — success_count=%d, bus reset done; "
++        "emitting READY (attempt_count cleared at next post-rmInit-OK)\n",
+         atomic_read(&nvl->lever_m->success_count));
+ 
+     tb_egpu_lever_m_emit_uevent(pdev, "READY");
+ }
+ EXPORT_SYMBOL(tb_egpu_lever_m_slot_reset_resume);
+ 
++/* Patch 0028 (2026-05-08): post-rmInit-OK hook.
++ *
++ * Called from nv.c after rm_init_adapter returns success — i.e. after
++ * GSP firmware has booted and the adapter is ready for use. This is
++ * the moment we can declare an end-to-end successful recovery (or a
++ * normal cold-boot init). Resets attempt_count to 0 so the next burst
++ * starts fresh.
++ *
++ * Safe to call on every cold-boot too (attempt_count is already 0 in
++ * the no-recovery-needed case, so this is idempotent). When the call
++ * follows a Lever M-recover bus reset cycle, this is what makes the
++ * H1 MaxAttempts gate meaningful: only verified-end-to-end recoveries
++ * clear the counter; failed retries accumulate and eventually surrender.
++ */
++void tb_egpu_lever_m_record_post_rminit_ok(nv_linux_state_t *nvl)
++{
++    int prev;
++
++    if (!nvl || !nvl->lever_m)
++        return;
++
++    prev = atomic_read(&nvl->lever_m->attempt_count);
++    if (prev > 0) {
++        nv_printf(NV_DBG_ERRORS,
++            "AORUS Lever M-recover: post-rmInit-OK observed with attempt_count=%d; "
++            "verified end-to-end recovery — resetting attempt_count to 0\n",
++            prev);
++    }
++    atomic_set(&nvl->lever_m->attempt_count, 0);
++}
++EXPORT_SYMBOL(tb_egpu_lever_m_record_post_rminit_ok);
++
+ int tb_egpu_lever_m_recover_init(nv_linux_state_t *nvl)
+ {
+     struct tb_egpu_lever_m_recover *lm;
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -1559,6 +1559,11 @@
+     }
+     /* AORUS Lever M-recover diagnostic: post-rmInit SUCCESS path. */
+     tb_egpu_lever_m_diag_dump(nvl, "post-rmInit-OK");
++    /* AORUS Lever M-recover Patch 0028 (2026-05-08): verified end-to-end
++     * recovery — reset attempt_count so the H1 MaxAttempts gate measures
++     * consecutive *failed* full-recoveries, not raw retry count. Safe on
++     * cold boot (attempt_count=0 already; idempotent). */
++    tb_egpu_lever_m_record_post_rminit_ok(nvl);
+ 
+     /* Generate and cache the UUID for future callers */
+     (void)rm_get_gpu_uuid_raw(sp, nv);

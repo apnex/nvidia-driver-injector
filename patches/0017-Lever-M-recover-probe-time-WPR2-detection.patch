@@ -1,0 +1,243 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: Wed, 6 May 2026 14:55:00 +1000
+Subject: [PATCH] Lever M-recover: probe-time WPR2-stuck detection (Commit 2)
+
+Adds probe-time WPR2-stuck detection to the in-driver recovery state
+machine scaffolding from patch 0016 (Commit 1). This is Commit 2 of 3
+in the Lever M-recover series.
+
+Detection-only in this commit. No recovery action; probe continues
+normally. The existing failure path (rm_init_adapter fails on first
+nv_start_device, aorus-egpu-wpr2-recovery.service performs L4 recovery
+via dmesg-pattern detection) is unchanged.
+
+Mechanism:
+  - In nv_pci_probe, after BAR0 cpu_address is captured, do a temporary
+    ioremap of one page covering BAR0 + 0x88a828
+    (NV_HUBMMU0_PRI_BASE + NV_HUBMMU_PRI_MMU_WPR2_ADDR_HI on Blackwell
+    GB100/GB202 per published headers).
+  - Read 32-bit register, mask bits [31:4]. Non-zero ⇒ WPR2 is stuck up
+    from a previous boot cycle and GSP boot will fail later.
+  - On detection: increment fire_count, log NV_DBG_ERRORS marker, return.
+    Probe continues normally.
+  - iounmap before returning. No persistent mapping.
+
+Why detection-only this commit:
+  Recovery action requires careful PCI lifecycle (remove + rescan + reset)
+  with refcount management across nvl-free, which has higher risk than
+  probe-time detection. Staging detection first gives us real-world
+  fire-rate data via the existing sysfs counter (tb_egpu_lever_m_fires)
+  before adding the action mechanism in Commit 3.
+
+Lifecycle change:
+  tb_egpu_lever_m_recover_init() moved from end of nv_pci_probe to
+  immediately after nvl->pci_dev assignment, so the WPR2 check has
+  lever_m available. nv_pci_remove_helper teardown call is unchanged.
+
+Builds on patch 0016 (Commit 1). Module params, sysfs counters, and
+struct layout are unchanged.
+
+Bumps version 595.71.05-aorus.6 → aorus.7.
+
+Tasks: #62
+---
+diff --git a/kernel-open/nvidia/nv-lever-m-recover.c b/kernel-open/nvidia/nv-lever-m-recover.c
+index 286e7510..1000ae98 100644
+--- a/kernel-open/nvidia/nv-lever-m-recover.c
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -52,6 +52,16 @@
+ #include <linux/sysfs.h>
+ #include <linux/slab.h>
+ #include <linux/device.h>
++#include <linux/io.h>      /* ioremap, ioread32, iounmap */
++#include <linux/types.h>
++
++/* WPR2 status register: NV_HUBMMU0_PRI_BASE + NV_HUBMMU_PRI_MMU_WPR2_ADDR_HI
++ * for Blackwell GB100/GB202 (per published headers
++ * src/common/inc/swref/published/blackwell/gb100/{hwproject.h,
++ * dev_hubmmu_base.h}). DRF field _VAL is bits [31:4]; non-zero means
++ * WPR2 is up. */
++#define TB_EGPU_LEVER_M_WPR2_REG_OFFSET   0x88a828u
++#define TB_EGPU_LEVER_M_WPR2_VAL_MASK     0xfffffff0u    /* bits 31:4 */
+ 
+ /* Module parameters — kill switch + tunables. Default-on so the lever
+  * is engaged by default once landed; revert path is to set
+@@ -162,6 +172,84 @@ static DEVICE_ATTR(tb_egpu_lever_m_surrenders, 0444,
+ static DEVICE_ATTR(tb_egpu_lever_m_last_fire_jiffies, 0444,
+                    tb_egpu_lever_m_last_fire_jiffies_show, NULL);
+ 
++/* Commit 2: probe-time WPR2-stuck detection.
++ *
++ * Reads the GSP MMU WPR2 status register via a temporary ioremap of a
++ * single page covering the register offset. We can't use nv->regs->map
++ * because at this point in nv_pci_probe (before RM init), NVIDIA's RM
++ * code hasn't yet ioremapped BAR0. Our own ioremap is safe and
++ * exclusive — we map for the duration of the read, then iounmap.
++ *
++ * Detection-only in this commit. No recovery action; probe continues.
++ * Increments lever_m->fire_count to track real-world rate.
++ */
++bool tb_egpu_lever_m_check_wpr2_at_probe(nv_linux_state_t *nvl,
++                                        u64 bar0_phys_addr)
++{
++    nv_state_t  *nv;
++    void __iomem *tmp_map;
++    u64          page_aligned_phys;
++    u32          page_offset;
++    u32          wpr2_raw;
++    u32          wpr2_val;
++
++    if (!nvl)
++        return false;
++
++    if (!NVreg_TbEgpuLeverMRecoverEnable || !nvl->lever_m)
++    {
++        /* Lever disabled or per-pdev state not allocated; nothing to do. */
++        return false;
++    }
++
++    nv = NV_STATE_PTR(nvl);
++
++    /* Page-align the mapping. We only need to read 4 bytes at offset
++     * 0x88a828, but ioremap must operate on page boundaries. */
++    page_aligned_phys = (bar0_phys_addr + TB_EGPU_LEVER_M_WPR2_REG_OFFSET) & PAGE_MASK;
++    page_offset       = (bar0_phys_addr + TB_EGPU_LEVER_M_WPR2_REG_OFFSET) & ~PAGE_MASK;
++
++    tmp_map = ioremap(page_aligned_phys, PAGE_SIZE);
++    if (!tmp_map)
++    {
++        NV_DEV_PRINTF(NV_DBG_INFO, nv,
++            "AORUS Lever M-recover: WPR2 detection — ioremap failed at probe; "
++            "skipping check (probe continues normally)\n");
++        return false;
++    }
++
++    wpr2_raw = ioread32(tmp_map + page_offset);
++    iounmap(tmp_map);
++
++    wpr2_val = wpr2_raw & TB_EGPU_LEVER_M_WPR2_VAL_MASK;
++
++    if (wpr2_val == 0)
++    {
++        NV_DEV_PRINTF(NV_DBG_INFO, nv,
++            "AORUS Lever M-recover: WPR2 check at probe — clear (raw=0x%08x); "
++            "GSP boot should proceed normally\n", wpr2_raw);
++        return false;
++    }
++
++    /* WPR2 is up. Increment counter and log marker. Recovery action is
++     * deferred to Commit 3 — for now, probe continues; the existing
++     * failure path (rm_init_adapter fails on first nv_start_device,
++     * aorus-egpu-wpr2-recovery.service performs L4 recovery) is
++     * unchanged. */
++    atomic_inc(&nvl->lever_m->fire_count);
++    nvl->lever_m->last_fire_jiffies = jiffies;
++
++    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++        "AORUS Lever M-recover: WPR2 DETECTED UP at probe (raw=0x%08x val=0x%08x). "
++        "Commit 2 detection only — recovery action pending Commit 3. "
++        "L4 helper (aorus-egpu-wpr2-recovery.service) will handle recovery via "
++        "the existing dmesg-pattern-detection path. fire_count=%d\n",
++        wpr2_raw, wpr2_val,
++        atomic_read(&nvl->lever_m->fire_count));
++
++    return true;
++}
++
+ int tb_egpu_lever_m_recover_init(nv_linux_state_t *nvl)
+ {
+     struct tb_egpu_lever_m_recover *lm;
+diff --git a/kernel-open/nvidia/nv-lever-m-recover.h b/kernel-open/nvidia/nv-lever-m-recover.h
+index e1771073..cf14bab9 100644
+--- a/kernel-open/nvidia/nv-lever-m-recover.h
++++ b/kernel-open/nvidia/nv-lever-m-recover.h
+@@ -59,4 +59,34 @@ struct tb_egpu_lever_m_recover
+ int  tb_egpu_lever_m_recover_init(nv_linux_state_t *nvl);
+ void tb_egpu_lever_m_recover_stop(nv_linux_state_t *nvl);
+ 
++/* Probe-time WPR2-stuck detection (Commit 2 of patch 0016).
++ *
++ * Reads the GSP MMU WPR2 status register at BAR0 + 0x88a828
++ * (NV_HUBMMU0_PRI_BASE + NV_HUBMMU_PRI_MMU_WPR2_ADDR_HI on Blackwell
++ * GB100/GB202). If bits [31:4] are non-zero, WPR2 is stuck up from a
++ * previous boot cycle and GSP boot will fail (see H13 in
++ * docs/reliability-hypothesis-ledger.md).
++ *
++ * Detection-only in this commit — increments lever_m->fire_count and
++ * logs a marker. No recovery action; probe continues normally. The
++ * existing failure path (rm_init_adapter returns error in nv_start_device,
++ * L4 helper aorus-egpu-wpr2-recovery.service does the recovery) is
++ * unchanged. Provides real-world fire rate via sysfs counter.
++ *
++ * Commit 3 will replace the no-op recovery action with pci-level
++ * remove + rescan + reset, eliminating the userspace race per
++ * docs/lever-M-recover-design.md.
++ *
++ * Caller must pass the BAR0 physical address (from nv->bars[REGS]).
++ * Function does its own temporary ioremap+iounmap; safe to call any
++ * time after pci_enable_device has succeeded and the BAR address is
++ * known. Cheap (~1 register read).
++ *
++ * Returns: NV_TRUE if WPR2 detected up, NV_FALSE if clear or any other
++ *          error (e.g. ioremap failed). Either way, probe should
++ *          continue — return value is informational.
++ */
++bool tb_egpu_lever_m_check_wpr2_at_probe(nv_linux_state_t *nvl,
++                                        u64 bar0_phys_addr);
++
+ #endif /* _NV_LEVER_M_RECOVER_H_ */
+diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
+index c0210ef5..95ad91fd 100644
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -1918,6 +1918,23 @@ nv_pci_probe
+     nvl->pci_dev           = pci_dev;
+     nvl->dma_dev.dev       = nvl->dev;
+ 
++    /* AORUS Lever M-recover (Phase 4, 2026-05-06) Commit 2:
++     * Allocate per-pdev recovery state EARLY (was at end of probe in
++     * Commit 1) so it's available for the WPR2 check below. Failure
++     * is non-fatal — leaves nvl->lever_m=NULL; check short-circuits. */
++    (void)tb_egpu_lever_m_recover_init(nvl);
++
++    /* AORUS Lever M-recover Commit 2: probe-time WPR2-stuck detection.
++     *
++     * Reads GSP MMU WPR2 status register (BAR0 + 0x88a828). If non-zero,
++     * WPR2 is stuck from a previous boot cycle; GSP boot will fail when
++     * nv_start_device subsequently calls rm_init_adapter. THIS COMMIT
++     * IS DETECTION-ONLY — increments fire_count and logs a marker, but
++     * probe continues. Existing L4 helper handles recovery. Commit 3
++     * will add in-driver pci_reset_bus action to retire the L4 helper. */
++    (void)tb_egpu_lever_m_check_wpr2_at_probe(nvl,
++        nv->bars[NV_GPU_BAR_INDEX_REGS].cpu_address);
++
+     nv->pci_info.vendor_id = pci_dev->vendor;
+     nv->pci_info.device_id = pci_dev->device;
+     nv->subsystem_id       = pci_dev->subsystem_device;
+@@ -2204,12 +2221,10 @@ nv_pci_probe
+      * watchdog, falling back to the existing Q-active wrapper. */
+     (void)tb_egpu_qwatchdog_init(nvl);
+ 
+-    /* AORUS Lever M-recover (Phase 4, 2026-05-06): allocate per-pdev
+-     * state for in-driver recovery. Commit 1 scaffolding only —
+-     * struct + workqueue + sysfs counters. Behaviour change comes in
+-     * commits 2 (probe-time WPR2 detection) and 3 (AER callback path).
+-     * Failure non-fatal; driver continues without recovery state. */
+-    (void)tb_egpu_lever_m_recover_init(nvl);
++    /* AORUS Lever M-recover init was moved earlier in probe (line ~1920)
++     * in Commit 2 so the WPR2 check has lever_m available; no longer
++     * called here. Stop is still called at the corresponding teardown
++     * point in nv_pci_remove_helper. */
+ 
+     nv_kmem_cache_free_stack(sp);
+ 
+diff --git a/version.mk b/version.mk
+index 41dcf6f5..a5fda94c 100644
+--- a/version.mk
++++ b/version.mk
+@@ -1,4 +1,4 @@
+-NVIDIA_VERSION = 595.71.05-aorus.6
++NVIDIA_VERSION = 595.71.05-aorus.7
+ NVIDIA_NVID_VERSION = 595.71.05
+ NVIDIA_NVID_EXTRA = 
+ 

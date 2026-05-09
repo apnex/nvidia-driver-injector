@@ -1,0 +1,81 @@
+diff --git a/kernel-open/nvidia/nv-qwatchdog.c b/kernel-open/nvidia/nv-qwatchdog.c
+index d19a3ada..e9f667d2 100644
+--- a/kernel-open/nvidia/nv-qwatchdog.c
++++ b/kernel-open/nvidia/nv-qwatchdog.c
+@@ -170,6 +170,42 @@ static int tb_egpu_qwatchdog_thread(void *data)
+     return 0;
+ }
+ 
++/*
++ * AORUS Lever Q-watchdog Tier 2 (Gap 2 closer, 2026-05-06): expose
++ * per-device atomic counters via sysfs. Userspace can read:
++ *   /sys/bus/pci/devices/0000:04:00.0/tb_egpu_qwatchdog_cycles
++ *   /sys/bus/pci/devices/0000:04:00.0/tb_egpu_qwatchdog_detections
++ * to observe kthread probe rate and dead-bus detection events
++ * cumulatively. Read-only (mode 0444). Persists for the device's
++ * driver-bound lifetime; reset by module reload or device remove.
++ */
++static ssize_t tb_egpu_qwatchdog_cycles_show(struct device *dev,
++                                            struct device_attribute *attr,
++                                            char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->qwd)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%d\n", atomic_read(&nvl->qwd->cycles));
++}
++
++static ssize_t tb_egpu_qwatchdog_detections_show(struct device *dev,
++                                                struct device_attribute *attr,
++                                                char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->qwd)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%d\n", atomic_read(&nvl->qwd->detections));
++}
++
++static DEVICE_ATTR(tb_egpu_qwatchdog_cycles, 0444,
++                   tb_egpu_qwatchdog_cycles_show, NULL);
++static DEVICE_ATTR(tb_egpu_qwatchdog_detections, 0444,
++                   tb_egpu_qwatchdog_detections_show, NULL);
++
+ int tb_egpu_qwatchdog_init(nv_linux_state_t *nvl)
+ {
+     struct tb_egpu_qwatchdog *qwd;
+@@ -211,6 +247,19 @@ int tb_egpu_qwatchdog_init(nv_linux_state_t *nvl)
+     }
+ 
+     nvl->qwd = qwd;
++
++    /* Tier 2: register sysfs counters. Failure is non-fatal — kthread
++     * still runs, just without userspace-visible counters. */
++    if (nvl->pci_dev)
++    {
++        if (device_create_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_cycles) != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "AORUS Lever Q-watchdog: device_create_file(cycles) failed\n");
++        if (device_create_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_detections) != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "AORUS Lever Q-watchdog: device_create_file(detections) failed\n");
++    }
++
+     return 0;
+ }
+ 
+@@ -221,6 +270,13 @@ void tb_egpu_qwatchdog_stop(nv_linux_state_t *nvl)
+     if (!nvl)
+         return;
+ 
++    /* Tier 2: remove sysfs counters before tearing down the kthread. */
++    if (nvl->pci_dev)
++    {
++        device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_cycles);
++        device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_detections);
++    }
++
+     qwd = nvl->qwd;
+     if (!qwd)
+         return;

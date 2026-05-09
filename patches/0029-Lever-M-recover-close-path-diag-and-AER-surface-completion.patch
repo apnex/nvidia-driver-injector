@@ -1,0 +1,309 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: 2026-05-08
+Subject: [PATCH] AORUS Patch 0029 — close-path DIAG instrumentation + AER err_handlers surface completion
+
+Extends our open-side DIAG infrastructure (probe-end / startdev-entry
+/ pre-rmInit / post-rmInit-{OK,FAIL}) into the close path so we can
+diagnose the close-path-bug class (architecture.md Problem 2 +
+Problem 4) by capturing state diff across the open->work->close->
+reopen lifecycle.
+
+Three components:
+
+PART A — close-path DIAG sites (4 new sites in nv.c):
+
+  - close-entry      — at top of nvidia_close_callback after nvl
+                       check; captures pre-close state. Full DIAG
+                       only on last-close (usage_count==1).
+  - pre-stop         — just before nv_close_device under ldata_lock.
+                       Captures state right before teardown can fire.
+  - post-shutdown    — inside nv_stop_device after rm_disable_adapter
+                       or nv_shutdown_adapter. Always last-close
+                       (nv_stop_device is only entered when
+                       usage_count reaches 0). Most diagnostic site.
+  - close-exit       — at end of nvidia_close_callback. Captures
+                       fully-torn-down post-close state.
+
+  Each site emits a one-line marker logging usage_count. On the
+  last-close path, additionally calls tb_egpu_lever_m_diag_dump and
+  tb_egpu_dump_aer_trigger_event for full state + AER snapshot. The
+  diff between these and the open-side DIAG entries identifies what
+  the close path mutates in PMC_BOOT_0 / WPR2 / LnkSta / AER state
+  that breaks the next open.
+
+  Helper tb_egpu_lever_m_close_path_diag() lives in nv-lever-m-recover.c.
+
+PART B — pci_error_handlers surface completion (nv-pci.c):
+
+  - mmio_enabled callback: kernel may dispatch this between
+    error_detected returning CAN_RECOVER and slot_reset. We always
+    return NEED_RESET so this normally won't fire, but kernel
+    internals occasionally invoke it via pci_walk_bus during AER
+    recovery. Wired up for completeness, observability, and
+    future-proofing. Body: dump DIAG + AER snapshot, return
+    PCI_ERS_RESULT_RECOVERED.
+
+  - cor_error_detected callback: proactive observability for
+    correctable AER errors that don't reach the uncorrectable
+    path. The Gen3 demotion observed 2026-05-07 (Br_AER_Cor=0x1 +
+    GPU_AER_UncMsk=0x400000 demoting Internal Error to Cor=0x2000)
+    is exactly this class. No state change; pure observability.
+
+  Both wired into nv_pci_err_handlers struct.
+
+PART C — version.mk bump to aorus.11 to mark this build distinctly
+  from the aorus.10 production build (patches 0024-0028).
+
+Risk per feedback_observability_perturbs_bug: bpftrace, ioctl-trace,
+CUDA_LAUNCH_BLOCKING all materially perturbed the failure mode in
+past investigations. Our DIAG dump uses ioremap+ioread32+iounmap
+(passive MMIO) and tb_egpu_dump_aer_trigger_event uses PCI
+config-space reads only (passive). Both helpers have been live
+since 2026-05-06 in 4 open-side DIAG sites without observable
+perturbation. The new 4 close-path sites follow the same pattern;
+if behaviour changes after this patch, baseline-vs-instrumented
+comparison will isolate it.
+
+Refs: docs/architecture.md Problem 2 + Problem 4;
+      memory/feedback_avoid_nvidia_smi_for_state_checks.md;
+      memory/feedback_observability_perturbs_bug.md.
+---
+--- a/kernel-open/nvidia/nv-lever-m-recover.h
++++ b/kernel-open/nvidia/nv-lever-m-recover.h
+@@ -158,6 +158,36 @@
+  * call on every successful adapter init (idempotent on cold boot). */
+ void tb_egpu_lever_m_record_post_rminit_ok(nv_linux_state_t *nvl);
+ 
++/* Patch 0029 (2026-05-08): close-path DIAG marker.
++ *
++ * Extends the open-side DIAG infrastructure (probe-end / startdev-entry
++ * / pre-rmInit / post-rmInit-{OK,FAIL}) into the close path. Lets us
++ * capture state diff across the open->work->close->reopen lifecycle,
++ * which is what we need to diagnose the close-path-bug class
++ * (architecture.md Problem 2 + Problem 4).
++ *
++ * Behaviour:
++ *   - Always emits a one-line marker logging usage_count at the site.
++ *   - On the "last close" path (usage_count==0 after decrement, or about
++ *     to be 0 going in), additionally calls tb_egpu_lever_m_diag_dump
++ *     and tb_egpu_dump_aer_trigger_event for full state + AER capture.
++ *   - Cheap when the call is NOT a last-close (e.g. persistenced still
++ *     holds an fd) — just one printk line.
++ *
++ * Sites (called from nv.c):
++ *   - close-entry      — entry of nvidia_close_callback
++ *   - pre-stop         — after usage_count decremented to 0, before nv_stop_device
++ *   - post-shutdown    — inside nv_stop_device after rm_disable/nv_shutdown_adapter
++ *   - close-exit       — end of nvidia_close_callback
++ *
++ * `is_last_close` parameter — caller's determination. true means do
++ * full DIAG + AER dump. false means just the marker line.
++ */
++void tb_egpu_lever_m_close_path_diag(nv_linux_state_t *nvl,
++                                    const char *site,
++                                    long usage_count,
++                                    bool is_last_close);
++
+ /* AORUS Mode B telemetry S1 (2026-05-08): trigger-event AER capture.
+  * Reactive helper called from Q-watchdog detection and AER error_detected
+  * callback. Walks GPU -> bridge -> root_port (via aorus_walk_to_root_port
+--- a/kernel-open/nvidia/nv-lever-m-recover.c
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -1185,6 +1185,52 @@
+ }
+ EXPORT_SYMBOL(tb_egpu_lever_m_record_post_rminit_ok);
+ 
++/* Patch 0029 (2026-05-08): close-path DIAG marker + last-close full dump.
++ *
++ * Companion to the existing 4 open-side DIAG sites. Always emits a
++ * one-line marker logging usage_count at the call site. On the
++ * last-close path (caller passes is_last_close=true), additionally
++ * calls tb_egpu_lever_m_diag_dump and tb_egpu_dump_aer_trigger_event for
++ * the full state + AER snapshot — the diff between this and the
++ * preceding open-side DIAG entries is the close path's hardware/
++ * firmware footprint, which is what we need to diagnose the close-path
++ * bug class (architecture.md Problem 2 + Problem 4).
++ *
++ * Passive: uses the existing diag_dump (ioremap+ioread32+iounmap, no
++ * DMA) and tb_egpu_dump_aer_trigger_event (PCI config-space reads only).
++ * Both have been live since 2026-05-06 in DIAG sites without perturbing
++ * observed behaviour. Per feedback_observability_perturbs_bug, verify
++ * via baseline-vs-instrumented comparison if the close path is observed
++ * to behave differently after this patch lands.
++ */
++void tb_egpu_lever_m_close_path_diag(nv_linux_state_t *nvl,
++                                    const char *site,
++                                    long usage_count,
++                                    bool is_last_close)
++{
++    nv_state_t *nv;
++
++    if (!nvl)
++        return;
++
++    nv = NV_STATE_PTR(nvl);
++
++    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++        "AORUS Lever M-recover [CLOSE]: site=%-15s usage_count=%ld%s\n",
++        site, usage_count, is_last_close ? " (LAST-CLOSE)" : "");
++
++    if (is_last_close)
++    {
++        /* Full state dump + AER snapshot. Same helper used by the open
++         * side, so the dmesg format is consistent across both halves of
++         * the open->close lifecycle. */
++        tb_egpu_lever_m_diag_dump(nvl, site);
++        if (nvl->pci_dev)
++            tb_egpu_dump_aer_trigger_event(nvl->pci_dev, site, NULL);
++    }
++}
++EXPORT_SYMBOL(tb_egpu_lever_m_close_path_diag);
++
+ int tb_egpu_lever_m_recover_init(nv_linux_state_t *nvl)
+ {
+     struct tb_egpu_lever_m_recover *lm;
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -2953,10 +2953,61 @@
+     tb_egpu_lever_m_slot_reset_resume(pci_dev);
+ }
+ 
++/* AORUS Lever M-recover Patch 0029 (2026-05-08): mmio_enabled callback.
++ *
++ * Called by the kernel between error_detected returning CAN_RECOVER
++ * and slot_reset, to give the driver a chance to do passive MMIO
++ * probing. We currently always return NEED_RESET from error_detected
++ * (H4 path), so the kernel's normal flow won't dispatch mmio_enabled —
++ * but kernel internals occasionally invoke it via pci_walk_bus during
++ * AER recovery. Wiring it up:
++ *   (a) closes the err_handlers callback surface for completeness,
++ *   (b) gives us observability if the kernel ever does call it,
++ *   (c) future-proofs against kernel API changes.
++ *
++ * Body: dump DIAG + AER snapshot, return RECOVERED (we have no special
++ * MMIO test to run). */
++static pci_ers_result_t nv_pci_mmio_enabled(struct pci_dev *pci_dev)
++{
++    nv_linux_state_t *nvl = pci_get_drvdata(pci_dev);
++
++    nv_printf(NV_DBG_ERRORS,
++              "AORUS Lever M-recover: mmio_enabled callback fired on %s\n",
++              pci_name(pci_dev));
++
++    if (nvl) {
++        tb_egpu_lever_m_diag_dump(nvl, "mmio-enabled");
++        tb_egpu_dump_aer_trigger_event(pci_dev, "mmio-enabled", NULL);
++    }
++
++    return PCI_ERS_RESULT_RECOVERED;
++}
++
++/* AORUS Lever M-recover Patch 0029 (2026-05-08): cor_error_detected
++ * callback. Proactive observability for correctable AER errors that
++ * don't reach the uncorrectable path. The Gen3 demotion observed
++ * 2026-05-07 (Br_AER_Cor=0x1 + GPU_AER_UncMsk=0x400000 demoting
++ * Internal Error to Cor=0x2000) is the kind of correctable that
++ * normally doesn't surface — this callback dumps the AER snapshot at
++ * the moment the kernel sees a Cor fire, giving us a leading
++ * indicator before things escalate to uncorrectable.
++ *
++ * No state change, no recovery action — pure observability. */
++static void nv_pci_cor_error_detected(struct pci_dev *pci_dev)
++{
++    nv_printf(NV_DBG_ERRORS,
++              "AORUS Lever M-recover: cor_error_detected callback fired on %s\n",
++              pci_name(pci_dev));
++
++    tb_egpu_dump_aer_trigger_event(pci_dev, "cor-error", NULL);
++}
++
+ static const struct pci_error_handlers nv_pci_err_handlers = {
+-    .error_detected = nv_pci_error_detected,
+-    .slot_reset     = nv_pci_slot_reset,
+-    .resume         = nv_pci_resume,
++    .error_detected     = nv_pci_error_detected,
++    .mmio_enabled       = nv_pci_mmio_enabled,
++    .slot_reset         = nv_pci_slot_reset,
++    .resume             = nv_pci_resume,
++    .cor_error_detected = nv_pci_cor_error_detected,
+ };
+ 
+ struct pci_driver nv_pci_driver = {
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -2125,6 +2125,13 @@
+             nv_acpi_unregister_notifier(nvl);
+             nv_shutdown_adapter(sp, nv, nvl);
+         }
++        /* AORUS Lever M-recover Patch 0029: post-shutdown DIAG site.
++         * Inside nv_stop_device after rm_disable_adapter or
++         * nv_shutdown_adapter has run. usage_count is 0 at this point
++         * (nv_stop_device is only called when count reaches 0). This is
++         * the most diagnostic moment — captures GSP/firmware state
++         * immediately after the destabilising teardown sequence. */
++        tb_egpu_lever_m_close_path_diag(nvl, "post-shutdown", 0L, true);
+     }
+ 
+     if (!(nv->flags & NV_FLAG_PERSISTENT_SW_STATE))
+@@ -2212,6 +2219,17 @@
+ 
+     nv = NV_STATE_PTR(nvl);
+ 
++    /* AORUS Lever M-recover Patch 0029: close-entry DIAG site.
++     * Captures pre-close state. is_last_close=true triggers full DIAG +
++     * AER snapshot only when this close will drive usage_count to 0
++     * (i.e. count==1 before any decrement). Otherwise emits a one-line
++     * marker. */
++    {
++        long _aorus_uc = atomic64_read(&nvl->usage_count);
++        tb_egpu_lever_m_close_path_diag(nvl, "close-entry",
++                                       _aorus_uc, _aorus_uc == 1);
++    }
++
+     rm_cleanup_file_private(sp, nv, &nvlfp->nvfp);
+ 
+     down(&nvl->mmap_lock);
+@@ -2219,12 +2237,35 @@
+     up(&nvl->mmap_lock);
+ 
+     down(&nvl->ldata_lock);
++
++    /* AORUS Lever M-recover Patch 0029: pre-stop DIAG site.
++     * Captures state immediately before nv_close_device runs. If this
++     * is the last close, nv_close_device will call nv_stop_device which
++     * runs the destabilising teardown sequence — diff this snapshot
++     * against post-shutdown to identify what the teardown mutates. */
++    {
++        long _aorus_uc = atomic64_read(&nvl->usage_count);
++        tb_egpu_lever_m_close_path_diag(nvl, "pre-stop",
++                                       _aorus_uc, _aorus_uc == 1);
++    }
++
+     nv_close_device(nv, sp);
+ 
+     bRemove = (!NV_IS_DEVICE_IN_SURPRISE_REMOVAL(nv)) &&
+               (atomic64_read(&nvl->usage_count) == 0) &&
+               rm_get_device_remove_flag(sp, nv->gpu_id);
+ 
++    /* AORUS Lever M-recover Patch 0029: close-exit DIAG site.
++     * Captures post-teardown state. usage_count==0 at this point on the
++     * last-close path means nv_stop_device just ran. Diff this against
++     * the next open's startdev-entry/pre-rmInit to pinpoint what the
++     * close path left in a state that breaks the next open. */
++    {
++        long _aorus_uc = atomic64_read(&nvl->usage_count);
++        tb_egpu_lever_m_close_path_diag(nvl, "close-exit",
++                                       _aorus_uc, _aorus_uc == 0);
++    }
++
+     nv_free_file_private(nvlfp);
+ 
+     /*
+--- a/version.mk
++++ b/version.mk
+@@ -1,4 +1,4 @@
+-NVIDIA_VERSION = 595.71.05-aorus.10
++NVIDIA_VERSION = 595.71.05-aorus.11
+ NVIDIA_NVID_VERSION = 595.71.05
+ NVIDIA_NVID_EXTRA = 
+ 

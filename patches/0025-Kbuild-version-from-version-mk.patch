@@ -1,0 +1,46 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: 2026-05-08
+Subject: [PATCH] AORUS Patch 0025 — Kbuild reads NVIDIA_VERSION from version.mk
+
+Eliminates Kbuild / version.mk drift. Prior to this, patch 0005
+hardcoded the literal '595.71.05-aorus.5' as -DNV_VERSION_STRING in
+kernel-open/Kbuild AND set NVIDIA_VERSION = 595.71.05-aorus.5 in
+version.mk. Subsequent patches (0016/0017/0018/0020) bumped only
+version.mk and the strings drifted: Kbuild stayed at aorus.5 while
+version.mk reached aorus.10, so modinfo's version: field reported
+aorus.5 even after multiple aorus.N bumps.
+
+Fix: have Kbuild include ../version.mk and use $(NVIDIA_VERSION) in
+the -DNV_VERSION_STRING macro. Single source of truth; future patches
+only need to bump version.mk.
+
+kbuild's .cmd hashing detects the expanded -D value changing and
+rebuilds nv.o accordingly, so a bare 'make modules' after a bump
+of NVIDIA_VERSION produces the correct modinfo without 'make clean'.
+
+Note for upstream: this is independent of the AORUS reliability
+stack and is a candidate for upstreaming as a standalone cleanup PR
+if NVIDIA is willing to accept it.
+---
+--- a/kernel-open/Kbuild
++++ b/kernel-open/Kbuild
+@@ -79,7 +79,18 @@
+ ccflags-y += -I$(src)
+ ccflags-y += -Wall $(DEFINES) $(INCLUDES) -Wno-cast-qual -Wno-format-extra-args
+ ccflags-y += -D__KERNEL__ -DMODULE -DNVRM
+-ccflags-y += -DNV_VERSION_STRING=\"595.71.05-aorus.5\"
++
++# AORUS Patch 0025 (2026-05-08): single source of truth for the version
++# string. Read NVIDIA_VERSION from the repo-root version.mk so a bump
++# there propagates to MODULE_VERSION() automatically. Prior to this,
++# patch 0005 hardcoded the literal here AND set NVIDIA_VERSION in
++# version.mk; subsequent patches (0016/0017/0018/0020) bumped only
++# version.mk and the strings drifted (Kbuild left at aorus.5 while
++# version.mk reached aorus.10). kbuild's .cmd hashing detects the
++# expanded -D value changing and rebuilds nv.o accordingly, so a bare
++# `make modules` after a version.mk bump produces the correct modinfo.
++include $(src)/../version.mk
++ccflags-y += -DNV_VERSION_STRING=\"$(NVIDIA_VERSION)\"
+ 
+ # Include and link Tegra out-of-tree modules.
+ ifneq ($(wildcard /usr/src/nvidia/nvidia-public),)

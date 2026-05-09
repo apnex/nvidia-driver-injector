@@ -1,0 +1,76 @@
+diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
+index 996d5c0e..57ae77f1 100644
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -2747,6 +2747,63 @@ NvBool NV_API_CALL nv_grdma_pci_topology_supported(
+ extern struct dev_pm_ops nv_pm_ops;
+ #endif
+ 
++//
++// AORUS Lever M-base patch (2026-05-04):
++// Register a pci_error_handlers struct with the NVIDIA pci_driver so the
++// kernel's AER subsystem has a place to dispatch error notifications.
++//
++// Without this, AER messages from the GPU on a degrading PCIe link (issue
++// #979 on AORUS RTX 5090 over Thunderbolt 4) get logged by pcieport but
++// never reach the NVIDIA driver. The driver continues issuing transactions
++// to a broken bus, threads hang on register reads, and the host wedges
++// silently with no diagnostic trace -- as observed in test
++// lite-2026-05-04-142154 where AER fired three times within 1s yet zero
++// NVRM output landed in dmesg before the freeze.
++//
++// This is M-base: minimum viable. error_detected() logs the event and
++// returns PCI_ERS_RESULT_DISCONNECT. The kernel marks the device as
++// permanently failed; the kernel will then schedule the existing
++// nv_pci_remove path. Levers I, J-2 (patches 0001-0004) and N (patch
++// 0006) engage on that cleanup chain to ensure no asserts fire and no
++// RPCs hang.
++//
++// Future stages:
++//   M-recover  -- return PCI_ERS_RESULT_CAN_RECOVER, implement
++//                 mmio_enabled / slot_reset / resume to actually recover
++//                 the GPU without unbinding it.
++//   M-preserve -- save/restore driver state across slot_reset so in-flight
++//                 CUDA work survives. (NVIDIA's roadmap calls this
++//                 "PEX Reset and Recovery"; not yet shipped in the open
++//                 module.)
++//
++// Static counter for log-once behaviour: AER notifications can fire many
++// times in rapid succession; we want one bright marker per failure event,
++// not log spam.
++//
++static pci_ers_result_t
++nv_pci_error_detected(struct pci_dev *pci_dev, pci_channel_state_t state)
++{
++    static int s_tb_egpu_lever_m_logged = 0;
++
++    if (!s_tb_egpu_lever_m_logged)
++    {
++        s_tb_egpu_lever_m_logged = 1;
++        nv_printf(NV_DBG_ERRORS,
++                  "AORUS Lever M-base: AER error_detected fired on %04x:%02x:%02x.%x "
++                  "(channel state=%d). Returning DISCONNECT to trigger clean teardown; "
++                  "Levers I/J-2/N will handle the GPU-lost cleanup chain.\n",
++                  NV_PCI_DOMAIN_NUMBER(pci_dev), NV_PCI_BUS_NUMBER(pci_dev),
++                  NV_PCI_SLOT_NUMBER(pci_dev), PCI_FUNC(pci_dev->devfn),
++                  (int)state);
++    }
++
++    return PCI_ERS_RESULT_DISCONNECT;
++}
++
++static const struct pci_error_handlers nv_pci_err_handlers = {
++    .error_detected = nv_pci_error_detected,
++};
++
+ struct pci_driver nv_pci_driver = {
+     .name      = MODULE_NAME,
+     .id_table  = nv_pci_table,
+@@ -2761,6 +2818,7 @@ struct pci_driver nv_pci_driver = {
+     .driver.pm = &nv_pm_ops,
+ #endif
+     .driver.probe_type = PROBE_FORCE_SYNCHRONOUS,
++    .err_handler = &nv_pci_err_handlers,
+ };
+ 
+ void nv_pci_unregister_driver(void)

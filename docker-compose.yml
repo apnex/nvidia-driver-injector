@@ -1,0 +1,48 @@
+# Local Docker test for nvidia-driver-injector.
+#
+# Usage:
+#   docker compose build
+#   docker compose up    # builds + loads nvidia.ko on the host
+#   docker compose logs -f
+#
+# When done:
+#   docker compose down  # stops the container; nvidia module STAYS LOADED
+#                        # in host kernel (kernel modules persist past
+#                        # container exit). To unload manually:
+#                        # sudo modprobe -r nvidia_uvm nvidia
+#
+# Prerequisites on host (handled by the aorus-5090-egpu repo's apply.sh):
+#   - kernel cmdline includes thunderbolt.host_reset=false +
+#     pci=resource_alignment=35@<bridge_bdf>
+#   - kernel-devel installed (kernel build dir present at
+#     /lib/modules/$(uname -r)/build)
+#   - eGPU connected and enumerated
+#   - aorus-egpu-bridge-link-cap.service has run (Lever H17 LnkCtl2 cap)
+#   - nvidia not already loaded by another path (this container won't
+#     conflict but won't unload either)
+
+services:
+  driver-injector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: apnex/nvidia-driver-injector:595.71.05-aorus.12
+    container_name: nvidia-driver-injector
+    privileged: true
+    pid: host
+    volumes:
+      # Host kernel build dir — needed for the build step
+      - /lib/modules:/lib/modules:rw
+      - /usr/src:/usr/src:ro
+      # Host's PCI sysfs — needed for PCI gate + BAR1 verify
+      - /sys:/sys:rw
+      # /proc for kernel version detection
+      - /proc:/proc
+      # /dev for char-device creation (nvidia-modprobe -u -c 0)
+      - /dev:/dev
+    restart: unless-stopped
+    # Optional environment overrides (rare custom topology)
+    # environment:
+    #   EGPU_VENDOR_ID: "0x10de"
+    #   EGPU_DEVICE_ID: "0x2b85"
+    #   EGPU_BDF: "0000:04:00.0"

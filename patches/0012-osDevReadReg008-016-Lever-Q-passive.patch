@@ -1,0 +1,46 @@
+diff --git a/src/nvidia/arch/nvalloc/unix/src/os.c b/src/nvidia/arch/nvalloc/unix/src/os.c
+index bc784af8..6d387116 100644
+--- a/src/nvidia/arch/nvalloc/unix/src/os.c
++++ b/src/nvidia/arch/nvalloc/unix/src/os.c
+@@ -1878,6 +1878,23 @@ NvU8 osDevReadReg008(
+ {
+     NvU8 retval = 0;
+ 
++    //
++    // AORUS Lever Q-passive (2026-05-04, Phase 1b): same dead-bus
++    // short-circuit as in osDevReadReg032 — see comment there for
++    // full rationale. 8/16-bit variants don't have a vGPU passthrough
++    // check; they go straight to MMIO, so they're equally vulnerable
++    // to hanging on a dead bus and need the same protection.
++    //
++    if (pGpu)
++    {
++        nv_state_t *nv = NV_GET_NV_STATE(pGpu);
++        if ((nv != NULL && os_pci_is_disconnected(nv->handle)) ||
++            pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST))
++        {
++            return 0xFFU;
++        }
++    }
++
+     if (thisAddress >= pMapping->gpuNvLength)
+     {
+         NV_ASSERT(thisAddress < pMapping->gpuNvLength);
+@@ -1896,6 +1913,17 @@ NvU16 osDevReadReg016(
+ {
+     NvU16 retval = 0;
+ 
++    // AORUS Lever Q-passive: same as osDevReadReg008 above.
++    if (pGpu)
++    {
++        nv_state_t *nv = NV_GET_NV_STATE(pGpu);
++        if ((nv != NULL && os_pci_is_disconnected(nv->handle)) ||
++            pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST))
++        {
++            return 0xFFFFU;
++        }
++    }
++
+     if (thisAddress >= pMapping->gpuNvLength)
+     {
+         NV_ASSERT(thisAddress < pMapping->gpuNvLength);
