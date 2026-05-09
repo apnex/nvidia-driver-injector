@@ -8,18 +8,22 @@
 # When done:
 #   docker compose down  # stops the container; nvidia module STAYS LOADED
 #                        # in host kernel (kernel modules persist past
-#                        # container exit). To unload manually:
-#                        # sudo modprobe -r nvidia_uvm nvidia
+#                        # container exit). To unload, use the explicit
+#                        # uninstall subcommand:
+#                        #   docker compose run --rm driver-injector uninstall
 #
-# Prerequisites on host (handled by the aorus-5090-egpu repo's apply.sh):
-#   - kernel cmdline includes thunderbolt.host_reset=false +
-#     pci=resource_alignment=35@<bridge_bdf>
-#   - kernel-devel installed (kernel build dir present at
-#     /lib/modules/$(uname -r)/build)
-#   - eGPU connected and enumerated
-#   - aorus-egpu-bridge-link-cap.service has run (Lever H17 LnkCtl2 cap)
-#   - nvidia not already loaded by another path (this container won't
-#     conflict but won't unload either)
+# Prerequisites on host (handled by `sudo ./scripts/install-host.sh`
+# in this repo — see docs/architecture.md):
+#   - kernel cmdline tuning (iommu=off, host_reset=false, etc.)
+#   - kernel-devel installed for $(uname -r)
+#   - /etc/modprobe.d/nvidia-driver-injector.conf installed (production
+#     NVreg options including LeverMRecoverEnable=1)
+#   - nvidia-driver-injector-bridge-link-cap.service enabled
+#     (runs Before=docker.service to apply Lever H17 cap)
+#   - eGPU connected and authorised over Thunderbolt
+#   - nvidia not already loaded by another deployment path
+#     (the apnex/aorus-5090-egpu repo's apply.sh also loads it —
+#     pick one geometry, not both)
 
 services:
   driver-injector:
@@ -40,6 +44,16 @@ services:
       - /proc:/proc
       # /dev for char-device creation (nvidia-modprobe -u -c 0)
       - /dev:/dev
+      # Host modprobe.d — read-only, lets the container's modprobe
+      # apply production NVreg options (LeverMRecoverEnable=1, etc.).
+      # WITHOUT this mount, the entrypoint falls back to insmod with
+      # no options and the recovery state machine is OFF (Gap #1 in
+      # docs/architecture.md). Layer 1 install-host.sh installs the
+      # config file this picks up.
+      - /etc/modprobe.d:/etc/modprobe.d:ro
+      # Host /etc/group so the container can resolve the ollama gid
+      # for chgrp on /dev/nvidia* (Gap #4).
+      - /etc/group:/etc/group:ro
     restart: unless-stopped
     # Optional environment overrides (rare custom topology)
     # environment:

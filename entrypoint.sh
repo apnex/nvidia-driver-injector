@@ -238,14 +238,20 @@ log "build ✓"
 # ============================================================================
 # Step 4: Load modules into host kernel
 # ============================================================================
-# Why insmod direct, not modprobe:
-#   - Host's /etc/modprobe.d/aorus-egpu-compute-only.conf has
-#     'install nvidia /bin/false' to block accidental modprobe on host.
-#   - modprobe inside the container would see the host's modprobe.d via
-#     /etc/modprobe.d bind-mount (if present) and refuse the install.
-#   - insmod operates on the .ko file directly — no modprobe.d consulted.
-#   - This matches the semantics that the host service achieves with
-#     `modprobe --ignore-install nvidia`.
+# Load via `modprobe --ignore-install` so /etc/modprobe.d/ options
+# (NVreg_TbEgpuLeverMRecoverEnable=1, NVreg_DeviceFile*, etc.) apply.
+# `--ignore-install` bypasses the `install ... /bin/false` guards that
+# the host's nvidia-driver-injector.conf installs to block accidental
+# auto-load — a clean separation: host posture is "nothing auto-loads",
+# container posture is "we know what we're doing, here's the patched
+# build with production options".
+#
+# The newly-built .ko has to be on the modules.dep search path. We
+# install it under /lib/modules/<kver>/extra/ (which is bind-mounted
+# from host) and run depmod so modprobe can find it.
+#
+# Falls back to insmod if modprobe isn't available or modprobe.d isn't
+# bind-mounted (e.g. legacy compose without /etc/modprobe.d:ro mount).
 
 # Module paths after build — open-gpu-kernel-modules layout has them under
 # kernel-open/.
@@ -256,24 +262,67 @@ KO_DRM="/src/nvidia-open-gpu-kernel-modules/kernel-open/nvidia-drm.ko"
 
 [[ -f "$KO_NVIDIA" ]] || fail "expected ${KO_NVIDIA} not found after build"
 
-# Already loaded? skip — idempotent on repeated pod starts (k8s-friendly).
-if grep -q '^nvidia ' /proc/modules; then
-    log "nvidia already loaded — skipping insmod"
+# Detect whether the host's modprobe.d is bind-mounted (architecture
+# expects /etc/modprobe.d to be mounted from host, ro).
+HAS_HOST_MODPROBE_D=0
+if [[ -f "/etc/modprobe.d/nvidia-driver-injector.conf" ]]; then
+    HAS_HOST_MODPROBE_D=1
+    log "host modprobe.d detected — production NVreg options will apply"
 else
-    log "insmod nvidia.ko ..."
-    insmod "$KO_NVIDIA" || fail "insmod nvidia.ko failed"
+    warn "host /etc/modprobe.d not bind-mounted; falling back to insmod with no NVreg options.
+       For production reliability, mount the host's modprobe.d into the container
+       (see docker-compose.yml) and run install-host.sh first."
 fi
 
-if grep -q '^nvidia_uvm ' /proc/modules; then
-    log "nvidia_uvm already loaded — skipping insmod"
-else
-    log "insmod nvidia-uvm.ko ..."
-    insmod "$KO_UVM" || warn "insmod nvidia-uvm.ko failed (non-fatal)"
-fi
+load_module() {
+    local mod_short="$1"           # e.g. "nvidia"
+    local ko_path="$2"
+
+    if grep -q "^${mod_short} " /proc/modules; then
+        log "${mod_short} already loaded — skipping"
+        return 0
+    fi
+
+    if [[ "$HAS_HOST_MODPROBE_D" -eq 1 ]] && command -v modprobe >/dev/null 2>&1; then
+        # Install the freshly-built .ko under /lib/modules/<kver>/extra/
+        # so modprobe can find it. /lib/modules is bind-mounted writable
+        # from host.
+        local extra_dir="/lib/modules/${KVER}/extra"
+        mkdir -p "$extra_dir"
+        cp -u "$ko_path" "${extra_dir}/$(basename "$ko_path")"
+        depmod -a "${KVER}" 2>/dev/null || true
+
+        log "modprobe --ignore-install ${mod_short} ..."
+        if modprobe --ignore-install "$mod_short"; then
+            return 0
+        fi
+        warn "modprobe ${mod_short} failed; falling back to insmod"
+    fi
+
+    log "insmod ${ko_path} ..."
+    insmod "$ko_path" || fail "insmod ${ko_path} failed"
+}
+
+load_module "nvidia"     "$KO_NVIDIA"
+load_module "nvidia_uvm" "$KO_UVM"
 
 # Verify the patched build is loaded (project markers visible in modinfo).
 loaded_version="$(cat /sys/module/nvidia/version 2>/dev/null || echo unknown)"
 log "load ✓ — nvidia version: ${loaded_version}"
+
+# Confirm the production-posture knob actually took effect.
+recover_enable_path="/sys/module/nvidia/parameters/NVreg_TbEgpuLeverMRecoverEnable"
+if [[ -r "$recover_enable_path" ]]; then
+    re_val="$(cat "$recover_enable_path")"
+    if [[ "$re_val" == "1" ]]; then
+        log "Lever M-recover ✓ — NVreg_TbEgpuLeverMRecoverEnable=1"
+    else
+        warn "NVreg_TbEgpuLeverMRecoverEnable=${re_val} (expected 1).
+       Production posture not applied; the recovery state machine is OFF.
+       Check that /etc/modprobe.d/nvidia-driver-injector.conf is bind-mounted
+       and that install-host.sh has been run on the host."
+    fi
+fi
 
 # Verify GPU bound to nvidia
 sleep 1
@@ -284,6 +333,27 @@ if [[ -e "/sys/bus/pci/devices/${EGPU_BDF}/driver" ]]; then
     else
         warn "${EGPU_BDF} bound to '${bound_drv}' (expected 'nvidia') — check driver_override on host"
     fi
+fi
+
+# ============================================================================
+# Step 4.5: /dev/nvidia* permissions (Gap #4)
+# ============================================================================
+# NVreg_DeviceFile* options handle /dev/nvidia0 + /dev/nvidiactl, but
+# nvidia_uvm has no equivalent. Belt-and-suspenders chmod here so all
+# device files end up at the project's preferred 0660 root:ollama.
+# Skipped silently if the ollama group doesn't exist (host hasn't
+# completed Layer 1 install — falls back to whatever NVreg defaults are
+# in effect).
+if getent group ollama >/dev/null 2>&1; then
+    for dev in /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
+        if [[ -e "$dev" ]]; then
+            chgrp ollama "$dev" 2>/dev/null && chmod 0660 "$dev" 2>/dev/null && \
+                log "perms ✓ — ${dev}: 0660 root:ollama"
+        fi
+    done
+else
+    warn "ollama group not present on host — leaving /dev/nvidia* perms at NVreg defaults
+       (run install-host.sh on the host to create the group + udev rule)"
 fi
 
 # ============================================================================
