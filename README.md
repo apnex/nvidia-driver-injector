@@ -14,22 +14,28 @@ host bind-mounts `/lib/modules` for the kernel build dir).
 
 ## What it does
 
-A privileged container that runs five steps on each pod start
+A privileged container that runs these steps on each pod start
 (matching the responsibilities historically owned by
 `aorus-egpu-compute-load-nvidia.service` on the host):
 
 1. **PCI gate** —
    verify the eGPU is enumerated;
    exit cleanly if not.
-2. **BAR1 verify** —
+2. **driver_override clear** —
+   if the host had a teardown applied
+   (e.g. `aorus-5090-egpu`'s `remove.sh` sets a sentinel
+   to block auto-bind),
+   clear it so nvidia can bind on insmod.
+   Skipped when override is empty or already `nvidia`.
+3. **BAR1 verify** —
    confirm BAR1 = 32 GiB;
    refuse to load if smaller (catches missing kernel cmdline tuning).
-3. **Build** —
+4. **Build** —
    compile the patched module against the host's running kernel
    using `/lib/modules/$(uname -r)/build` bind-mounted from the host.
-4. **Load** —
+5. **Load** —
    `insmod nvidia.ko` + `insmod nvidia-uvm.ko` directly into the host kernel.
-5. **UVM device files** —
+6. **UVM device files** —
    `nvidia-modprobe -u -c 0` materialises `/dev/nvidia-uvm-tools`.
 
 Then `sleep infinity` as a "container of intent" —
