@@ -36,23 +36,64 @@ on the host):
 Then `sleep infinity` as a "container of intent" — exit triggers the pod restart
 policy.
 
-## Companion repo (host-side prerequisites)
+## Architecture
 
-This image only handles the kernel module.
-The host-side configuration (kernel cmdline, udev rules, modprobe.d, Lever H17
-LnkCtl2 cap) lives in
-[`apnex/aorus-5090-egpu`](https://github.com/apnex/aorus-5090-egpu).
-Apply the host-side bring-up there before running this container.
+This container is **Layer 2 of three**.
+A correctly-deployed system has:
 
-| Concern | Where it lives |
-|---|---|
-| Kernel cmdline (`iommu=off`, etc.) | host (`grubby`, set per `aorus-5090-egpu` apply.sh) |
-| udev rules (`/dev/nvidia*` permissions, autoload guard) | host (`aorus-5090-egpu` udev rules) |
-| `/etc/modprobe.d/` blacklists + options | host |
-| Lever H17 LnkCtl2 cap (`bridge-link-cap` service) | host (must run BEFORE this container) |
-| `nvidia-persistenced` (warmup-latency optimisation) | host |
-| **Kernel module build + load** | **this container** |
-| **`nvidia-modprobe -u -c 0`** | **this container** |
+- **Layer 1 — Host bring-up**
+  (set once at install; must be in place before docker starts):
+  kernel cmdline,
+  bridge LnkCtl2 cap (Lever H17, runs `Before=docker.service`),
+  modprobe.d production NVreg options
+  (including `NVreg_TbEgpuLeverMRecoverEnable=1`),
+  Vulkan/EGL/OpenCL ICD disable.
+- **Layer 2 — Driver injector container** (this repo):
+  builds patched `nvidia.ko` against host kernel-devel,
+  loads it via `modprobe` so production modprobe.d options apply,
+  fixes `/dev/nvidia*` permissions,
+  optionally runs `nvidia-persistenced`.
+- **Layer 3 — Workload container**
+  (vLLM, OpenCode runtime, etc.):
+  pure userspace, depends on `/dev/nvidia*` working.
+
+See [`docs/architecture.md`](docs/architecture.md) for the full layered diagram,
+component-ownership table,
+and install / uninstall / reboot-survival workflows.
+That doc also tracks the gaps between the current implementation and
+the target architecture (Layer 1 install scripts pending,
+container currently uses `insmod` not `modprobe`, etc.).
+
+> **Different geometry from
+> [`apnex/aorus-5090-egpu`](https://github.com/apnex/aorus-5090-egpu).**
+> That repo deploys the same patched driver via host systemd services
+> (no container).
+> Pick **one** of the two patterns —
+> they are not meant to coexist on the same host.
+
+## Companion repo (host-side prerequisites — current state)
+
+The Layer 1 install scripts have not yet been written for this repo
+(tracked as Gap #2 in `docs/architecture.md`).
+Until they ship,
+the host-side configuration is documented in the
+[Prerequisites](#prerequisites) section below
+or can be borrowed from
+[`apnex/aorus-5090-egpu`](https://github.com/apnex/aorus-5090-egpu)
+**provided you understand that mixing the two repos' install paths is
+not supported.**
+
+| Concern | Layer | Owner today |
+|---|---|---|
+| Kernel cmdline (`iommu=off`, etc.) | 1 | manual `grubby` per Prerequisites below |
+| udev rules (`/dev/nvidia*` group) | 1 | manual per Prerequisites below |
+| `/etc/modprobe.d/` blacklists + NVreg options | 1 | **TODO — gap #1, container currently uses `insmod` and bypasses these** |
+| Lever H17 LnkCtl2 cap (`bridge-link-cap`) | 1 | **TODO — gap #3, no Layer-1 service shipped here yet** |
+| Vulkan/EGL/OpenCL ICD disable | 1 | TODO |
+| `nvidia-persistenced` | 2 | TODO — not started by container yet |
+| **Kernel module build + load** | **2** | **this container** ✓ |
+| **`nvidia-modprobe -u -c 0`** | **2** | **this container** ✓ |
+| `/dev/nvidia*` perms | 2 | TODO — gap #4, container doesn't chown/chmod yet |
 
 ## Prerequisites
 
