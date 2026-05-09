@@ -1,0 +1,464 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: 2026-05-08
+Subject: [PATCH] AORUS Mode B telemetry — S1 trigger-event AER capture, S2 expanded DIAG sites, S3 Q-watchdog persistent detection state
+
+S1: tb_egpu_dump_aer_trigger_event() helper — reactive AER+DPC+link snapshot
+    called from Q-watchdog detection point AND nv_pci_error_detected.
+    Walks GPU -> immediate bridge -> true root port (via aorus_walk_to_root_port
+    helper) so labels are accurate even on multi-bridge topologies like
+    AORUS hub.
+S2: [DIAG-AER2] follow-up at 4 existing DIAG sites — bridge AER masks,
+    root port AER+RootSta, DPC capability state. Always emitted.
+S3: 3 new sysfs files (tb_egpu_qwatchdog_last_detection_jiffies,
+    last_pmc_boot_0, last_aer_summary) for cross-boot post-mortems.
+
+aorus_walk_to_root_port iterates pci_upstream_bridge until pci_pcie_type
+== PCI_EXP_TYPE_ROOT_PORT (bounded to 8 hops), fixing the original
+"one-hop" approach that landed on the AORUS hub upstream port (02:00.0)
+instead of the actual host root port (00:07.0).
+
+Reactive only. No continuous probing added.
+---
+--- a/kernel-open/nvidia/nv-qwatchdog.h
++++ b/kernel-open/nvidia/nv-qwatchdog.h
+@@ -14,16 +14,39 @@
+ #define _NV_QWATCHDOG_H_
+ 
+ #include <linux/atomic.h>
++#include <linux/types.h>
+ 
+ struct task_struct;
+ struct nv_linux_state_s;
+ typedef struct nv_linux_state_s nv_linux_state_t;
+ 
++/* AORUS Mode B telemetry S3 (2026-05-08): compact AER snapshot recorded
++ * at moment of last Q-watchdog detection. Populated atomically by
++ * tb_egpu_dump_aer_trigger_event() via its `out` parameter. Exposed to
++ * userspace via tb_egpu_qwatchdog_last_aer_summary sysfs. */
++struct tb_egpu_qwatchdog_aer_snapshot
++{
++    u32 gpu_aer_uesta;
++    u32 gpu_aer_cesta;
++    u32 br_aer_uesta;
++    u32 br_aer_cesta;
++    u32 root_aer_uesta;
++    u32 root_aer_cesta;
++    u32 root_rootsta;
++    u16 dpc_status;
++    u8  valid;  /* 0 = never populated; 1 = populated at least once */
++};
++
+ struct tb_egpu_qwatchdog
+ {
+     struct task_struct *thread;
+     atomic_t            cycles;
+     atomic_t            detections;
++
++    /* S3 telemetry — populated on detection events. Read-only once set. */
++    unsigned long       last_detection_jiffies;
++    u32                 last_pmc_boot_0;
++    struct tb_egpu_qwatchdog_aer_snapshot last_aer;
+ };
+ 
+ int  tb_egpu_qwatchdog_init(nv_linux_state_t *nvl);
+--- a/kernel-open/nvidia/nv-qwatchdog.c
++++ b/kernel-open/nvidia/nv-qwatchdog.c
+@@ -50,11 +50,16 @@
+ #include "nv-linux.h"
+ #include "nv-qwatchdog.h"
+ 
++#include "nv-lever-m-recover.h"  /* tb_egpu_dump_aer_trigger_event() */
++
+ #include <linux/kthread.h>
+ #include <linux/delay.h>
+ #include <linux/slab.h>
+ #include <linux/err.h>
+ #include <linux/moduleparam.h>
++#include <linux/jiffies.h>
++#include <linux/device.h>
++#include <linux/sysfs.h>
+ 
+ /* Module parameters */
+ 
+@@ -149,6 +154,15 @@
+                     "subsequent ioctl-path MMIO reads will short-circuit "
+                     "via Q-passive.\n",
+                     boot_0, atomic_read(&qwd->cycles));
++
++                /* AORUS Mode B telemetry S1 + S3 (2026-05-08): on first
++                 * detection of an episode, dump full AER + DPC + link
++                 * state to dmesg AND populate persistent S3 state. Inside
++                 * the latch so it fires once per episode. */
++                qwd->last_detection_jiffies = jiffies;
++                qwd->last_pmc_boot_0        = boot_0;
++                tb_egpu_dump_aer_trigger_event(nvl->pci_dev, "qwatchdog-detect",
++                                              &qwd->last_aer);
+             }
+ 
+             os_pci_set_disconnected(nv->handle);
+@@ -206,6 +220,62 @@
+ static DEVICE_ATTR(tb_egpu_qwatchdog_detections, 0444,
+                    tb_egpu_qwatchdog_detections_show, NULL);
+ 
++/* AORUS Mode B telemetry S3 (2026-05-08): persistent detection state. */
++
++static ssize_t tb_egpu_qwatchdog_last_detection_jiffies_show(
++    struct device *dev, struct device_attribute *attr, char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->qwd)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%lu\n", nvl->qwd->last_detection_jiffies);
++}
++
++static ssize_t tb_egpu_qwatchdog_last_pmc_boot_0_show(
++    struct device *dev, struct device_attribute *attr, char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->qwd)
++        return scnprintf(buf, PAGE_SIZE, "0x00000000\n");
++    return scnprintf(buf, PAGE_SIZE, "0x%08x\n", nvl->qwd->last_pmc_boot_0);
++}
++
++static ssize_t tb_egpu_qwatchdog_last_aer_summary_show(
++    struct device *dev, struct device_attribute *attr, char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    struct tb_egpu_qwatchdog_aer_snapshot *s;
++
++    if (!nvl || !nvl->qwd)
++        return scnprintf(buf, PAGE_SIZE, "(no qwatchdog state)\n");
++    s = &nvl->qwd->last_aer;
++    if (!s->valid)
++        return scnprintf(buf, PAGE_SIZE,
++            "(no detection event yet — qwatchdog has run %d cycles)\n",
++            atomic_read(&nvl->qwd->cycles));
++    return scnprintf(buf, PAGE_SIZE,
++        "GPU_AER_UESta=0x%08x  CESta=0x%08x\n"
++        "Br_AER_UESta=0x%08x   CESta=0x%08x\n"
++        "Root_AER_UESta=0x%08x CESta=0x%08x\n"
++        "Root_RootSta=0x%08x   DPC_Status=0x%04x\n"
++        "captured_at_jiffies=%lu pmc_boot_0=0x%08x\n",
++        s->gpu_aer_uesta, s->gpu_aer_cesta,
++        s->br_aer_uesta, s->br_aer_cesta,
++        s->root_aer_uesta, s->root_aer_cesta,
++        s->root_rootsta, s->dpc_status,
++        nvl->qwd->last_detection_jiffies, nvl->qwd->last_pmc_boot_0);
++}
++
++static DEVICE_ATTR(tb_egpu_qwatchdog_last_detection_jiffies, 0444,
++                   tb_egpu_qwatchdog_last_detection_jiffies_show, NULL);
++static DEVICE_ATTR(tb_egpu_qwatchdog_last_pmc_boot_0, 0444,
++                   tb_egpu_qwatchdog_last_pmc_boot_0_show, NULL);
++static DEVICE_ATTR(tb_egpu_qwatchdog_last_aer_summary, 0444,
++                   tb_egpu_qwatchdog_last_aer_summary_show, NULL);
++
+ int tb_egpu_qwatchdog_init(nv_linux_state_t *nvl)
+ {
+     struct tb_egpu_qwatchdog *qwd;
+@@ -258,6 +328,16 @@
+         if (device_create_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_detections) != 0)
+             NV_DEV_PRINTF(NV_DBG_INFO, nv,
+                 "AORUS Lever Q-watchdog: device_create_file(detections) failed\n");
++        /* S3 telemetry sysfs (2026-05-08). */
++        if (device_create_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_last_detection_jiffies) != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "AORUS Lever Q-watchdog: device_create_file(last_detection_jiffies) failed\n");
++        if (device_create_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_last_pmc_boot_0) != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "AORUS Lever Q-watchdog: device_create_file(last_pmc_boot_0) failed\n");
++        if (device_create_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_last_aer_summary) != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "AORUS Lever Q-watchdog: device_create_file(last_aer_summary) failed\n");
+     }
+ 
+     return 0;
+@@ -275,6 +355,10 @@
+     {
+         device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_cycles);
+         device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_detections);
++        /* S3 telemetry sysfs cleanup (2026-05-08). */
++        device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_last_detection_jiffies);
++        device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_last_pmc_boot_0);
++        device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_qwatchdog_last_aer_summary);
+     }
+ 
+     qwd = nvl->qwd;
+--- a/kernel-open/nvidia/nv-lever-m-recover.h
++++ b/kernel-open/nvidia/nv-lever-m-recover.h
+@@ -114,4 +114,15 @@
+  */
+ void tb_egpu_lever_m_diag_dump(nv_linux_state_t *nvl, const char *site);
+ 
++/* AORUS Mode B telemetry S1 (2026-05-08): trigger-event AER capture.
++ * Reactive helper called from Q-watchdog detection and AER error_detected
++ * callback. Walks GPU -> bridge -> root_port (via aorus_walk_to_root_port
++ * in the .c file), dumps full AER + DPC + link state in one printk block.
++ * `out` (optional) receives a compact snapshot for sysfs persistence (S3). */
++struct pci_dev;
++struct tb_egpu_qwatchdog_aer_snapshot;  /* full def in nv-qwatchdog.h */
++void tb_egpu_dump_aer_trigger_event(struct pci_dev *gpu_pdev,
++                                   const char *trigger,
++                                   struct tb_egpu_qwatchdog_aer_snapshot *out);
++
+ #endif /* _NV_LEVER_M_RECOVER_H_ */
+--- a/kernel-open/nvidia/nv-lever-m-recover.c
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -44,6 +44,7 @@
+ #include "nv-lever-m-recover.h"
+ #include "nv-linux.h"
+ #include "nv-pci-types.h"
++#include "nv-qwatchdog.h"  /* tb_egpu_qwatchdog_aer_snapshot */
+ 
+ #include <linux/module.h>
+ #include <linux/workqueue.h>
+@@ -54,6 +55,8 @@
+ #include <linux/device.h>
+ #include <linux/io.h>      /* ioremap, ioread32, iounmap */
+ #include <linux/types.h>
++#include <linux/pci.h>
++#include <linux/pci_regs.h>
+ 
+ /* WPR2 status register: NV_HUBMMU0_PRI_BASE + NV_HUBMMU_PRI_MMU_WPR2_ADDR_HI
+  * for Blackwell GB100/GB202 (per published headers
+@@ -207,6 +210,166 @@
+  * gated behind a kill switch. For now it's always-on — no perf concern,
+  * runs ~4 times per boot + once per persistenced retry.
+  */
++/* AORUS Mode B telemetry helpers (S1, 2026-05-08).
++ * Walker: walks pci_upstream_bridge from `start` until it finds a device
++ * whose Express type is ROOT_PORT, or runs out of parents. Returns NULL
++ * if not found within 8 hops. Fixes the original "one-hop" bug that
++ * landed on the AORUS hub upstream port instead of the host root port. */
++static struct pci_dev *aorus_walk_to_root_port(struct pci_dev *start)
++{
++    struct pci_dev *p = start;
++    int hops = 0;
++    while (p && hops < 8) {
++        if (pci_pcie_type(p) == PCI_EXP_TYPE_ROOT_PORT)
++            return p;
++        p = pci_upstream_bridge(p);
++        hops++;
++    }
++    return NULL;
++}
++
++/* Read DPC capability registers if present. */
++static void aorus_read_dpc_state(struct pci_dev *pdev,
++                                  bool *present_out,
++                                  u16 *dpc_status_out,
++                                  u16 *dpc_ctl_out)
++{
++    int dpc_pos;
++    u16 stat = 0, ctl = 0;
++    *present_out = false;
++    *dpc_status_out = 0;
++    *dpc_ctl_out = 0;
++    if (!pdev) return;
++    dpc_pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_DPC);
++    if (!dpc_pos) return;
++    *present_out = true;
++    (void)pci_read_config_word(pdev, dpc_pos + 0x04, &ctl);
++    (void)pci_read_config_word(pdev, dpc_pos + 0x06, &stat);
++    *dpc_ctl_out = ctl;
++    *dpc_status_out = stat;
++}
++
++/* Read full AER status set for a device. */
++static void aorus_read_aer_full(struct pci_dev *pdev, int *pos_out,
++                                 u32 *uesta, u32 *uemsk, u32 *uesvrt,
++                                 u32 *cesta, u32 *cemsk,
++                                 u32 hdrlog[4],
++                                 u32 *rootcmd, u32 *rootsta, u32 *errsrc)
++{
++    *pos_out = 0;
++    *uesta = *uemsk = *uesvrt = *cesta = *cemsk = 0;
++    if (hdrlog) { hdrlog[0] = hdrlog[1] = hdrlog[2] = hdrlog[3] = 0; }
++    if (rootcmd) *rootcmd = 0;
++    if (rootsta) *rootsta = 0;
++    if (errsrc)  *errsrc  = 0;
++    if (!pdev) return;
++    *pos_out = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_ERR);
++    if (!*pos_out) return;
++    (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_UNCOR_STATUS, uesta);
++    (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_UNCOR_MASK,   uemsk);
++    (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_UNCOR_SEVER,  uesvrt);
++    (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_COR_STATUS,   cesta);
++    (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_COR_MASK,     cemsk);
++    if (hdrlog) {
++        (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_HEADER_LOG + 0,  &hdrlog[0]);
++        (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_HEADER_LOG + 4,  &hdrlog[1]);
++        (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_HEADER_LOG + 8,  &hdrlog[2]);
++        (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_HEADER_LOG + 12, &hdrlog[3]);
++    }
++    if (rootcmd) (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_ROOT_COMMAND, rootcmd);
++    if (rootsta) (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_ROOT_STATUS, rootsta);
++    if (errsrc)  (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_ROOT_ERR_SRC, errsrc);
++}
++
++/* AORUS Mode B telemetry S1 (2026-05-08): trigger-event AER capture.
++ * Walks GPU -> immediate bridge -> true root port (via walker), reads
++ * full AER + DPC + link state, emits one printk block. */
++void tb_egpu_dump_aer_trigger_event(struct pci_dev *gpu_pdev,
++                                   const char *trigger,
++                                   struct tb_egpu_qwatchdog_aer_snapshot *out)
++{
++    struct pci_dev *bridge, *root;
++    u16 gpu_lnksta = 0xffff, br_lnksta = 0xffff, root_lnksta = 0xffff;
++    u16 gpu_devsta = 0xffff, br_devsta = 0xffff, root_devsta = 0xffff;
++    int gpu_aer_pos = 0, br_aer_pos = 0, root_aer_pos = 0;
++    u32 gpu_uesta=0, gpu_uemsk=0, gpu_uesvrt=0, gpu_cesta=0, gpu_cemsk=0;
++    u32 gpu_hdrlog[4] = {0,0,0,0};
++    u32 br_uesta=0, br_uemsk=0, br_uesvrt=0, br_cesta=0, br_cemsk=0;
++    u32 root_uesta=0, root_uemsk=0, root_uesvrt=0, root_cesta=0, root_cemsk=0;
++    u32 root_rootcmd=0, root_rootsta=0, root_errsrc=0;
++    bool dpc_present = false;
++    u16  dpc_status = 0, dpc_ctl = 0;
++    const char *trig = trigger ? trigger : "?";
++
++    if (!gpu_pdev) {
++        pr_info("AORUS Mode-B Trigger [event=%s]: gpu_pdev=NULL\n", trig);
++        return;
++    }
++
++    bridge = pci_upstream_bridge(gpu_pdev);
++    /* Walk to TRUE host root port, not just immediate grandparent. */
++    root   = aorus_walk_to_root_port(gpu_pdev);
++
++    (void)pcie_capability_read_word(gpu_pdev, PCI_EXP_LNKSTA, &gpu_lnksta);
++    (void)pcie_capability_read_word(gpu_pdev, PCI_EXP_DEVSTA, &gpu_devsta);
++    aorus_read_aer_full(gpu_pdev, &gpu_aer_pos,
++                        &gpu_uesta, &gpu_uemsk, &gpu_uesvrt, &gpu_cesta, &gpu_cemsk,
++                        gpu_hdrlog, NULL, NULL, NULL);
++    if (bridge) {
++        (void)pcie_capability_read_word(bridge, PCI_EXP_LNKSTA, &br_lnksta);
++        (void)pcie_capability_read_word(bridge, PCI_EXP_DEVSTA, &br_devsta);
++        aorus_read_aer_full(bridge, &br_aer_pos,
++                            &br_uesta, &br_uemsk, &br_uesvrt, &br_cesta, &br_cemsk,
++                            NULL, NULL, NULL, NULL);
++    }
++    if (root) {
++        (void)pcie_capability_read_word(root, PCI_EXP_LNKSTA, &root_lnksta);
++        (void)pcie_capability_read_word(root, PCI_EXP_DEVSTA, &root_devsta);
++        aorus_read_aer_full(root, &root_aer_pos,
++                            &root_uesta, &root_uemsk, &root_uesvrt, &root_cesta, &root_cemsk,
++                            NULL, &root_rootcmd, &root_rootsta, &root_errsrc);
++        aorus_read_dpc_state(root, &dpc_present, &dpc_status, &dpc_ctl);
++    }
++
++    pr_info("AORUS Mode-B Trigger [event=%s]:\n"
++            "  GPU(%s)    LnkSta=0x%04x DevSta=0x%04x  AER UESta=0x%08x UEMsk=0x%08x UESvrt=0x%08x CESta=0x%08x CEMsk=0x%08x\n"
++            "             AER HdrLog=%08x_%08x_%08x_%08x\n"
++            "  Bridge(%s) LnkSta=0x%04x DevSta=0x%04x  AER UESta=0x%08x UEMsk=0x%08x UESvrt=0x%08x CESta=0x%08x CEMsk=0x%08x\n"
++            "  Root(%s)   LnkSta=0x%04x DevSta=0x%04x  AER UESta=0x%08x UEMsk=0x%08x CESta=0x%08x CEMsk=0x%08x\n"
++            "             RootCmd=0x%08x RootSta=0x%08x ErrorSrc=0x%08x\n"
++            "  DPC: %s\n",
++            trig,
++            pci_name(gpu_pdev), gpu_lnksta, gpu_devsta,
++            gpu_uesta, gpu_uemsk, gpu_uesvrt, gpu_cesta, gpu_cemsk,
++            gpu_hdrlog[0], gpu_hdrlog[1], gpu_hdrlog[2], gpu_hdrlog[3],
++            bridge ? pci_name(bridge) : "NULL",
++            br_lnksta, br_devsta,
++            br_uesta, br_uemsk, br_uesvrt, br_cesta, br_cemsk,
++            root ? pci_name(root) : "NULL",
++            root_lnksta, root_devsta,
++            root_uesta, root_uemsk, root_cesta, root_cemsk,
++            root_rootcmd, root_rootsta, root_errsrc,
++            dpc_present ? "(see follow-up)" : "absent");
++    if (dpc_present) {
++        pr_info("AORUS Mode-B Trigger [event=%s]: DPC Status=0x%04x Ctl=0x%04x\n",
++                trig, dpc_status, dpc_ctl);
++    }
++
++    if (out) {
++        out->gpu_aer_uesta  = gpu_uesta;
++        out->gpu_aer_cesta  = gpu_cesta;
++        out->br_aer_uesta   = br_uesta;
++        out->br_aer_cesta   = br_cesta;
++        out->root_aer_uesta = root_uesta;
++        out->root_aer_cesta = root_cesta;
++        out->root_rootsta   = root_rootsta;
++        out->dpc_status     = dpc_status;
++        out->valid          = 1;
++    }
++    (void)gpu_aer_pos; (void)br_aer_pos; (void)root_aer_pos;
++}
++EXPORT_SYMBOL(tb_egpu_dump_aer_trigger_event);
++
+ void tb_egpu_lever_m_diag_dump(nv_linux_state_t *nvl, const char *site)
+ {
+     nv_state_t   *nv;
+@@ -363,6 +526,56 @@
+                 gpu_aer_hdr[0], gpu_aer_hdr[1], gpu_aer_hdr[2], gpu_aer_hdr[3],
+                 (gpu_aer_capctl & 0x1f));
+         }
++
++        /* AORUS Mode B telemetry S2 (2026-05-08): expanded DIAG-AER2 with
++         * actual host root port AER + DPC + bridge masks. Always emitted. */
++        {
++            struct pci_dev *root_pdev = pdev ? aorus_walk_to_root_port(pdev) : NULL;
++            int br_aer_pos2 = 0, root_aer_pos2 = 0;
++            u32 br_uemsk2 = 0, br_cemsk2 = 0;
++            u32 root_uesta2 = 0, root_uemsk2 = 0, root_cesta2 = 0, root_cemsk2 = 0;
++            u32 root_rootsta2 = 0;
++            u16 root_lnksta2 = 0xffff;
++            bool dpc_p2 = false;
++            u16 dpc_s2 = 0, dpc_c2 = 0;
++
++            if (parent) {
++                br_aer_pos2 = pci_find_ext_capability(parent, PCI_EXT_CAP_ID_ERR);
++                if (br_aer_pos2) {
++                    (void)pci_read_config_dword(parent, br_aer_pos2 + PCI_ERR_UNCOR_MASK, &br_uemsk2);
++                    (void)pci_read_config_dword(parent, br_aer_pos2 + PCI_ERR_COR_MASK,   &br_cemsk2);
++                }
++            }
++            if (root_pdev) {
++                (void)pcie_capability_read_word(root_pdev, PCI_EXP_LNKSTA, &root_lnksta2);
++                root_aer_pos2 = pci_find_ext_capability(root_pdev, PCI_EXT_CAP_ID_ERR);
++                if (root_aer_pos2) {
++                    (void)pci_read_config_dword(root_pdev, root_aer_pos2 + PCI_ERR_UNCOR_STATUS, &root_uesta2);
++                    (void)pci_read_config_dword(root_pdev, root_aer_pos2 + PCI_ERR_UNCOR_MASK,   &root_uemsk2);
++                    (void)pci_read_config_dword(root_pdev, root_aer_pos2 + PCI_ERR_COR_STATUS,   &root_cesta2);
++                    (void)pci_read_config_dword(root_pdev, root_aer_pos2 + PCI_ERR_COR_MASK,     &root_cemsk2);
++                    (void)pci_read_config_dword(root_pdev, root_aer_pos2 + PCI_ERR_ROOT_STATUS,  &root_rootsta2);
++                }
++                aorus_read_dpc_state(root_pdev, &dpc_p2, &dpc_s2, &dpc_c2);
++            }
++
++            NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++                "AORUS Lever M-recover [DIAG-AER2]: site=%-18s "
++                "Br_UncMsk=0x%08x Br_CorMsk=0x%08x "
++                "Root=%s Root_LnkSta=0x%04x "
++                "Root_UESta=0x%08x Root_UEMsk=0x%08x Root_CESta=0x%08x Root_CEMsk=0x%08x Root_RootSta=0x%08x "
++                "DPC=%s\n",
++                site,
++                br_uemsk2, br_cemsk2,
++                root_pdev ? pci_name(root_pdev) : "NULL", root_lnksta2,
++                root_uesta2, root_uemsk2, root_cesta2, root_cemsk2, root_rootsta2,
++                dpc_p2 ? "(see follow-up)" : "absent");
++            if (dpc_p2) {
++                NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++                    "AORUS Lever M-recover [DIAG-AER2]: site=%-18s DPC Status=0x%04x Ctl=0x%04x\n",
++                    site, dpc_s2, dpc_c2);
++            }
++        }
+     }
+ }
+ 
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -2845,6 +2845,11 @@
+                   NV_PCI_DOMAIN_NUMBER(pci_dev), NV_PCI_BUS_NUMBER(pci_dev),
+                   NV_PCI_SLOT_NUMBER(pci_dev), PCI_FUNC(pci_dev->devfn),
+                   (int)state);
++
++        /* AORUS Mode B telemetry S1 (2026-05-08): on first AER fire, dump
++         * full AER + DPC + link state. Reactive — fires only when this
++         * callback runs. Gated on log-once latch. */
++        tb_egpu_dump_aer_trigger_event(pci_dev, "error-handler", NULL);
+     }
+ 
+     return PCI_ERS_RESULT_DISCONNECT;

@@ -1,0 +1,26 @@
+diff --git a/src/nvidia/src/kernel/diagnostics/nv_debug_dump.c b/src/nvidia/src/kernel/diagnostics/nv_debug_dump.c
+index d76f255a..98651b64 100644
+--- a/src/nvidia/src/kernel/diagnostics/nv_debug_dump.c
++++ b/src/nvidia/src/kernel/diagnostics/nv_debug_dump.c
+@@ -270,6 +270,21 @@ nvdDumpAllEngines_IMPL
+         (prbEncBufLeft(pPrbEnc) > 0) && (pEngineCallback != NULL);
+         pEngineCallback = pEngineCallback->pNext)
+     {
++        //
++        // AORUS Lever J-2 patch (2026-05-03):
++        // Per-iteration guard. Existing PDB_PROP_GPU_INACCESSIBLE check
++        // below sets advisory flag but does NOT break the loop. Add
++        // explicit break here, also check sibling PDB_PROP_GPU_IS_LOST.
++        //
++        if (pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST) ||
++            pGpu->getProperty(pGpu, PDB_PROP_GPU_INACCESSIBLE))
++        {
++            NV_PRINTF(LEVEL_ERROR,
++                      "AORUS Lever J-2 (nvdDumpAllEngines): GPU lost/inaccessible, skipping remaining engine dumps\n");
++            pNvDumpState->bGpuAccessible = NV_FALSE;
++            break;
++        }
++
+         NV_CHECK_OK_OR_CAPTURE_FIRST_ERROR(nvStatus, LEVEL_ERROR,
+             nvdEngineDumpCallbackHelper(pGpu, pPrbEnc, pNvDumpState, pEngineCallback));
+ 

@@ -1,0 +1,75 @@
+diff --git a/src/nvidia/arch/nvalloc/unix/src/os.c b/src/nvidia/arch/nvalloc/unix/src/os.c
+--- a/src/nvidia/arch/nvalloc/unix/src/os.c
++++ b/src/nvidia/arch/nvalloc/unix/src/os.c
+@@ -27,6 +27,7 @@
+ #include <os/os.h>
+ #include <nvos.h>
+ #include <osapi.h>
++#include <nv_ref.h>                 // AORUS Lever Q-active: NV_PMC_BOOT_0 for verification read
+ #include <ctrl/ctrl0000/ctrl0000gpu.h>
+ #include <ctrl/ctrl0000/ctrl0000unix.h>
+ #include <class/cl90cd.h> // NV_EVENT_BUFFER_BIND
+@@ -1967,6 +1968,63 @@
+     else
+         retval = NV_PRIV_REG_RD32(pMapping->gpuNvAddr, thisAddress);
+ 
++    //
++    // AORUS Lever Q-active (2026-05-04, Phase 1b): post-read sanity
++    // check. If the read returned 0xFFFFFFFF, the bus may have just
++    // died — verify by reading NV_PMC_BOOT_0 directly. If THAT also
++    // returns 0xFFFFFFFF (not the saved boot ID), the GPU is genuinely
++    // gone. Declare it lost via gpuSetDisconnectedProperties (sets
++    // PDB_PROP_GPU_IS_LOST so Q-passive short-circuits subsequent
++    // reads) AND propagate the disconnect state kernel-wide via
++    // os_pci_set_disconnected (sets pci_dev->error_state =
++    // pci_channel_io_perm_failure so other kernel subsystems also
++    // fail fast).
++    //
++    // The verification PMC_BOOT_0 read uses direct NV_PRIV_REG_RD32
++    // (bypasses our chokepoint to avoid recursion). If the bus is
++    // dead, this read takes one hardware-completion-timeout
++    // (~50ms) but happens at most ONCE per failure event due to the
++    // first-fire latch, after which Q-passive prevents any further
++    // hung reads.
++    //
++    // Skip on healthy data (retval != 0xFFFFFFFF). Skip if pGpu/nv
++    // not available (boot-time path). Skip if GPU is already known
++    // lost (re-entrant safety; we'd be redundant).
++    //
++    if (retval == 0xFFFFFFFFU && pGpu)
++    {
++        nv_state_t *nv = NV_GET_NV_STATE(pGpu);
++        if (nv && nv->regs && nv->regs->map_u &&
++            !pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST))
++        {
++            nv_priv_t *nvp = NV_GET_NV_PRIV(nv);
++            NvU32 pmc_boot_0_now = NV_PRIV_REG_RD32(nv->regs->map_u, NV_PMC_BOOT_0);
++            if (nvp != NULL && pmc_boot_0_now != nvp->pmc_boot_0)
++            {
++                static int s_tb_egpu_lever_q_active_logged = 0;
++                NvBool bOsDisconnectedPre = os_pci_is_disconnected(nv->handle);
++                NvBool bGpuLostPre = pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST);
++                if (!s_tb_egpu_lever_q_active_logged)
++                {
++                    s_tb_egpu_lever_q_active_logged = 1;
++                    NV_PRINTF(LEVEL_ERROR,
++                        "AORUS Lever Q-active: dead-bus DETECTED via post-read sanity check\n"
++                        "  trigger_offset:      0x%08x\n"
++                        "  trigger_value:       0x%08x\n"
++                        "  pmc_boot_0_read:     0x%08x\n"
++                        "  pmc_boot_0_expected: 0x%08x\n"
++                        "  pre_state: os_pci_disconnected=%d, gpu_is_lost=%d\n"
++                        "  actions: gpuSetDisconnectedProperties + os_pci_set_disconnected called\n"
++                        "  All subsequent MMIO reads will short-circuit via Q-passive\n",
++                        thisAddress, retval, pmc_boot_0_now, nvp->pmc_boot_0,
++                        (int)bOsDisconnectedPre, (int)bGpuLostPre);
++                }
++                gpuSetDisconnectedProperties(pGpu);
++                os_pci_set_disconnected(nv->handle);
++            }
++        }
++    }
++
+     return retval;
+ }
+ 

@@ -1,0 +1,38 @@
+diff --git a/src/nvidia/src/kernel/diagnostics/journal.c b/src/nvidia/src/kernel/diagnostics/journal.c
+index ab42cdc7..d114379a 100644
+--- a/src/nvidia/src/kernel/diagnostics/journal.c
++++ b/src/nvidia/src/kernel/diagnostics/journal.c
+@@ -2236,7 +2236,11 @@ _rcdbAddRmGpuDumpCallback
+                 pRcDB->setProperty(pRcDB, PDB_PROP_RCDB_IN_DEFERRED_DUMP_CODEPATH, NV_TRUE);
+ 
+                 status = rcdbAddRmGpuDump(pGpu);
+-                NV_ASSERT(status == NV_OK);
++                // AORUS Lever J-2 patch (2026-05-03):
++                if (status != NV_OK) {
++                    NV_PRINTF(LEVEL_ERROR,
++                              "AORUS Lever J-2 (journal.c:2239): rcdbAddRmGpuDump returned 0x%x in deferred dump path\n", status);
++                }
+ 
+                 pRcDB->setProperty(pRcDB, PDB_PROP_RCDB_IN_DEFERRED_DUMP_CODEPATH, NV_FALSE);
+ 
+@@ -2914,6 +2918,20 @@ rcdbAddRmGpuDump
+     NvU32               bufferUsed;
+     NvU8               *pBuf               = NULL;
+ 
++    //
++    // AORUS Lever J-2 patch (2026-05-03):
++    // Short-circuit on PDB_PROP_GPU_IS_LOST. A GPU known to be lost has
++    // nothing to dump; attempting to iterate engine callbacks via
++    // nvdDumpAllEngines just exercises the GSP-RPC failure cascade that
++    // deadlocks the kernel at journal.c:2239.
++    //
++    if (pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST))
++    {
++        NV_PRINTF(LEVEL_ERROR,
++                  "AORUS Lever J-2 (rcdbAddRmGpuDump): GPU lost, skipping crash dump (was deadlock locus)\n");
++        return NV_OK;
++    }
++
+     if (pGpu->getProperty(pGpu, PDB_PROP_GPU_TEGRA_SOC_NVDISPLAY))
+     {
+         return NV_ERR_NOT_SUPPORTED;

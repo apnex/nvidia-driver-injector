@@ -1,0 +1,90 @@
+diff --git a/kernel-open/common/inc/os-interface.h b/kernel-open/common/inc/os-interface.h
+index b71946b2..07280570 100644
+--- a/kernel-open/common/inc/os-interface.h
++++ b/kernel-open/common/inc/os-interface.h
+@@ -108,6 +108,14 @@ NV_STATUS   NV_API_CALL  os_pci_write_word                (void *, NvU32, NvU16)
+ NV_STATUS   NV_API_CALL  os_pci_write_dword               (void *, NvU32, NvU32);
+ NvBool      NV_API_CALL  os_pci_remove_supported          (void);
+ void        NV_API_CALL  os_pci_remove                    (void *);
++//
++// AORUS Lever Q (2026-05-04): two helpers used by Lever Q-passive and
++// Q-active in osDevReadReg032/016/008 to detect & propagate
++// disconnected device state without RM-side code including
++// <linux/pci.h>. See docs/lever-Q-design.md.
++//
++NvBool      NV_API_CALL  os_pci_is_disconnected           (void *);
++void        NV_API_CALL  os_pci_set_disconnected          (void *);
+ void*       NV_API_CALL  os_map_kernel_space              (NvU64, NvU64, NvU32);
+ void        NV_API_CALL  os_unmap_kernel_space            (void *, NvU64);
+ #if defined(NV_VMWARE)
+diff --git a/kernel-open/nvidia/os-pci.c b/kernel-open/nvidia/os-pci.c
+index 4190c59e..46f459a8 100644
+--- a/kernel-open/nvidia/os-pci.c
++++ b/kernel-open/nvidia/os-pci.c
+@@ -147,6 +147,47 @@ void NV_API_CALL os_pci_remove(
+     pci_stop_and_remove_bus_device(handle);
+ }
+ 
++//
++// AORUS Lever Q (2026-05-04, Phase 1b): Linux MMIO read protection
++// helpers. Wrap the kernel's pci_dev_is_disconnected() inline (in
++// <linux/pci.h>) and a WRITE_ONCE update to dev->error_state for use
++// by RM-side code in src/nvidia/arch/nvalloc/unix/src/os.c. Keeps the
++// layering boundary clean: only kernel-open includes <linux/pci.h>.
++//
++// See docs/lever-Q-design.md for the full design rationale.
++//
++
++NvBool NV_API_CALL os_pci_is_disconnected(
++    void *handle
++)
++{
++    struct pci_dev *pdev = (struct pci_dev *) handle;
++    if (!pdev)
++        return NV_FALSE;
++    return pci_dev_is_disconnected(pdev) ? NV_TRUE : NV_FALSE;
++}
++
++void NV_API_CALL os_pci_set_disconnected(
++    void *handle
++)
++{
++    struct pci_dev *pdev = (struct pci_dev *) handle;
++    if (!pdev)
++        return;
++    //
++    // pci_channel_io_perm_failure is a sink state — once set, no
++    // transitions out — so a non-atomic WRITE_ONCE is race-safe even if
++    // AER is concurrently transitioning the device through other states.
++    // The kernel's own pci_dev_is_disconnected() inline reads via
++    // READ_ONCE, so this matches the kernel's pattern.
++    //
++    // Linux 6.x has pci_dev_set_io_state() in drivers/pci/pci.c but it
++    // is private (not exported). Reproducing the relevant write here is
++    // the cleanest module-friendly equivalent.
++    //
++    WRITE_ONCE(pdev->error_state, pci_channel_io_perm_failure);
++}
++
+ NV_STATUS NV_API_CALL
+ os_enable_pci_req_atomics(
+     void *handle,
+diff --git a/src/nvidia/arch/nvalloc/unix/include/os-interface.h b/src/nvidia/arch/nvalloc/unix/include/os-interface.h
+index 2a3612f2..f9e0ec04 100644
+--- a/src/nvidia/arch/nvalloc/unix/include/os-interface.h
++++ b/src/nvidia/arch/nvalloc/unix/include/os-interface.h
+@@ -108,6 +108,14 @@ NV_STATUS   NV_API_CALL  os_pci_write_word                (void *, NvU32, NvU16)
+ NV_STATUS   NV_API_CALL  os_pci_write_dword               (void *, NvU32, NvU32);
+ NvBool      NV_API_CALL  os_pci_remove_supported          (void);
+ void        NV_API_CALL  os_pci_remove                    (void *);
++//
++// AORUS Lever Q (2026-05-04): two helpers used by Lever Q-passive and
++// Q-active in osDevReadReg032/016/008 to detect & propagate
++// disconnected device state without RM-side code including
++// <linux/pci.h>. See docs/lever-Q-design.md.
++//
++NvBool      NV_API_CALL  os_pci_is_disconnected           (void *);
++void        NV_API_CALL  os_pci_set_disconnected          (void *);
+ void*       NV_API_CALL  os_map_kernel_space              (NvU64, NvU64, NvU32);
+ void        NV_API_CALL  os_unmap_kernel_space            (void *, NvU64);
+ NV_STATUS   NV_API_CALL  os_flush_cpu_cache_all           (void);

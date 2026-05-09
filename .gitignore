@@ -1,0 +1,26 @@
+# Build artefacts
+*.ko
+*.ko.xz
+*.o
+*.mod
+*.mod.c
+.tmp_versions/
+Module.symvers
+modules.order
+
+# Build/CI scratch
+build/
+.cache/
+
+# Editor / patch-tool detritus
+*.swp
+*.swo
+*~
+*.orig
+*.rej
+
+# Local docker compose state
+.env
+
+# nvidia-open-src checkout (fetched at image-build time)
+nvidia-open-gpu-kernel-modules/

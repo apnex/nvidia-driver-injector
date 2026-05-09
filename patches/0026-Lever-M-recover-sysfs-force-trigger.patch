@@ -1,0 +1,106 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: 2026-05-08
+Subject: [PATCH] AORUS Patch 0026 — sysfs tb_egpu_lever_m_force_trigger for Phase 3 testing
+
+Adds a write-only sysfs file (mode 0200) on the GPU pdev that, when
+written with a non-zero value, calls tb_egpu_lever_m_trigger_post_rminit_fail()
+directly — as if the post-rmInit-FAIL hook in nv.c had fired.
+
+Motivation: the post-rmInit-FAIL hook only fires when rm_init_adapter
+actually returns failure. On a healthy current stack (iommu=off,
+H9a retired, UncMaskClear deployed) cold-cold-boots succeed and
+rm_init_adapter naturally completes, so NVreg_TbEgpuLeverMTestForceTrigger=1
+alone has nothing to override — that flag controls the WPR2-clear branch
+*inside* the trigger function but cannot make the function itself be
+called. Phase 3 of the design test plan needs to deliberately exercise
+the recovery action without waiting for natural occurrence.
+
+Usage:
+  echo 1 > /sys/bus/pci/devices/0000:04:00.0/tb_egpu_lever_m_force_trigger
+
+The trigger function still applies all H1/H2/Enable gates internally;
+if Enable=0, lever_m=NULL, or rate-limited, this is a no-op. Combined
+with cmdline NVreg_TbEgpuLeverMRecoverEnable=1 +
+NVreg_TbEgpuLeverMTestForceTrigger=1 the full recovery path executes:
+schedule_work -> pci_reset_bus -> kernel slot_reset -> kernel resume.
+
+Mode 0200 (root-only write). Writing 0 is a no-op.
+
+Refs: docs/lever-m-recover-commit3-hardening-design.md Phase 3.
+---
+--- a/kernel-open/nvidia/nv-lever-m-recover.c
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -363,6 +363,55 @@
+ static DEVICE_ATTR(tb_egpu_lever_m_last_fire_jiffies, 0444,
+                    tb_egpu_lever_m_last_fire_jiffies_show, NULL);
+ 
++/* Patch 0026 (Phase 3 test path) — write-only sysfs trigger.
++ *
++ *   echo 1 > /sys/bus/pci/devices/0000:04:00.0/tb_egpu_lever_m_force_trigger
++ *
++ * Calls tb_egpu_lever_m_trigger_post_rminit_fail() directly, as if the
++ * post-rmInit-FAIL hook in nv.c had fired. The trigger function still
++ * applies all H1/H2/Enable gates internally; if Enable=0 it's a no-op,
++ * if rate-limited it defers, etc. Combined with NVreg_TbEgpuLever-
++ * MTestForceTrigger=1 (which overrides the WPR2-clear branch inside
++ * the trigger function), this exercises the full recovery path on a
++ * healthy system without having to deliberately fail rm_init_adapter.
++ *
++ * Mode 0200 (root write only). Writing 0 is a no-op so the file can
++ * be safely tab-completed/echoed without firing.
++ */
++static ssize_t tb_egpu_lever_m_force_trigger_store(struct device *dev,
++                                                  struct device_attribute *attr,
++                                                  const char *buf, size_t count)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl;
++    unsigned long val;
++    int rc;
++
++    if (!pdev)
++        return -ENODEV;
++
++    nvl = pci_get_drvdata(pdev);
++    if (!nvl)
++        return -ENODEV;
++
++    rc = kstrtoul(buf, 0, &val);
++    if (rc != 0)
++        return rc;
++
++    if (val == 0)
++        return count;
++
++    nv_printf(NV_DBG_ERRORS,
++        "AORUS Lever M-recover: sysfs force_trigger fired (val=%lu) — "
++        "invoking trigger as if from post-rmInit-FAIL\n", val);
++    (void)tb_egpu_lever_m_trigger_post_rminit_fail(nvl);
++
++    return count;
++}
++
++static DEVICE_ATTR(tb_egpu_lever_m_force_trigger, 0200,
++                   NULL, tb_egpu_lever_m_force_trigger_store);
++
+ /* Diagnostic telemetry helper (2026-05-06).
+  *
+  * Reads PMC_BOOT_0 (bus-alive sanity) and WPR2_ADDR_HI (stuck check) via
+@@ -1162,6 +1211,9 @@
+         if (device_create_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_last_fire_jiffies) != 0)
+             NV_DEV_PRINTF(NV_DBG_INFO, nv,
+                 "AORUS Lever M-recover: device_create_file(last_fire_jiffies) failed\n");
++        if (device_create_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_force_trigger) != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "AORUS Lever M-recover: device_create_file(force_trigger) failed\n");
+     }
+ 
+     NV_DEV_PRINTF(NV_DBG_INFO, nv,
+@@ -1187,6 +1239,7 @@
+         device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_successes);
+         device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_surrenders);
+         device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_last_fire_jiffies);
++        device_remove_file(&nvl->pci_dev->dev, &dev_attr_tb_egpu_lever_m_force_trigger);
+     }
+ 
+     lm = nvl->lever_m;

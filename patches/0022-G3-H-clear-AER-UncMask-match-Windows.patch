@@ -1,0 +1,126 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: Wed, 7 May 2026 19:45:00 +1000
+Subject: [PATCH] G3-H — clear GPU AER UncMask at probe to match Windows behavior
+
+Targets H17.G3 (Gen3 GSP_LOCKDOWN root cause) per task #106.
+
+Empirical evidence (windows-test/powershell-cmds.txt 2026-05-07):
+  Windows DEVPKEY_PciDevice_Uncorrectable_Error_Mask = 0
+  Windows DEVPKEY_PciDevice_Correctable_Error_Mask   = 0
+  Windows DEVPKEY_PciDevice_ECRC_Errors              = 160 (tolerated)
+
+Linux observed (every probe-end since 2026-05-07):
+  GPU_AER_UncMsk = 0x00400000  (bit 22 = Uncorrectable Internal Error)
+  GPU_AER_Cor    = 0x00002000  (bit 13 = Advisory Non-Fatal)
+
+Mechanism:
+  PCIe r6 §6.2.3.2: when an Uncorrectable error fires AND the
+  corresponding bit in the Uncorrectable Error MASK register is SET,
+  the error is "downgraded" to Advisory Non-Fatal — Cor bit 13 set,
+  UncStatus NOT updated, Header Log NOT captured.
+
+  Linux PCI core (or AORUS BIOS) sets UncMask bit 22 at probe time,
+  which means GPU PCIe IP-internal errors get silently demoted. We
+  see Cor=0x2000 with no Uncor capture and no recovery handler trigger.
+
+  Windows leaves UncMask=0. Internal Errors fire as Uncorrectable
+  Non-Fatal (per UncSeverity which has bit 22 = Non-Fatal), routed
+  through standard AER recovery flow. Windows's nvlddmkm tolerates
+  these via PCIe link layer retry; ECRC errors counted but operation
+  continues.
+
+Implementation:
+  In tb_egpu_lever_m_recover_init() (called from nv_pci_probe), write
+  PCI_ERR_UNCOR_MASK = 0 on the GPU PCIe device. Runs BEFORE the
+  NVreg_TbEgpuLeverMRecoverEnable check, so the unmask is independent
+  of the recovery state machine — even with M-recover disabled, we
+  want errors visible rather than silently demoted.
+
+  Gated by NVreg_TbEgpuUncMaskClearEnable (default 1). Disable via
+  cmdline arg if causes regression.
+
+Decision matrix this enables:
+  - On port B (currently working at Gen3): observe whether UncMask=0
+    changes [DIAG]/[DIAG-AER] pattern. If Internal Error now fires as
+    Unc Non-Fatal (UncStatus bit 22 set, Header Log populated), we
+    have a pcie_error_handlers hook to react.
+  - On port A (currently fails 36 LOCKDOWN at Gen3): test whether
+    the demotion was the cause of the cascade. If port A succeeds
+    with UncMask=0, the silent demotion + lack of recovery hook was
+    the proximate cause. If port A still fails, demotion was NOT
+    the proximate cause.
+
+Aligns with project scope per memory feedback_project_scope_path_a:
+  full open-driver parity with Windows closed driver.
+
+Tasks: #106
+---
+--- a/kernel-open/nvidia/nv-lever-m-recover.c
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -86,6 +86,30 @@
+ MODULE_PARM_DESC(NVreg_TbEgpuLeverMResetSettleMs,
+     "AORUS Lever M-recover: settle delay (ms) after bus reset before re-checking (default 500)");
+ 
++/* G3-H (2026-05-07): Match Windows AER configuration.
++ *
++ * Empirical (windows-test/powershell-cmds.txt 2026-05-07):
++ *   Windows DEVPKEY_PciDevice_Uncorrectable_Error_Mask = 0
++ *
++ * Linux observed (archive/gen3-fail-2026-05-07-165158, port-A and port-B
++ * boots): GPU_AER_UncMsk = 0x00400000 (bit 22 = Uncorrectable Internal
++ * Error MASKED). When Internal Error fires, masking demotes it to
++ * Advisory Non-Fatal (Cor bit 13 = 0x00002000) — observed at every
++ * probe-end. Header Log is bypassed.
++ *
++ * Setting UncMask = 0 lets Internal Error fire as Uncorrectable Non-Fatal,
++ * which:
++ *   - Triggers standard AER recovery flow (pci_error_handlers callbacks)
++ *   - Hooks into our Lever M-recover state machine via slot_reset/resume
++ *   - Populates Header Log with the offending TLP for diagnosis
++ *
++ * Default-on. Disable via NVreg_TbEgpuUncMaskClearEnable=0 if it causes
++ * regressions. Task #106. */
++unsigned int NVreg_TbEgpuUncMaskClearEnable = 1;
++module_param(NVreg_TbEgpuUncMaskClearEnable, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuUncMaskClearEnable,
++    "AORUS G3-H: clear GPU AER UncMask at probe to match Windows (1=on default, 0=off)");
++
+ /* No-op work handler stub — Commit 2 fills in the actual recovery
+  * sequence. For Commit 1 we just log that the workqueue plumbing fired,
+  * increment the counter, and return. Useful for sanity-checking the
+@@ -425,6 +449,35 @@
+     struct tb_egpu_lever_m_recover *lm;
+     nv_state_t *nv = NV_STATE_PTR(nvl);
+ 
++    /* G3-H: clear GPU AER UncMask at probe to match Windows behavior.
++     * Runs regardless of NVreg_TbEgpuLeverMRecoverEnable since unmasking
++     * is independent of the recovery state machine — even with M-recover
++     * disabled, we want errors visible rather than silently demoted. */
++    if (NVreg_TbEgpuUncMaskClearEnable && nvl->pci_dev)
++    {
++        struct pci_dev *pdev = nvl->pci_dev;
++        int aer_pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_ERR);
++        if (aer_pos)
++        {
++            u32 old_mask = 0;
++            (void)pci_read_config_dword(pdev, aer_pos + PCI_ERR_UNCOR_MASK, &old_mask);
++            if (old_mask != 0)
++            {
++                (void)pci_write_config_dword(pdev, aer_pos + PCI_ERR_UNCOR_MASK, 0);
++                NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++                    "AORUS UncMaskClear (G3-H): GPU AER UncMask 0x%08x -> 0x00000000 "
++                    "(matching Windows; un-masks Internal Error so Unc Non-Fatal fires "
++                    "instead of Cor=0x2000 demotion)\n",
++                    old_mask);
++            }
++            else
++            {
++                NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                    "AORUS UncMaskClear (G3-H): GPU AER UncMask already 0x00000000; no change\n");
++            }
++        }
++    }
++
+     if (!NVreg_TbEgpuLeverMRecoverEnable)
+     {
+         NV_DEV_PRINTF(NV_DBG_INFO, nv,

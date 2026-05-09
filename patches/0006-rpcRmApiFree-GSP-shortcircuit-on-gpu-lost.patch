@@ -1,0 +1,37 @@
+diff --git a/src/nvidia/src/kernel/vgpu/rpc.c b/src/nvidia/src/kernel/vgpu/rpc.c
+index 77954e1b..2e2c66d9 100644
+--- a/src/nvidia/src/kernel/vgpu/rpc.c
++++ b/src/nvidia/src/kernel/vgpu/rpc.c
+@@ -11493,6 +11493,32 @@ NV_STATUS rpcRmApiFree_GSP
+     NV_STATUS status = NV_OK;
+     NvU32 gpuMaskRelease = 0;
+ 
++    //
++    // AORUS Lever N patch (2026-05-04, J-2 architectural fix):
++    // When GPU is logically lost (PDB_PROP_GPU_IS_LOST set by
++    // osHandleGpuLost), device-side resource free is moot -- the GPU is
++    // unresponsive anyway and a host reboot is mandatory per the
++    // ROBUST_CHANNEL_GPU_HAS_FALLEN_OFF_THE_BUS notification. Returning
++    // NV_OK silently here makes all 107 NV_ASSERT(status == NV_OK) sites
++    // in the cleanup paths pass without firing, and the host-side
++    // resource bookkeeping (rs_client/rs_server tables) cleans up
++    // correctly. Eliminates the entire fn-10 RPC failure cascade in
++    // one site instead of patching 107 individual asserts.
++    //
++    // Logged on first call only to avoid log spam; the cleanup path
++    // calls this many times.
++    //
++    if (pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST))
++    {
++        static int s_tb_egpu_lever_n_logged = 0;
++        if (!s_tb_egpu_lever_n_logged) {
++            s_tb_egpu_lever_n_logged = 1;
++            NV_PRINTF(LEVEL_ERROR,
++                      "AORUS Lever N (rpcRmApiFree_GSP): GPU lost, free RPCs returning NV_OK silently for cleanup\n");
++        }
++        return NV_OK;
++    }
++
+     if (!rmDeviceGpuLockIsOwner(pGpu->gpuInstance))
+     {
+         NV_PRINTF(LEVEL_WARNING, "Calling RPC RmFree without adequate locks!\n");

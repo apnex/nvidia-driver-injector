@@ -1,0 +1,77 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: 2026-05-08
+Subject: [PATCH] AORUS Patch 0027 — dispatch slot_reset+resume from work handler
+
+After pci_reset_bus succeeds, the work handler now explicitly
+invokes tb_egpu_lever_m_slot_reset() and (on RECOVERED)
+tb_egpu_lever_m_slot_reset_resume(), so the manual trigger path
+(post-rmInit-FAIL hook + sysfs force_trigger) reaches the same
+completion state as the AER PCI_ERS_RESULT_NEED_RESET path.
+
+Why this is necessary:
+
+  pci_reset_bus() resets the secondary bus but does NOT dispatch
+  through pci_error_handlers->slot_reset / ->resume. Those
+  callbacks only fire when the AER subsystem drives recovery via
+  the NEED_RESET return path from error_detected. Until this patch,
+  the manual trigger path completed the bus reset but never ran
+  PMC_BOOT_0 verification, never incremented success_count, never
+  reset attempt_count, and never emitted TB_EGPU_GPU_STATE=READY.
+
+  In production, the WPR2-stuck recovery (the very case Lever M-
+  recover targets) comes through the post-rmInit-FAIL hook, NOT
+  through AER. So the bug was production-relevant, not a
+  test-only concern.
+
+  Discovered while preparing Phase 3 manual-trigger testing
+  (Patch 0026's sysfs force_trigger): the expected dmesg trail
+  showed only the bus-reset half, no slot_reset/resume.
+
+Behaviour after this patch:
+
+  - Manual trigger path: schedule_work -> pci_reset_bus -> our
+    slot_reset helper (PMC_BOOT_0 read; RECOVERED or DISCONNECT)
+    -> our resume helper (success_count++, attempt_count=0,
+    TB_EGPU_GPU_STATE=READY uevent) on RECOVERED. Surrender
+    accounting in slot_reset handles the DISCONNECT branch.
+
+  - AER NEED_RESET path: unchanged. The kernel still drives the
+    bus reset and dispatches our slot_reset/resume helpers via
+    err_handlers. Our work handler is NOT invoked on that path.
+
+No double-dispatch: pci_reset_bus does not invoke err_handlers
+callbacks, and the kernel does not synthesise an AER event from
+a manual reset, so the helpers run exactly once per recovery.
+---
+--- a/kernel-open/nvidia/nv-lever-m-recover.c
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -270,10 +270,27 @@
+     }
+ 
+     nv_printf(NV_DBG_ERRORS,
+-        "AORUS Lever M-recover: pci_reset_bus(%s) OK; awaiting slot_reset/"
+-        "resume callbacks for verification + counter reset\n",
++        "AORUS Lever M-recover: pci_reset_bus(%s) OK; dispatching "
++        "slot_reset + resume helpers explicitly\n",
+         pci_name(bridge));
+ 
++    /* Patch 0027: pci_reset_bus does NOT dispatch err_handlers->slot_reset
++     * or ->resume callbacks — those only fire when the AER subsystem
++     * drives recovery via PCI_ERS_RESULT_NEED_RESET. To unify the manual
++     * trigger path (post-rmInit-FAIL hook + sysfs force_trigger) with the
++     * AER path so both finish recovery accounting — PMC_BOOT_0 verify,
++     * success_count++, attempt_count reset to 0, TB_EGPU_GPU_STATE=READY
++     * uevent — we invoke our slot_reset helper here, and on RECOVERED
++     * also the resume helper. Both helpers handle their own logging and
++     * uevent emission. The DISCONNECT branch's surrender accounting is
++     * handled inside tb_egpu_lever_m_slot_reset(). */
++    {
++        pci_ers_result_t rs = tb_egpu_lever_m_slot_reset(pdev);
++        if (rs == PCI_ERS_RESULT_RECOVERED) {
++            tb_egpu_lever_m_slot_reset_resume(pdev);
++        }
++    }
++
+ out_put:
+     pci_dev_put(pdev);
+     lm->pdev_for_work = NULL;

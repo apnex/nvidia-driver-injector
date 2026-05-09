@@ -1,0 +1,250 @@
+From: aorus-5090-egpu <noreply@example.invalid>
+Date: Wed, 6 May 2026 15:30:00 +1000
+Subject: [PATCH] Lever M-recover: diagnostic telemetry for Commit 3 design
+
+Adds 4-point timeline instrumentation reading PMC_BOOT_0 + WPR2_ADDR_HI
+at key driver lifecycle points:
+
+  - probe-end          (nv_pci_probe, after BAR0 mapped + Commit 2 check)
+  - startdev-entry     (nv_start_device, on /dev/nvidia0 open path)
+  - pre-rmInit         (nv_start_device, immediately before rm_init_adapter)
+  - post-rmInit-{OK,FAIL} (nv_start_device, immediately after rm_init_adapter)
+
+All log at NV_DBG_ERRORS so visible at default verbosity. Each line:
+  [DIAG]: site=<X> bar0=0x<X> PMC_BOOT_0=0x<X> WPR2_ADDR_HI=0x<X>
+          WPR2_VAL=0x<X> WPR2_up=YES/no parent_bridge=<BDF>
+
+Background: 2026-05-06 15:18 cold-cold-boot validation of Commit 2
+(probe-time WPR2 detection at offset 0x88a828) showed fire_count=0
+despite kernel _kgspBootGspRm correctly logging WPR2-up. Confirmed not
+a code-path / dispatch / kill-switch issue. The diagnostic answers
+*where* in the lifecycle WPR2 transitions to non-zero, so Commit 3 can
+hook the trigger at the right point.
+
+Decision matrix the diagnostic resolves:
+
+  WPR2 timeline       | Commit 3 design
+  --------------------|----------------------------------------
+  0,0,0,nz            | Hook nv_start_device pre-rmInit (alt 2)
+  0,0,0,0             | Pivot to NVOC kgspBootGspRm hook (alt 1)
+  nz everywhere       | Investigate ioremap/mapping mechanism
+  any 0xFFFFFFFF      | Bus dies in lifecycle; different problem
+
+Instrumentation-only — no behaviour change. PMC_BOOT_0 reads serve as
+bus-alive sanity check.
+
+Removed once Commit 3 design finalised, OR gated behind a kill switch.
+
+Bumps version 595.71.05-aorus.7 → aorus.8.
+
+Tasks: #62
+---
+diff --git a/kernel-open/nvidia/nv-lever-m-recover.c b/kernel-open/nvidia/nv-lever-m-recover.c
+index 1000ae98..9b306d76 100644
+--- a/kernel-open/nvidia/nv-lever-m-recover.c
++++ b/kernel-open/nvidia/nv-lever-m-recover.c
+@@ -172,6 +172,89 @@ static DEVICE_ATTR(tb_egpu_lever_m_surrenders, 0444,
+ static DEVICE_ATTR(tb_egpu_lever_m_last_fire_jiffies, 0444,
+                    tb_egpu_lever_m_last_fire_jiffies_show, NULL);
+ 
++/* Diagnostic telemetry helper (2026-05-06).
++ *
++ * Reads PMC_BOOT_0 (bus-alive sanity) and WPR2_ADDR_HI (stuck check) via
++ * temporary ioremap, logs both at NV_DBG_ERRORS along with upstream
++ * bridge BDF. Called from 4 lifecycle points to build a timeline that
++ * conclusively determines where Commit 3 should hook its trigger.
++ *
++ * After Commit 3 design is finalised, this diagnostic is removed or
++ * gated behind a kill switch. For now it's always-on — no perf concern,
++ * runs ~4 times per boot + once per persistenced retry.
++ */
++void tb_egpu_lever_m_diag_dump(nv_linux_state_t *nvl, const char *site)
++{
++    nv_state_t   *nv;
++    struct pci_dev *pdev;
++    struct pci_dev *parent;
++    void __iomem *map_pmc;
++    void __iomem *map_wpr2;
++    u64           bar0_phys;
++    u64           wpr2_page_aligned;
++    u32           wpr2_page_offset;
++    u32           pmc_boot_0 = 0xdeadbeefu;
++    u32           wpr2_raw   = 0xdeadbeefu;
++    bool          pmc_ok = false, wpr2_ok = false;
++
++    if (!nvl)
++    {
++        nv_printf(NV_DBG_ERRORS,
++            "AORUS Lever M-recover [DIAG]: site=%s nvl=NULL — cannot read\n",
++            site);
++        return;
++    }
++
++    nv   = NV_STATE_PTR(nvl);
++    pdev = nvl->pci_dev;
++    bar0_phys = nv->bars[NV_GPU_BAR_INDEX_REGS].cpu_address;
++
++    if (bar0_phys == 0)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "AORUS Lever M-recover [DIAG]: site=%s bar0_phys=0 — BAR not yet captured; skipping\n",
++            site);
++        return;
++    }
++
++    /* Read PMC_BOOT_0 at offset 0 — bus-alive canary. */
++    map_pmc = ioremap(bar0_phys, PAGE_SIZE);
++    if (map_pmc)
++    {
++        pmc_boot_0 = ioread32(map_pmc);
++        iounmap(map_pmc);
++        pmc_ok = true;
++    }
++
++    /* Read WPR2_ADDR_HI at offset 0x88a828. */
++    wpr2_page_aligned = (bar0_phys + TB_EGPU_LEVER_M_WPR2_REG_OFFSET) & PAGE_MASK;
++    wpr2_page_offset  = (bar0_phys + TB_EGPU_LEVER_M_WPR2_REG_OFFSET) & ~PAGE_MASK;
++    map_wpr2 = ioremap(wpr2_page_aligned, PAGE_SIZE);
++    if (map_wpr2)
++    {
++        wpr2_raw = ioread32(map_wpr2 + wpr2_page_offset);
++        iounmap(map_wpr2);
++        wpr2_ok = true;
++    }
++
++    /* Parent bridge — Commit 3's pci_reset_bus() target candidate. */
++    parent = pdev ? pci_upstream_bridge(pdev) : NULL;
++
++    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++        "AORUS Lever M-recover [DIAG]: site=%-18s bar0=0x%llx "
++        "PMC_BOOT_0=%s%08x WPR2_ADDR_HI=%s%08x WPR2_VAL=0x%08x WPR2_up=%s "
++        "parent_bridge=%s\n",
++        site,
++        (unsigned long long)bar0_phys,
++        pmc_ok ? "0x" : "MAPFAIL:",
++        pmc_boot_0,
++        wpr2_ok ? "0x" : "MAPFAIL:",
++        wpr2_raw,
++        wpr2_raw & TB_EGPU_LEVER_M_WPR2_VAL_MASK,
++        ((wpr2_raw & TB_EGPU_LEVER_M_WPR2_VAL_MASK) != 0) ? "YES" : "no",
++        parent ? pci_name(parent) : "NULL");
++}
++
+ /* Commit 2: probe-time WPR2-stuck detection.
+  *
+  * Reads the GSP MMU WPR2 status register via a temporary ioremap of a
+diff --git a/kernel-open/nvidia/nv-lever-m-recover.h b/kernel-open/nvidia/nv-lever-m-recover.h
+index cf14bab9..24111803 100644
+--- a/kernel-open/nvidia/nv-lever-m-recover.h
++++ b/kernel-open/nvidia/nv-lever-m-recover.h
+@@ -89,4 +89,29 @@ void tb_egpu_lever_m_recover_stop(nv_linux_state_t *nvl);
+ bool tb_egpu_lever_m_check_wpr2_at_probe(nv_linux_state_t *nvl,
+                                         u64 bar0_phys_addr);
+ 
++/* Diagnostic telemetry for Commit 3 design (2026-05-06).
++ *
++ * Reads NV_PMC_BOOT_0 (bus-alive sanity, BAR0+0) and
++ * NV_HUBMMU_PRI_MMU_WPR2_ADDR_HI (BAR0+0x88a828) at multiple driver
++ * lifecycle points; logs each at NV_DBG_ERRORS so the timeline is
++ * visible at default verbosity. Also logs upstream bridge BDF (Commit 3
++ * reset target candidate). This is instrumentation-only — no behaviour
++ * change, no recovery action.
++ *
++ * Goal: after one reboot with this diagnostic, dmesg `[DIAG]` markers
++ * conclusively answer "where in the lifecycle should Commit 3 hook the
++ * trigger?" — by showing timeline of WPR2 register state across:
++ *   - nv_pci_probe entry (post pci_enable_device)
++ *   - nv_pci_probe end (post BAR0 mapping; current Commit 2 site)
++ *   - nv_start_device entry (open path)
++ *   - nv_start_device just before rm_init_adapter
++ *
++ * Caller passes `site` as a short string label (e.g. "probe-entry").
++ * The helper handles bar0_phys_addr=0 / nvl=NULL gracefully.
++ *
++ * After Commit 3 design is finalised, this diagnostic is removed; or
++ * alternatively kept as a NVreg_TbEgpuLeverMDiagEnable opt-in.
++ */
++void tb_egpu_lever_m_diag_dump(nv_linux_state_t *nvl, const char *site);
++
+ #endif /* _NV_LEVER_M_RECOVER_H_ */
+diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
+index 95ad91fd..512083f0 100644
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -1935,6 +1935,11 @@ nv_pci_probe
+     (void)tb_egpu_lever_m_check_wpr2_at_probe(nvl,
+         nv->bars[NV_GPU_BAR_INDEX_REGS].cpu_address);
+ 
++    /* AORUS Lever M-recover diagnostic (2026-05-06): visible-at-default-
++     * verbosity probe-end snapshot of PMC_BOOT_0 + WPR2_ADDR_HI for
++     * Commit 3 design. Removed once diagnostic complete. */
++    tb_egpu_lever_m_diag_dump(nvl, "probe-end");
++
+     nv->pci_info.vendor_id = pci_dev->vendor;
+     nv->pci_info.device_id = pci_dev->device;
+     nv->subsystem_id       = pci_dev->subsystem_device;
+diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
+index c27955fb..886159b2 100644
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -36,6 +36,7 @@
+ #include "nv-reg.h"
+ #include "nv-msi.h"
+ #include "nv-pci-table.h"
++#include "nv-lever-m-recover.h"  /* AORUS Lever M-recover diag (2026-05-06) */
+ #include "nv-chardev-numbers.h"
+ 
+ #if defined(NV_UVM_ENABLE)
+@@ -1386,6 +1387,12 @@ int nv_start_device(nv_state_t *nv, nvidia_stack_t *sp)
+     NvBool remove_numa_memory_kthread_init = NV_FALSE;
+     NvBool power_ref = NV_FALSE;
+ 
++    /* AORUS Lever M-recover diagnostic (2026-05-06): nv_start_device
++     * entry — typically fires when /dev/nvidia0 is opened (e.g.
++     * persistenced, ollama). Captures WPR2/PMC state at the start of
++     * the open path, before any RM init has touched it this session. */
++    tb_egpu_lever_m_diag_dump(nvl, "startdev-entry");
++
+     rc = nv_get_rsync_info();
+     if (rc != 0)
+     {
+@@ -1522,14 +1529,29 @@ int nv_start_device(nv_state_t *nv, nvidia_stack_t *sp)
+         }
+     }
+ 
++    /* AORUS Lever M-recover diagnostic (2026-05-06): immediately
++     * before rm_init_adapter — this is where _kgspBootGspRm will be
++     * called and where the kernel's own kgspIsWpr2Up_HAL reads the
++     * WPR2 register. Compare this site's reading with probe-end to
++     * see if WPR2 transitions during the driver lifecycle. */
++    tb_egpu_lever_m_diag_dump(nvl, "pre-rmInit");
++
+     if (!rm_init_adapter(sp, nv))
+     {
++        /* AORUS Lever M-recover diagnostic: post-rmInit FAILURE path —
++         * captures WPR2/PMC state immediately after rm_init_adapter
++         * returned failure. If WPR2 transitioned from clear (pre) to
++         * non-zero (post-fail), GSP firmware is what sets the register
++         * during its boot attempt. */
++        tb_egpu_lever_m_diag_dump(nvl, "post-rmInit-FAIL");
+         NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
+                       "rm_init_adapter failed, device minor number %d\n",
+                       nvl->minor_num);
+         rc = -EIO;
+         goto failed_release_irq;
+     }
++    /* AORUS Lever M-recover diagnostic: post-rmInit SUCCESS path. */
++    tb_egpu_lever_m_diag_dump(nvl, "post-rmInit-OK");
+ 
+     /* Generate and cache the UUID for future callers */
+     (void)rm_get_gpu_uuid_raw(sp, nv);
+diff --git a/version.mk b/version.mk
+index a5fda94c..bc59c1a4 100644
+--- a/version.mk
++++ b/version.mk
+@@ -1,4 +1,4 @@
+-NVIDIA_VERSION = 595.71.05-aorus.7
++NVIDIA_VERSION = 595.71.05-aorus.8
+ NVIDIA_NVID_VERSION = 595.71.05
+ NVIDIA_NVID_EXTRA = 
+ 

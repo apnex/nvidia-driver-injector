@@ -1,0 +1,50 @@
+diff --git a/src/nvidia/arch/nvalloc/unix/src/os.c b/src/nvidia/arch/nvalloc/unix/src/os.c
+index bc784af8..fa0125b0 100644
+--- a/src/nvidia/arch/nvalloc/unix/src/os.c
++++ b/src/nvidia/arch/nvalloc/unix/src/os.c
+@@ -1921,6 +1921,45 @@ NvU32 osDevReadReg032(
+         return retval;
+     }
+ 
++    //
++    // AORUS Lever Q-passive (2026-05-04, Phase 1b): if the device is
++    // already known-disconnected at the kernel level (M-base / AER
++    // marked it), OR the driver itself has declared GPU lost, skip
++    // the actual MMIO read. Returning 0xFFFFFFFF mimics what a dead
++    // bus eventually returns after hardware completion timeout, and
++    // matches the value used by every existing "is the GPU there?"
++    // sanity check.
++    //
++    // Effect: after the FIRST loss-detection event (whether via AER,
++    // sanity check, or Q-active), every subsequent MMIO read in the
++    // driver returns immediately. Drains lock contention, lets the
++    // kernel scheduler progress, lets userspace get its CUDA error,
++    // and prevents the 50ms hardware-completion-timeout stall that
++    // would otherwise occur on each subsequent driver read.
++    //
++    // First-fire log identifies which side detected the loss.
++    //
++    if (pGpu)
++    {
++        nv_state_t *nv = NV_GET_NV_STATE(pGpu);
++        NvBool bOsDisconnected = (nv != NULL) && os_pci_is_disconnected(nv->handle);
++        NvBool bGpuIsLost = pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST);
++        if (bOsDisconnected || bGpuIsLost)
++        {
++            static int s_tb_egpu_lever_q_passive_logged = 0;
++            if (!s_tb_egpu_lever_q_passive_logged)
++            {
++                s_tb_egpu_lever_q_passive_logged = 1;
++                NV_PRINTF(LEVEL_ERROR,
++                    "AORUS Lever Q-passive: dead-bus state detected at offset 0x%08x; "
++                    "source: os_pci_disconnected=%d, gpu_is_lost=%d; "
++                    "short-circuiting subsequent MMIO reads with 0xFFFFFFFF\n",
++                    thisAddress, (int)bOsDisconnected, (int)bGpuIsLost);
++            }
++            return 0xFFFFFFFFU;
++        }
++    }
++
+     if (thisAddress >= pMapping->gpuNvLength)
+     {
+         NV_ASSERT(thisAddress < pMapping->gpuNvLength);

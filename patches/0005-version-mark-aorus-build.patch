@@ -1,0 +1,23 @@
+diff --git a/kernel-open/Kbuild b/kernel-open/Kbuild
+index 089c77d0..3586420f 100644
+--- a/kernel-open/Kbuild
++++ b/kernel-open/Kbuild
+@@ -79,7 +79,7 @@ ccflags-y += -I$(src)/common/inc
+ ccflags-y += -I$(src)
+ ccflags-y += -Wall $(DEFINES) $(INCLUDES) -Wno-cast-qual -Wno-format-extra-args
+ ccflags-y += -D__KERNEL__ -DMODULE -DNVRM
+-ccflags-y += -DNV_VERSION_STRING=\"595.71.05\"
++ccflags-y += -DNV_VERSION_STRING=\"595.71.05-aorus.5\"
+ 
+ # Include and link Tegra out-of-tree modules.
+ ifneq ($(wildcard /usr/src/nvidia/nvidia-public),)
+diff --git a/version.mk b/version.mk
+index ea15e650..eed98621 100644
+--- a/version.mk
++++ b/version.mk
+@@ -1,4 +1,4 @@
+-NVIDIA_VERSION = 595.71.05
++NVIDIA_VERSION = 595.71.05-aorus.5
+ NVIDIA_NVID_VERSION = 595.71.05
+ NVIDIA_NVID_EXTRA = 
+ 

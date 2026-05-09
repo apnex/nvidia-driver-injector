@@ -1,0 +1,172 @@
+diff --git a/kernel-open/nvidia-uvm/uvm_va_space.c b/kernel-open/nvidia-uvm/uvm_va_space.c
+index ca00bd2d..a040f882 100644
+--- a/kernel-open/nvidia-uvm/uvm_va_space.c
++++ b/kernel-open/nvidia-uvm/uvm_va_space.c
+@@ -461,6 +461,27 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
+     uvm_processor_mask_t *retained_gpus = &va_space->registered_gpus_teardown;
+     LIST_HEAD(deferred_free_list);
+ 
++    //
++    // AORUS Lever P-probe (2026-05-04, diagnostic-only):
++    // Instrument uvm_va_space_destroy to localise the deadlock that wedges
++    // the host within ~50ms of ollama's CUDA panic in test
++    // lite-2026-05-04-153940. The cleanup chain (Levers J-2 + N) completes
++    // and ollama unwinds cleanly, but the kernel goes silent during the
++    // process exit's UVM release path. The freeze is somewhere inside this
++    // function or its child calls.
++    //
++    // Markers gated on uvm_global_get_status() != NV_OK so they only fire
++    // on the post-fatal cleanup we care about, never on normal shutdown.
++    //
++    // No behaviour change. The LAST marker that prints before the freeze
++    // tells us the deadlock locus. Once known, the targeted Lever P patch
++    // (covering all sites in the same shape) replaces this probe.
++    //
++    NV_STATUS aorus_uvm_status_at_entry = uvm_global_get_status();
++    if (aorus_uvm_status_at_entry != NV_OK)
++        UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[01-entry]: uvm_va_space_destroy entered (uvm_global_get_status=0x%x)\n",
++                             aorus_uvm_status_at_entry);
++
+     // Remove the VA space from the global list before we start tearing things
+     // down so other threads can't see the VA space in a partially-valid state.
+     uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
+@@ -469,6 +490,9 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
+ 
+     uvm_perf_heuristics_stop(va_space);
+ 
++    if (aorus_uvm_status_at_entry != NV_OK)
++        UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[02-pre-stop-channels]: about to stop_all_user_channels (RM Control RPC)\n");
++
+     // Stop all channels before unmapping anything. This kills the channels and
+     // prevents spurious MMU faults from being generated (bug 1722021), but
+     // doesn't prevent the bottom half from servicing old faults for those
+@@ -480,6 +504,9 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
+     uvm_va_space_stop_all_user_channels(va_space);
+     uvm_va_space_up_read_rm(va_space);
+ 
++    if (aorus_uvm_status_at_entry != NV_OK)
++        UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[03-post-stop-channels]: stop_all_user_channels returned\n");
++
+     // The bottom half GPU page fault handler(s) could still look up and use
+     // this va_space via the GPU's instance_ptr_table. Lock them out while we
+     // tear down. Once we're done, the bottom half will fail to find any
+@@ -492,6 +519,9 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
+ 
+     uvm_va_space_detach_all_user_channels(va_space, &deferred_free_list);
+ 
++    if (aorus_uvm_status_at_entry != NV_OK)
++        UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[04-pre-va-range-destroy]: about to destroy va_ranges\n");
++
+     // Destroy all VA ranges. We do this before unregistering the GPUs for
+     // performance, since GPU unregister will walk all VA ranges in the VA space
+     // multiple times.
+@@ -502,6 +532,9 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
+         uvm_va_range_destroy(va_range, &deferred_free_list);
+     }
+ 
++    if (aorus_uvm_status_at_entry != NV_OK)
++        UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[05-post-va-range-destroy]: va_ranges destroyed; about to unregister_gpu loop\n");
++
+     uvm_range_group_radix_tree_destroy(va_space);
+ 
+     // Unregister all GPUs in the VA space. Note that this does not release the
+@@ -509,6 +542,9 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
+     for_each_va_space_gpu(gpu, va_space)
+         unregister_gpu(va_space, gpu, NULL, &deferred_free_list, NULL);
+ 
++    if (aorus_uvm_status_at_entry != NV_OK)
++        UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[06-post-unregister-gpu]: unregister_gpu loop done\n");
++
+     uvm_hmm_va_space_destroy(va_space);
+ 
+     uvm_perf_heuristics_unload(va_space);
+@@ -533,8 +569,14 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
+     // This is also required to synchronize any pending
+     // block_deferred_accessed_by() work items.
+ 
++    if (aorus_uvm_status_at_entry != NV_OK)
++        UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[07-pre-global-q-flush]: about to nv_kthread_q_flush(g_uvm_global.global_q)\n");
++
+     nv_kthread_q_flush(&g_uvm_global.global_q);
+ 
++    if (aorus_uvm_status_at_entry != NV_OK)
++        UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[08-post-global-q-flush]: global_q flush returned\n");
++
+     for_each_gpu_in_mask(gpu, retained_gpus) {
+         // Free the processor masks allocated in uvm_va_space_register_gpu().
+         // The mask is also freed in uvm_va_space_unregister_gpu() but that
+@@ -550,19 +592,42 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
+             continue;
+         }
+ 
++        if (aorus_uvm_status_at_entry != NV_OK)
++            UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[09-pre-bottom-half-q-flush]: about to flush isr.bottom_half_q\n");
++
+         nv_kthread_q_flush(&gpu->parent->isr.bottom_half_q);
+ 
++        if (aorus_uvm_status_at_entry != NV_OK)
++            UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[10-post-bottom-half-q-flush]: bottom_half_q flush returned\n");
++
+         // The same applies to the kill channel kthreads. However, they need to
+         // be flushed after their bottom-half counterparts since the latter may
+         // schedule a channel kill.
+-        if (gpu->parent->isr.non_replayable_faults.handling)
++        if (gpu->parent->isr.non_replayable_faults.handling) {
++            if (aorus_uvm_status_at_entry != NV_OK)
++                UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[11-pre-kill-channel-q-flush]: about to flush isr.kill_channel_q\n");
++
+             nv_kthread_q_flush(&gpu->parent->isr.kill_channel_q);
+ 
+-        if (gpu->parent->access_counters_supported)
++            if (aorus_uvm_status_at_entry != NV_OK)
++                UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[12-post-kill-channel-q-flush]: kill_channel_q flush returned\n");
++        }
++
++        if (gpu->parent->access_counters_supported) {
++            if (aorus_uvm_status_at_entry != NV_OK)
++                UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[13-pre-access-counters-disable]: about to uvm_gpu_access_counters_disable\n");
++
+             uvm_gpu_access_counters_disable(gpu, va_space);
+ 
++            if (aorus_uvm_status_at_entry != NV_OK)
++                UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[14-post-access-counters-disable]: access_counters_disable returned\n");
++        }
++
+     }
+ 
++    if (aorus_uvm_status_at_entry != NV_OK)
++        UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[15-post-per-gpu-loop]: per-GPU teardown loop complete\n");
++
+     // Check that all CPU/GPU affinity masks are empty
+     for_each_gpu_id(gpu_id) {
+         const uvm_cpu_gpu_affinity_t *affinity = &va_space->gpu_cpu_numa_affinity[uvm_id_gpu_index(gpu_id)];
+@@ -589,6 +654,9 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
+ 
+     uvm_mutex_lock(&g_uvm_global.global_lock);
+ 
++    if (aorus_uvm_status_at_entry != NV_OK)
++        UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[16-pre-gpu-release-loop]: about to uvm_gpu_release_locked loop\n");
++
+     // Release the GPUs and their peer counts. Do not use
+     // for_each_gpu_in_mask for the outer loop as it reads the GPU
+     // state, which might get destroyed.
+@@ -613,6 +681,9 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
+         uvm_gpu_release_locked(gpu);
+     }
+ 
++    if (aorus_uvm_status_at_entry != NV_OK)
++        UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[17-post-gpu-release-loop]: uvm_gpu_release_locked loop complete\n");
++
+     UVM_ASSERT(bitmap_empty(va_space->enabled_peers, UVM_MAX_UNIQUE_GPU_PAIRS));
+     UVM_ASSERT(bitmap_empty(va_space->enabled_peers_teardown, UVM_MAX_UNIQUE_GPU_PAIRS));
+ 
+@@ -620,6 +691,9 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
+ 
+     uvm_kvfree(va_space->mapping);
+     uvm_kvfree(va_space);
++
++    if (aorus_uvm_status_at_entry != NV_OK)
++        UVM_ERR_PRINT_ALWAYS("AORUS Lever P-probe[18-EXIT]: uvm_va_space_destroy returning cleanly\n");
+ }
+ 
+ void uvm_va_space_stop_all_user_channels(uvm_va_space_t *va_space)

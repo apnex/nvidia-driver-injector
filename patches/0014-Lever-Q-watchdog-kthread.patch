@@ -1,0 +1,352 @@
+diff --git a/kernel-open/common/inc/nv-linux.h b/kernel-open/common/inc/nv-linux.h
+index 54549091..1ce779f9 100644
+--- a/kernel-open/common/inc/nv-linux.h
++++ b/kernel-open/common/inc/nv-linux.h
+@@ -1436,6 +1436,11 @@ typedef struct nv_linux_state_s {
+ 
+     /* Per-device GPU init on probe setting, initialized from global NVreg_GpuInitOnProbe */
+     NvBool init_on_probe;
++
++    /* AORUS Lever Q-watchdog (Phase 1c B4, 2026-05-05): per-device
++     * heartbeat kthread state. Forward-declared opaque pointer to
++     * avoid pulling nv-qwatchdog.h into common headers. */
++    struct tb_egpu_qwatchdog *qwd;
+ } nv_linux_state_t;
+ 
+ extern nv_linux_state_t *nv_linux_devices;
+diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
+index 57ae77f1..22d53e38 100644
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -27,6 +27,7 @@
+ #include "nv-msi.h"
+ #include "nv-hypervisor.h"
+ #include "nv-reg.h"
++#include "nv-qwatchdog.h"  /* AORUS Lever Q-watchdog (Phase 1c B4, 2026-05-05) */
+ 
+ #if defined(NV_VGPU_KVM_BUILD)
+ #include "nv-vgpu-vfio-interface.h"
+@@ -2194,6 +2195,14 @@ nv_pci_probe
+      */
+     rm_enable_dynamic_power_management(sp, nv);
+ 
++    /* AORUS Lever Q-watchdog (Phase 1c B4): spawn the heartbeat kthread.
++     * On this hardware NVreg_DynamicPowerManagement=0 (forced via
++     * etc/modprobe.d) and udev keeps power/control=on + d3cold_allowed=0,
++     * so the device stays in D0 and the kthread can safely read MMIO
++     * indefinitely. Failure here is non-fatal — driver continues without
++     * watchdog, falling back to the existing Q-active wrapper. */
++    (void)tb_egpu_qwatchdog_init(nvl);
++
+     nv_kmem_cache_free_stack(sp);
+ 
+     return 0;
+@@ -2266,6 +2275,14 @@ static void nv_pci_remove_helper(struct pci_dev *pci_dev, bool block_if_gpu_in_u
+ 
+     nv = NV_STATE_PTR(nvl);
+ 
++    /* AORUS Lever Q-watchdog (Phase 1c B4): stop heartbeat kthread before
++     * any state teardown. The kthread reads nv->regs->map and calls
++     * os_pci_set_disconnected(nv->handle); both must remain valid until
++     * the kthread has exited. kthread_stop blocks until the thread
++     * observes kthread_should_stop(), bounded by
++     * NVreg_TbEgpuWatchdogIntervalMs (clamped max 60s). */
++    tb_egpu_qwatchdog_stop(nvl);
++
+ #if NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_disable_feature
+ #if defined(CONFIG_IOMMU_SVA) && \
+     (defined(NV_IOASID_GET_PRESENT) || defined(NV_MM_PASID_DROP_PRESENT))
+diff --git a/kernel-open/nvidia/nv-qwatchdog.c b/kernel-open/nvidia/nv-qwatchdog.c
+new file mode 100644
+index 00000000..d19a3ada
+--- /dev/null
++++ b/kernel-open/nvidia/nv-qwatchdog.c
+@@ -0,0 +1,238 @@
++/*
++ * nv-qwatchdog.c — AORUS Lever Q-watchdog (Phase 1c B4, 2026-05-05)
++ *
++ * Per-device kthread that periodically reads NV_PMC_BOOT_0 (offset 0 of
++ * BAR0) via direct volatile MMIO. On 0xFFFFFFFF, declares the GPU
++ * disconnected via os_pci_set_disconnected — same kernel-side
++ * propagation that Q-active uses, but driven from an active heartbeat
++ * instead of waiting for an ioctl-path MMIO read.
++ *
++ * Closes the gap exposed by the 2026-05-05 Mode B silent freeze
++ * (loop-2026-05-05-165029): that freeze locus was DMA-path (mid model
++ * upload), where no MMIO reads fire from userspace context, so Q-active
++ * stayed silent. With Q-watchdog, the bus drop is detected within
++ * ~NVreg_TbEgpuWatchdogIntervalMs of failure regardless of which
++ * subsystem caused the wedge.
++ *
++ * Scope (v1):
++ *   - Active heartbeat at fixed interval (default 200 ms)
++ *   - On dead-bus detection: log marker, increment counter, mark
++ *     disconnected via os_pci_set_disconnected — Q-passive then
++ *     short-circuits all subsequent osDevReadReg* calls
++ *   - Per-device counters (cycles run, detections fired) for
++ *     A/B characterisation
++ *   - Module-param kill switch (NVreg_TbEgpuWatchdogEnable=0)
++ *
++ * Out of scope for v1 (future enhancements):
++ *   - Auto-FLR on detection (requires workqueue + reset orchestration)
++ *   - kobject_uevent emission (couples with Phase B3 watchdog daemon)
++ *   - sysfs counter exposure (counters live in struct, not yet exposed)
++ *   - DPM-aware backoff (this driver is configured with
++ *     NVreg_DynamicPowerManagement=0, so probe is always safe)
++ *
++ * Sovereignty / layer (per docs/architecture-and-modularity.md):
++ *   L1 (NVIDIA fork) — justified because the kthread needs:
++ *     - access to nv_state_t internals (regs->map)
++ *     - lifecycle binding to nvidia.ko probe/remove
++ *     - call into os_pci_set_disconnected (project-added kernel-open API)
++ *
++ * Heisenbug acknowledgement (per memory feedback_observability_perturbs_bug):
++ *   A 5 Hz active MMIO read is more perturbing than passive bpftrace.
++ *   The runtime kill-switch (NVreg_TbEgpuWatchdogEnable) and per-device
++ *   counters exist so we can A/B characterise whether the watchdog
++ *   itself materially changes the bug rate. The 2026-05-05 freeze
++ *   (which fired without heavy observability) suggests the bug is
++ *   not purely Heisenbug-driven; we expect the watchdog to provide
++ *   real signal rather than perturb the bug away.
++ */
++
++#include "os-interface.h"
++#include "nv-linux.h"
++#include "nv-qwatchdog.h"
++
++#include <linux/kthread.h>
++#include <linux/delay.h>
++#include <linux/slab.h>
++#include <linux/err.h>
++#include <linux/moduleparam.h>
++
++/* Module parameters */
++
++static unsigned int NVreg_TbEgpuWatchdogEnable = 1;
++module_param(NVreg_TbEgpuWatchdogEnable, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuWatchdogEnable,
++    "AORUS Lever Q-watchdog: enable kthread heartbeat MMIO probe "
++    "(1 = on (default), 0 = off). Runtime-toggleable; takes effect "
++    "next probe cycle.");
++
++static unsigned int NVreg_TbEgpuWatchdogIntervalMs = 200;
++module_param(NVreg_TbEgpuWatchdogIntervalMs, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuWatchdogIntervalMs,
++    "AORUS Lever Q-watchdog: probe period in milliseconds "
++    "(default 200, clamped to [10, 60000]).");
++
++#define TB_EGPU_QWATCHDOG_MIN_INTERVAL_MS  10
++#define TB_EGPU_QWATCHDOG_MAX_INTERVAL_MS  60000
++
++/* PMC_BOOT_0 lives at BAR0 offset 0 across all NVIDIA architectures.
++ * Hardcoded here to keep this file independent of the RM-side
++ * NV_PMC_BOOT_0 constant from src/common/inc/swref/published/nv_ref.h. */
++#define TB_EGPU_QWATCHDOG_PMC_BOOT_0_OFFSET  0u
++#define TB_EGPU_QWATCHDOG_DEAD_BUS_VALUE     0xFFFFFFFFu
++
++static int tb_egpu_qwatchdog_thread(void *data)
++{
++    nv_linux_state_t        *nvl = (nv_linux_state_t *)data;
++    nv_state_t              *nv  = NV_STATE_PTR(nvl);
++    struct tb_egpu_qwatchdog  *qwd = nvl->qwd;
++    volatile NvU32          *regs32;
++    NvU32                    boot_0;
++    unsigned int             interval_ms;
++    int                      detected_logged = 0;
++
++    NV_DEV_PRINTF(NV_DBG_INFO, nv,
++        "AORUS Lever Q-watchdog: kthread started (interval=%ums, enable=%u)\n",
++        NVreg_TbEgpuWatchdogIntervalMs, NVreg_TbEgpuWatchdogEnable);
++
++    while (!kthread_should_stop())
++    {
++        /* Re-read interval each cycle so runtime tuning takes effect */
++        interval_ms = NVreg_TbEgpuWatchdogIntervalMs;
++        if (interval_ms < TB_EGPU_QWATCHDOG_MIN_INTERVAL_MS)
++            interval_ms = TB_EGPU_QWATCHDOG_MIN_INTERVAL_MS;
++        if (interval_ms > TB_EGPU_QWATCHDOG_MAX_INTERVAL_MS)
++            interval_ms = TB_EGPU_QWATCHDOG_MAX_INTERVAL_MS;
++
++        msleep_interruptible(interval_ms);
++
++        if (kthread_should_stop())
++            break;
++
++        /* Skip cycle if disabled at runtime */
++        if (!NVreg_TbEgpuWatchdogEnable)
++            continue;
++
++        /* Defensive: skip if regs torn down (early probe / late remove
++         * race window — kthread_stop should prevent this but belt and
++         * suspenders) */
++        if (!nv || !nv->regs || !nv->regs->map)
++            continue;
++
++        /* Skip if already declared disconnected — Q-passive will
++         * short-circuit subsequent userspace reads, no need to log
++         * additional Q-watchdog detections during the same disconnect
++         * episode */
++        if (os_pci_is_disconnected(nv->handle))
++            continue;
++
++        /* Active heartbeat: read PMC_BOOT_0 directly via volatile MMIO.
++         * Bypasses osDevReadReg032 (Q-active wrapper) deliberately so
++         * Q-watchdog firings are cleanly attributable in dmesg vs
++         * Q-active firings. PMC_BOOT_0 returns the chip ID on a healthy
++         * GPU and 0xFFFFFFFF on a dead bus — single read suffices for
++         * the dead-bus determination. */
++        regs32 = (volatile NvU32 *)nv->regs->map;
++        boot_0 = regs32[TB_EGPU_QWATCHDOG_PMC_BOOT_0_OFFSET];
++        atomic_inc(&qwd->cycles);
++
++        if (boot_0 == TB_EGPU_QWATCHDOG_DEAD_BUS_VALUE)
++        {
++            atomic_inc(&qwd->detections);
++
++            if (!detected_logged)
++            {
++                detected_logged = 1;
++                NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++                    "AORUS Lever Q-watchdog: kthread DETECTED dead bus "
++                    "(PMC_BOOT_0=0x%08x after %d cycles).\n"
++                    "  action: os_pci_set_disconnected called; "
++                    "subsequent ioctl-path MMIO reads will short-circuit "
++                    "via Q-passive.\n",
++                    boot_0, atomic_read(&qwd->cycles));
++            }
++
++            os_pci_set_disconnected(nv->handle);
++            /* keep looping: counters keep ticking; if disconnect ever
++             * clears we'll re-fire and re-log */
++        }
++        else
++        {
++            /* Healthy reading; reset latch so a future episode logs again */
++            detected_logged = 0;
++        }
++    }
++
++    NV_DEV_PRINTF(NV_DBG_INFO, nv,
++        "AORUS Lever Q-watchdog: kthread stopped "
++        "(cycles=%d detections=%d)\n",
++        atomic_read(&qwd->cycles), atomic_read(&qwd->detections));
++
++    return 0;
++}
++
++int tb_egpu_qwatchdog_init(nv_linux_state_t *nvl)
++{
++    struct tb_egpu_qwatchdog *qwd;
++    nv_state_t             *nv = NV_STATE_PTR(nvl);
++
++    if (!NVreg_TbEgpuWatchdogEnable)
++    {
++        NV_DEV_PRINTF(NV_DBG_INFO, nv,
++            "AORUS Lever Q-watchdog: disabled at module load "
++            "(NVreg_TbEgpuWatchdogEnable=0); kthread not spawned\n");
++        nvl->qwd = NULL;
++        return 0;
++    }
++
++    qwd = kzalloc(sizeof(*qwd), GFP_KERNEL);
++    if (!qwd)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "AORUS Lever Q-watchdog: kzalloc failed; "
++            "continuing without watchdog\n");
++        return -ENOMEM;
++    }
++
++    atomic_set(&qwd->cycles, 0);
++    atomic_set(&qwd->detections, 0);
++
++    qwd->thread = kthread_run(tb_egpu_qwatchdog_thread, nvl,
++                              "aorus-qwd-%02x%02x",
++                              nv->pci_info.bus, nv->pci_info.slot);
++    if (IS_ERR(qwd->thread))
++    {
++        int err = PTR_ERR(qwd->thread);
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "AORUS Lever Q-watchdog: kthread_run failed: %d; "
++            "continuing without watchdog\n", err);
++        kfree(qwd);
++        nvl->qwd = NULL;
++        return err;
++    }
++
++    nvl->qwd = qwd;
++    return 0;
++}
++
++void tb_egpu_qwatchdog_stop(nv_linux_state_t *nvl)
++{
++    struct tb_egpu_qwatchdog *qwd;
++
++    if (!nvl)
++        return;
++
++    qwd = nvl->qwd;
++    if (!qwd)
++        return;
++
++    if (qwd->thread)
++    {
++        /* kthread_stop blocks until the thread returns from its
++         * current sleep — bounded by interval_ms (max 60s) */
++        kthread_stop(qwd->thread);
++        qwd->thread = NULL;
++    }
++
++    kfree(qwd);
++    nvl->qwd = NULL;
++}
+diff --git a/kernel-open/nvidia/nv-qwatchdog.h b/kernel-open/nvidia/nv-qwatchdog.h
+new file mode 100644
+index 00000000..f75d3fa5
+--- /dev/null
++++ b/kernel-open/nvidia/nv-qwatchdog.h
+@@ -0,0 +1,32 @@
++/*
++ * nv-qwatchdog.h — AORUS Lever Q-watchdog (Phase 1c B4, 2026-05-05)
++ *
++ * Per-device kthread that periodically probes NV_PMC_BOOT_0 via direct
++ * volatile MMIO. On 0xFFFFFFFF (dead bus), declares the GPU disconnected
++ * via os_pci_set_disconnected — same kernel-side propagation Q-active
++ * uses, but driven from an active heartbeat that runs even when no
++ * userspace ioctl path is reading registers.
++ *
++ * See nv-qwatchdog.c for design rationale, scope, and lifecycle notes.
++ */
++
++#ifndef _NV_QWATCHDOG_H_
++#define _NV_QWATCHDOG_H_
++
++#include <linux/atomic.h>
++
++struct task_struct;
++struct nv_linux_state_s;
++typedef struct nv_linux_state_s nv_linux_state_t;
++
++struct tb_egpu_qwatchdog
++{
++    struct task_struct *thread;
++    atomic_t            cycles;
++    atomic_t            detections;
++};
++
++int  tb_egpu_qwatchdog_init(nv_linux_state_t *nvl);
++void tb_egpu_qwatchdog_stop(nv_linux_state_t *nvl);
++
++#endif /* _NV_QWATCHDOG_H_ */
+diff --git a/kernel-open/nvidia/nvidia-sources.Kbuild b/kernel-open/nvidia/nvidia-sources.Kbuild
+index f6bc5bd1..98ffaadd 100644
+--- a/kernel-open/nvidia/nvidia-sources.Kbuild
++++ b/kernel-open/nvidia/nvidia-sources.Kbuild
+@@ -11,6 +11,7 @@ NVIDIA_SOURCES += nvidia/nv-platform-pm.c
+ NVIDIA_SOURCES += nvidia/nv-ipc-soc.c
+ NVIDIA_SOURCES += nvidia/nv.c
+ NVIDIA_SOURCES += nvidia/nv-pci.c
++NVIDIA_SOURCES += nvidia/nv-qwatchdog.c
+ NVIDIA_SOURCES += nvidia/nv-dmabuf.c
+ NVIDIA_SOURCES += nvidia/nv-nano-timer.c
+ NVIDIA_SOURCES += nvidia/nv-acpi.c
