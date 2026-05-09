@@ -20,7 +20,7 @@
 #
 # See README.md for the run command + bind-mount requirements.
 
-FROM debian:12-slim
+FROM debian:13-slim
 
 # Pinned upstream tag — the patches were authored against this exact version.
 # Bumping the tag requires re-validating the patches apply cleanly.
@@ -30,6 +30,8 @@ ENV NVIDIA_OPEN_TAG=${NVIDIA_OPEN_TAG}
 # Install build toolchain + kmod (modprobe/insmod) + curl + git for upstream fetch.
 # No kernel-devel here — the host's /lib/modules/$(uname -r)/build is bind-mounted
 # at runtime and provides the canonical kernel build dir.
+# nvidia-modprobe is NOT in Debian repos (only in NVIDIA's CUDA repo); we build
+# from upstream below.
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential \
@@ -39,8 +41,20 @@ RUN apt-get update && \
         curl \
         xz-utils \
         pciutils \
-        nvidia-modprobe && \
+        m4 \
+        libelf1t64 \
+        libssl3t64 && \
     rm -rf /var/lib/apt/lists/*
+
+# Build nvidia-modprobe from upstream — small C program (~200 LoC), GPL-2.0,
+# pinned to the same tag as the kernel module. Used at runtime to materialise
+# /dev/nvidia-uvm-tools after module load.
+RUN git clone --depth 1 -b ${NVIDIA_OPEN_TAG} \
+        https://github.com/NVIDIA/nvidia-modprobe.git /tmp/nvidia-modprobe && \
+    cd /tmp/nvidia-modprobe && \
+    make -j"$(nproc)" && \
+    install -m 4755 _out/Linux_$(uname -m)/nvidia-modprobe /usr/bin/nvidia-modprobe && \
+    cd / && rm -rf /tmp/nvidia-modprobe
 
 # Fetch upstream NVIDIA open driver source at image-build time.
 WORKDIR /src
