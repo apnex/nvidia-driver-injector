@@ -2,33 +2,129 @@
 # nvidia-driver-injector entrypoint — Approach B
 # (distro-neutral; uses host's /lib/modules bind-mount).
 #
-# Five responsibilities in order:
-#   1. PCI gate:
-#      verify the eGPU is enumerated; exit 0 cleanly if not
-#      (matches `ConditionPathExists` semantics from the host service this
-#      replaces).
-#   2. BAR1 verify:
-#      check BAR1 = 32 GiB; refuse to load if smaller
-#      (catches the host being booted without
-#      `thunderbolt.host_reset=false` or `pci=resource_alignment`).
-#   3. Build:
-#      compile the (already-patched-at-image-build-time) source tree against
-#      the host's kernel, using /lib/modules/<kver>/build bind-mounted from
-#      host.
-#   4. Load:
-#      insmod nvidia.ko + nvidia-uvm.ko directly into host kernel
-#      (--privileged + /lib/modules bind-mount writable).
-#   5. UVM device files:
-#      `nvidia-modprobe -u -c 0` materialises /dev/nvidia-uvm-tools.
+# Subcommands:
+#   load (default) — five-step bring-up:
+#     1. PCI gate (eGPU enumerated?)
+#     2. BAR1 verify (32 GiB?)
+#     3. Build patched modules against host kernel
+#     4. insmod nvidia.ko + nvidia-uvm.ko into host kernel
+#     5. nvidia-modprobe -u -c 0 → UVM device files
+#     Then sleep infinity as "container of intent".
 #
-# Then sleep infinity — pod stays alive as "container of intent". Exit
-# triggers k8s/Docker restart policy.
+#   uninstall — explicit, operator-intent teardown:
+#     - Refuse if any process holds /dev/nvidia* (EBUSY-safe).
+#     - rmmod nvidia_uvm, nvidia_modeset (if present), nvidia.
+#     - Verify all gone; exit 0.
+#     Module state is host state — this is the only graceful unload path.
+#     `docker compose down` does NOT trigger this (correct asymmetry).
+#
+# Invocation:
+#   docker compose up -d                                  # load (default)
+#   docker compose run --rm driver-injector uninstall     # graceful unload
+#   docker run --rm --privileged --pid=host \
+#     -v /sys:/sys -v /dev:/dev -v /lib/modules:/lib/modules \
+#     apnex/nvidia-driver-injector:<tag> uninstall
 
 set -euo pipefail
 
 log()  { printf '[nvidia-driver-injector] %s\n' "$*"; }
 warn() { printf '[nvidia-driver-injector] WARN: %s\n' "$*" >&2; }
 fail() { printf '[nvidia-driver-injector] FAIL: %s\n' "$*" >&2; exit 1; }
+
+# ============================================================================
+# Subcommand: uninstall
+# ============================================================================
+# Graceful host-side teardown of the nvidia kernel modules. Safe-by-default:
+# refuses to proceed if anything is holding /dev/nvidia*, and bails cleanly
+# when nothing is loaded.
+#
+# Why this is a SUBCOMMAND, not a SIGTERM trap:
+#   - SIGTERM has a 10s grace before SIGKILL. rmmod on a wedged GPU can hang
+#     longer than that and leave kernel state half-torn-down.
+#   - Pod restart loops (kubelet OOM, scheduler eviction) would auto-rmmod on
+#     every blip, hammering the close-path that Patches 0029/0030 mitigate.
+#   - Module state is host state. Container lifecycle ≠ kernel state lifecycle.
+# This subcommand is for explicit operator intent: driver upgrade, node
+# decommission, or recovery from a wedged module.
+cmd_uninstall() {
+    log "=========================================="
+    log "  UNINSTALL — graceful host-side teardown"
+    log "=========================================="
+
+    # Pre-flight 1: nothing loaded at all? Nothing to do.
+    local any_loaded=false
+    for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do
+        if grep -q "^${m} " /proc/modules; then
+            any_loaded=true
+            break
+        fi
+    done
+    if ! $any_loaded; then
+        log "nothing to do — no nvidia* modules loaded in host kernel"
+        return 0
+    fi
+
+    # Pre-flight 2: refuse if anything holds /dev/nvidia*. fuser exit 0 means
+    # at least one process holds the file → EBUSY would be inevitable.
+    if command -v fuser >/dev/null 2>&1; then
+        local holders
+        holders="$(fuser /dev/nvidia* 2>&1 || true)"
+        if [[ -n "$holders" ]] && echo "$holders" | grep -qE '[0-9]+'; then
+            warn "GPU has active users; refusing to rmmod:"
+            echo "$holders" | sed 's/^/    /' >&2
+            fail "stop GPU consumers (vLLM, ollama, nvidia-persistenced, …) and retry"
+        fi
+    else
+        # fuser not in image → fall back to checking refcount.
+        local rc
+        rc="$(cat /sys/module/nvidia/refcnt 2>/dev/null || echo 0)"
+        if [[ "$rc" != "0" ]]; then
+            fail "/sys/module/nvidia/refcnt = ${rc} (≠ 0) — module in use; refusing rmmod"
+        fi
+    fi
+
+    # Unload in reverse-dependency order. `rmmod -s` quiets non-existent-module
+    # noise; we already gated on /proc/modules so genuine errors will surface.
+    for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do
+        if grep -q "^${m} " /proc/modules; then
+            log "rmmod ${m} ..."
+            if ! rmmod "$m"; then
+                fail "rmmod ${m} failed — kernel state may be inconsistent.
+       Check 'dmesg | tail' and 'lsof /dev/nvidia*'.
+       Recovery: reboot the host, or run apply.sh from aorus-5090-egpu repo."
+            fi
+        fi
+    done
+
+    # Verify post-rmmod
+    for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do
+        if grep -q "^${m} " /proc/modules; then
+            fail "post-rmmod verify: ${m} still loaded (refcount race?)"
+        fi
+    done
+
+    log "uninstall ✓ — all nvidia* modules unloaded from host kernel"
+    log "host state restored to pre-injector baseline"
+    log "(re-run 'docker compose up' to reload)"
+    return 0
+}
+
+# ============================================================================
+# Subcommand dispatch
+# ============================================================================
+SUBCOMMAND="${1:-load}"
+case "$SUBCOMMAND" in
+    load|"")
+        : # fall through to main bring-up flow below
+        ;;
+    uninstall)
+        cmd_uninstall
+        exit $?
+        ;;
+    *)
+        fail "unknown subcommand: '${SUBCOMMAND}' (expected: load | uninstall)"
+        ;;
+esac
 
 # Configurable — env var overrides for the rare custom topology.
 EGPU_VENDOR_ID="${EGPU_VENDOR_ID:-0x10de}"

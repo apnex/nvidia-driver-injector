@@ -43,7 +43,8 @@ RUN apt-get update && \
         pciutils \
         m4 \
         libelf1t64 \
-        libssl3t64 && \
+        libssl3t64 \
+        psmisc && \
     rm -rf /var/lib/apt/lists/*
 
 # Build nvidia-modprobe from upstream — small C program (~200 LoC), GPL-2.0,

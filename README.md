@@ -80,9 +80,31 @@ cat /sys/module/nvidia/version           # 595.71.05-aorus.12
 To stop:
 
 ```bash
-docker compose down                      # stops container; module stays loaded
-sudo modprobe -r nvidia_uvm nvidia       # to unload manually if desired
+docker compose down                      # stops container; module STAYS LOADED
+                                         # (kernel modules outlive containers
+                                         # by design — module state is host
+                                         # state, not container state)
 ```
+
+To gracefully unload the module
+(driver upgrade, node decommission, recovery from a wedged module),
+use the explicit `uninstall` subcommand:
+
+```bash
+docker compose run --rm driver-injector uninstall
+```
+
+This is **not** triggered by `docker compose down` — that asymmetry is
+deliberate.
+The `uninstall` path:
+
+- Refuses if any process holds `/dev/nvidia*`
+  (fail loud rather than rmmod with active users).
+- `rmmod nvidia_uvm` → `nvidia_drm` → `nvidia_modeset` → `nvidia`
+  in dependency order.
+- Verifies all modules gone before exiting.
+- Exit 0 → host restored to pre-injector baseline;
+  re-run `docker compose up` to reload.
 
 ## Quick start — Kubernetes
 
