@@ -57,12 +57,15 @@ A correctly-deployed system has:
   (vLLM, OpenCode runtime, etc.):
   pure userspace, depends on `/dev/nvidia*` working.
 
+Layer 1 setup is automated by `sudo ./scripts/install-host.sh`
+(refuses to install if `apnex/aorus-5090-egpu` artifacts are present —
+the two are alternative geometries, not stackable);
+`sudo ./scripts/uninstall-host.sh` reverses it.
+
 See [`docs/architecture.md`](docs/architecture.md) for the full layered diagram,
 component-ownership table,
-and install / uninstall / reboot-survival workflows.
-That doc also tracks the gaps between the current implementation and
-the target architecture (Layer 1 install scripts pending,
-container currently uses `insmod` not `modprobe`, etc.).
+install / uninstall / reboot-survival workflows,
+and the gap-status table tracking the current implementation against the target.
 
 > **Different geometry from
 > [`apnex/aorus-5090-egpu`](https://github.com/apnex/aorus-5090-egpu).**
@@ -71,29 +74,22 @@ container currently uses `insmod` not `modprobe`, etc.).
 > Pick **one** of the two patterns —
 > they are not meant to coexist on the same host.
 
-## Companion repo (host-side prerequisites — current state)
+## Component ownership
 
-The Layer 1 install scripts have not yet been written for this repo
-(tracked as Gap #2 in `docs/architecture.md`).
-Until they ship,
-the host-side configuration is documented in the
-[Prerequisites](#prerequisites) section below
-or can be borrowed from
-[`apnex/aorus-5090-egpu`](https://github.com/apnex/aorus-5090-egpu)
-**provided you understand that mixing the two repos' install paths is
-not supported.**
-
-| Concern | Layer | Owner today |
+| Concern | Layer | Owner |
 |---|---|---|
-| Kernel cmdline (`iommu=off`, etc.) | 1 | manual `grubby` per Prerequisites below |
-| udev rules (`/dev/nvidia*` group) | 1 | manual per Prerequisites below |
-| `/etc/modprobe.d/` blacklists + NVreg options | 1 | **TODO — gap #1, container currently uses `insmod` and bypasses these** |
-| Lever H17 LnkCtl2 cap (`bridge-link-cap`) | 1 | **TODO — gap #3, no Layer-1 service shipped here yet** |
-| Vulkan/EGL/OpenCL ICD disable | 1 | TODO |
-| `nvidia-persistenced` | 2 | TODO — not started by container yet |
-| **Kernel module build + load** | **2** | **this container** ✓ |
-| **`nvidia-modprobe -u -c 0`** | **2** | **this container** ✓ |
-| `/dev/nvidia*` perms | 2 | TODO — gap #4, container doesn't chown/chmod yet |
+| Kernel cmdline (`iommu=off`, etc.) | 1 | `scripts/install-host.sh` (auto-detects bridge BDF for `pci=resource_alignment`) |
+| `/etc/modprobe.d/nvidia-driver-injector.conf` (blacklists + NVreg options including LeverMRecoverEnable=1) | 1 | `scripts/install-host.sh` |
+| Lever H17 LnkCtl2 cap (`nvidia-driver-injector-bridge-link-cap.service`, ordered `Before=docker.service`) | 1 | `scripts/install-host.sh` |
+| `/etc/udev/rules.d/79-nvidia-driver-injector.rules` (`/dev/nvidia*` group) | 1 | `scripts/install-host.sh` |
+| Vulkan/EGL/OpenCL ICD disable | 1 | `scripts/install-host.sh` |
+| `kernel-devel` for `$(uname -r)` | 1 | `scripts/install-host.sh` (dnf or apt) |
+| **Kernel module build + load** (`modprobe --ignore-install nvidia` against the patched .ko) | **2** | **this container's entrypoint** ✓ |
+| **`nvidia-modprobe -u -c 0`** (UVM device files) | **2** | **this container's entrypoint** ✓ |
+| `/dev/nvidia*` chown/chmod (belt-and-suspenders to udev rule) | 2 | this container's entrypoint ✓ |
+| `NVreg_TbEgpuLeverMRecoverEnable=1` post-load verification | 2 | this container's entrypoint ✓ |
+| `nvidia-persistenced` (warmup-latency optimisation, optional) | 2 | TODO (Gap #5; close-path bug class already mitigated, low priority) |
+| Workload `depends_on` healthcheck | 3 | TODO (Gap #6; documented in workload-side compose) |
 
 ## Prerequisites
 

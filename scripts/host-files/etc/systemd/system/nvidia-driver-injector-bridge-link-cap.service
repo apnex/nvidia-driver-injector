@@ -1,0 +1,36 @@
+[Unit]
+Description=NVIDIA driver-injector bridge link speed cap (Lever H17 — caps PCIe link to Gen2 before nvidia binds)
+Documentation=https://github.com/apnex/nvidia-driver-injector/blob/main/docs/architecture.md
+# Ordering: must run after Thunderbolt is up so the bridge BDF is
+# enumerated, and before docker so the cap is in place before any
+# container can race the nvidia driver bind.
+After=systemd-udev-settle.service bolt.service
+Wants=systemd-udev-settle.service bolt.service
+Before=docker.service
+
+# Note: deliberately NOT using `Requires=` or `RequiredBy=` against
+# docker.service. If this oneshot fails, docker should still start —
+# the container's entrypoint will then warn about missing production
+# posture and fall back to insmod. Hard-coupling docker to this
+# service would mean a transient cap failure takes the whole host
+# down. Operator can add a docker.service override if they want
+# stricter coupling.
+
+# No ConditionPathExists: script auto-detects the AORUS GPU's parent
+# bridge regardless of TB4 port (different BDF per port). If the GPU
+# isn't present, the script is a fast no-op (clean exit 0).
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nvidia-driver-injector-bridge-link-cap apply
+ExecStop=/usr/local/sbin/nvidia-driver-injector-bridge-link-cap restore
+RemainAfterExit=yes
+
+# Default cap target is Gen2 (production-stable on this hardware).
+# Override via drop-in override.conf if you need a different speed:
+#   sudo systemctl edit nvidia-driver-injector-bridge-link-cap.service
+#   [Service]
+#   Environment="CAP_TARGET_SPEED=1"
+
+[Install]
+WantedBy=multi-user.target

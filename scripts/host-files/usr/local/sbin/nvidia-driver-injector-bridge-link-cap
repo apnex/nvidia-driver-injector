@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# nvidia-driver-injector-bridge-link-cap
+#
+# Caps the PCIe link speed on the upstream Thunderbolt switch
+# downstream port (the parent bridge of the AORUS RTX 5090) BEFORE
+# nvidia.ko binds, eliminating link-speed renegotiation during the
+# GSP DMA setup window — the trigger for GSP_LOCKDOWN_NOTICE / "GPU
+# lost from the bus" failures on this hardware.
+#
+# Mechanism:
+#   1. Read LnkCtl2 (PCIe Express Capability offset 0x30, word).
+#   2. Mask bits [3:0] (Target Link Speed); set to desired generation
+#      without disturbing other bits.
+#   3. Trigger Retrain Link via LnkCtl bit 5 (offset 0x10) so the new
+#      target takes effect (without retrain, the kernel/bridge will
+#      sync LnkCtl2 back to the active speed).
+#
+# Target speed defaults to Gen2 (production-validated as stable on
+# this hardware: GSP_LOCKDOWN cascade observed at Gen3, intermittent
+# at Gen4-uncapped; Gen1 also stable but bandwidth-limited).
+# Override via CAP_TARGET_SPEED env (1=Gen1, 2=Gen2, 3=Gen3).
+#
+# Usage:
+#   nvidia-driver-injector-bridge-link-cap apply
+#   nvidia-driver-injector-bridge-link-cap restore   # let bridge default re-take
+#   nvidia-driver-injector-bridge-link-cap status
+#
+# Cleanroom equivalent of the same operation in apnex/aorus-5090-egpu;
+# this file ships with this repo so the injector deployment can stand
+# alone without depending on that repo.
+
+set -u
+
+VENDOR_ID="0x10de"        # NVIDIA
+DEVICE_ID="0x2b85"        # RTX 5090
+TARGET_SPEED="${CAP_TARGET_SPEED:-2}"   # default Gen2
+
+LNKCTL2_OFFSET="CAP_EXP+0x30.W"
+LNKCTL_OFFSET="CAP_EXP+0x10.W"
+
+green() { printf '\033[32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
+red() { printf '\033[31m%s\033[0m\n' "$*" >&2; }
+
+# Find the PCI bridge directly above the AORUS RTX 5090 by walking
+# /sys/bus/pci/devices for the matching vendor:device, then taking
+# the parent in the device tree. Works on either NUC TB4 port (the
+# bridge BDF differs per port).
+detect_bridge() {
+    local d v dv
+    for d in /sys/bus/pci/devices/*; do
+        [[ -r "$d/vendor" && -r "$d/device" ]] || continue
+        v=$(<"$d/vendor"); dv=$(<"$d/device")
+        if [[ "$v" == "$VENDOR_ID" && "$dv" == "$DEVICE_ID" ]]; then
+            basename "$(dirname "$(readlink -f "$d")")"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Override via BRIDGE= env if needed (e.g. for testing with a known BDF).
+BRIDGE="${BRIDGE:-$(detect_bridge || true)}"
+
+if [[ -z "$BRIDGE" ]]; then
+    yellow "No AORUS RTX 5090 (${VENDOR_ID}:${DEVICE_ID}) found on PCI bus"
+    yellow "(this is expected if the eGPU is disconnected; oneshot exits clean)"
+    exit 0
+fi
+
+read_word() {
+    local off="$1"
+    setpci -s "$BRIDGE" "$off" 2>/dev/null
+}
+
+write_word() {
+    local off="$1" val="$2"
+    setpci -s "$BRIDGE" "${off}=${val}"
+}
+
+cmd_apply() {
+    green "bridge=${BRIDGE}  target=Gen${TARGET_SPEED}"
+
+    local cur
+    cur=$(read_word "$LNKCTL2_OFFSET")
+    if [[ -z "$cur" ]]; then
+        red "could not read LnkCtl2 from ${BRIDGE}"
+        exit 2
+    fi
+
+    # cur is hex string like "1042"; mask off bits [3:0], set to TARGET_SPEED
+    local cur_int new_int new_hex
+    cur_int=$((0x$cur))
+    new_int=$(( (cur_int & ~0xF) | (TARGET_SPEED & 0xF) ))
+    new_hex=$(printf '%04x' "$new_int")
+
+    if [[ "$cur" == "$new_hex" ]]; then
+        green "  LnkCtl2 already 0x${cur} — no change"
+    else
+        write_word "$LNKCTL2_OFFSET" "$new_hex"
+        green "  LnkCtl2 0x${cur} → 0x${new_hex}"
+
+        # Retrain link so the new target takes effect.
+        local lnkctl lnkctl_int retrain_int retrain_hex
+        lnkctl=$(read_word "$LNKCTL_OFFSET")
+        lnkctl_int=$((0x$lnkctl))
+        retrain_int=$(( lnkctl_int | 0x20 ))    # bit 5 = Retrain Link
+        retrain_hex=$(printf '%04x' "$retrain_int")
+        write_word "$LNKCTL_OFFSET" "$retrain_hex"
+        green "  retrain triggered"
+    fi
+}
+
+cmd_restore() {
+    # Restore Target Link Speed to "max supported" (vendor default).
+    # Per PCIe spec, target=0 means "use max supported speed", which
+    # lets the bridge negotiate up. This is the pre-cap state.
+    local cur cur_int new_int new_hex
+    cur=$(read_word "$LNKCTL2_OFFSET")
+    cur_int=$((0x$cur))
+    new_int=$(( cur_int & ~0xF ))           # clear bits [3:0] → target=0
+    new_hex=$(printf '%04x' "$new_int")
+    write_word "$LNKCTL2_OFFSET" "$new_hex"
+    yellow "bridge=${BRIDGE}  LnkCtl2 0x${cur} → 0x${new_hex}  (target=max-supported)"
+}
+
+cmd_status() {
+    local lnkctl2 lnksta
+    lnkctl2=$(read_word "$LNKCTL2_OFFSET")
+    lnksta=$(setpci -s "$BRIDGE" CAP_EXP+0x12.W 2>/dev/null)
+    local target speed width active
+    target=$(( 0x$lnkctl2 & 0xF ))
+    speed=$(( 0x$lnksta & 0xF ))
+    width=$(( (0x$lnksta >> 4) & 0x3F ))
+    active=$(( (0x$lnksta >> 12) & 1 ))
+    cat <<EOF
+bridge=${BRIDGE}
+LnkCtl2=0x${lnkctl2}  TargetLinkSpeed=Gen${target}
+LnkSta=0x${lnksta}    LiveSpeed=Gen${speed}  Width=x${width}  Active=${active}
+EOF
+}
+
+case "${1:-}" in
+    apply)   cmd_apply ;;
+    restore) cmd_restore ;;
+    status)  cmd_status ;;
+    *)
+        red "Usage: $0 {apply|restore|status}"
+        exit 1
+        ;;
+esac

@@ -127,19 +127,23 @@ Everything else can be containerised.
 ### Install (fresh host)
 
 ```bash
-# Layer 1 — host setup (one-time)
+# Layer 1 — host setup (one-time, idempotent)
 git clone https://github.com/apnex/nvidia-driver-injector /root/nvidia-driver-injector
 cd /root/nvidia-driver-injector
-sudo ./scripts/install-host.sh
-  # (TODO — see "Gaps" below; not yet written)
-  # Idempotent. Does:
-  #   - grubby --update-kernel cmdline edits
-  #   - dnf install kernel-devel-$(uname -r)
-  #   - install /etc/modprobe.d/nvidia-driver-injector.conf
-  #   - install + enable bridge-link-cap.service (Before=docker.service)
-  #   - rename Vulkan/EGL/OpenCL ICDs to .disabled
-  #   - install udev rules
-  #   - reboot if cmdline changed
+sudo ./scripts/install-host.sh           # use --no-act first to dry-run
+  # Refuses if apnex/aorus-5090-egpu artifacts are detected
+  # (override with --force-coexist; not recommended).
+  # Does:
+  #   - grubby --update-kernel cmdline edits (iommu=off, host_reset=false,
+  #     pci=resource_alignment=35@<auto-detected bridge bdf>, etc.)
+  #   - dnf/apt install kernel-devel-$(uname -r) if missing
+  #   - install /etc/modprobe.d/nvidia-driver-injector.conf with production
+  #     NVreg options (LeverMRecoverEnable=1, DeviceFileMode=0660, ...)
+  #   - install + enable nvidia-driver-injector-bridge-link-cap.service
+  #     ordered Before=docker.service
+  #   - install /etc/udev/rules.d/79-nvidia-driver-injector.rules
+  #   - rename Vulkan/EGL/OpenCL ICDs to .nvidia-driver-injector-disabled
+  #   - prompt for reboot if cmdline changed
 
 # Layer 2 — driver injector container (persistent)
 docker compose up -d
@@ -158,11 +162,16 @@ cd /root/nvidia-driver-injector
 docker compose run --rm driver-injector uninstall   # rmmod nvidia*
 docker compose down
 
-sudo ./scripts/uninstall-host.sh                    # (TODO)
-  # Reverts modprobe.d, disables systemd service,
-  # restores Vulkan/EGL/OpenCL ICDs.
-  # Leaves kernel cmdline alone by default
-  # (operator opt-in via --revert-cmdline).
+sudo ./scripts/uninstall-host.sh
+  # Reverses install-host.sh idempotently. Removes:
+  #   - bridge-link-cap.service + binary
+  #   - /etc/modprobe.d/nvidia-driver-injector.conf
+  #   - /etc/udev/rules.d/79-nvidia-driver-injector.rules
+  #   - re-enables Vulkan/EGL/OpenCL ICDs
+  # Does NOT revert kernel cmdline by default
+  # (use --revert-cmdline if desired; reboot needed after).
+  # Leaves the ollama UNIX group + kernel-devel package alone
+  # (may be in use by other things on the host).
 ```
 
 ### Reboot survival
@@ -212,24 +221,23 @@ If something fails mid-boot:
 The `depends_on: { driver-injector: { condition: service_healthy } }`
 relationship is what couples workload-restart to driver-ready.
 
-## Gaps the current implementation has
+## Gaps vs the target architecture
 
 Surfaced 2026-05-10 after a reboot incident
-(see `archive/reboot-2026-05-10-modeB.md` for details, when written).
-The current entrypoint diverges from this target in several ways:
+(boot landed on Mode B silent wedge — see commit history for details).
 
-| # | Gap | Effect | Fix planned |
+| # | Gap | Effect | Status |
 |---|---|---|---|
-| 1 | Container uses `insmod nvidia.ko` directly, bypassing `/etc/modprobe.d/` | Production NVreg options not applied (e.g. `RecoverEnable=0` instead of `1`) — Lever M-recover doesn't fire on AER | Switch to `modprobe nvidia` with `/etc/modprobe.d` bind-mounted from host |
-| 2 | No host-side install script | Operator has to manually do Layer 1 setup | Add `scripts/install-host.sh` + `scripts/uninstall-host.sh` |
-| 3 | No bridge-link-cap.service shipped with this repo | Must rely on a separate apply.sh from aorus-5090-egpu, OR live link comes up at whatever speed it happens to | Vendor the bridge-link-cap binary + unit into this repo, install via Layer 1 script |
-| 4 | No `chown` / `chmod` of `/dev/nvidia*` post-load | Permissions are 0666 root:root (works but wide open) | Add post-load chown/chmod step in entrypoint |
-| 5 | No nvidia-persistenced inside container | Warmup-latency optimization not active | Optional: spawn `nvidia-persistenced --user root` after load |
-| 6 | No `depends_on` healthcheck linking workload → injector | Workload can crash-loop while injector still warming up | Document the recommended workload-side compose pattern |
+| 1 | Container uses `insmod nvidia.ko` directly, bypassing `/etc/modprobe.d/` | Production NVreg options not applied (e.g. `RecoverEnable=0` instead of `1`) — Lever M-recover doesn't fire on AER | **CLOSED** — entrypoint switched to `modprobe --ignore-install nvidia` with `/etc/modprobe.d` bind-mounted from host. Falls back to insmod if mount missing. Verifies `NVreg_TbEgpuLeverMRecoverEnable=1` post-load and warns if not. |
+| 2 | No host-side install script | Operator has to manually do Layer 1 setup | **CLOSED** — `scripts/install-host.sh` + `scripts/uninstall-host.sh` shipped. |
+| 3 | No bridge-link-cap.service shipped with this repo | Must rely on a separate apply.sh from aorus-5090-egpu, OR live link comes up at whatever speed it happens to | **CLOSED** — cleanroom `nvidia-driver-injector-bridge-link-cap` binary + systemd unit shipped under `scripts/host-files/`, installed via Layer 1. |
+| 4 | No `chown` / `chmod` of `/dev/nvidia*` post-load | Permissions are 0666 root:root (works but wide open) | **CLOSED** — entrypoint chgrps to `ollama` and chmods 0660 if the group exists on host. |
+| 5 | No nvidia-persistenced inside container | Warmup-latency optimization not active | OPEN (low priority — close-path bug class already mitigated) |
+| 6 | No `depends_on` healthcheck linking workload → injector | Workload can crash-loop while injector still warming up | OPEN — to be documented in workload-side compose examples |
 
-These are tracked here as a TODO list;
-the next round of injector work should close them in roughly this order
-(highest to lowest impact for reliability).
+Gaps 1-4 closed in commits leading up to and including the
+"hardened install/remove workflow" series.
+Gaps 5-6 are lower-priority follow-ups.
 
 ## Out-of-scope for this repo
 
