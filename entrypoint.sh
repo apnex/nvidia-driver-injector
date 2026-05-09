@@ -163,6 +163,36 @@ fi
 log "PCI gate ✓ — GPU at ${EGPU_BDF}"
 
 # ============================================================================
+# Step 1.5: Clear driver_override if blocking nvidia bind
+# ============================================================================
+# The companion repo's remove.sh sets driver_override to a sentinel
+# ('aorus_egpu_manual') so that, while the host stack is uninstalled, no
+# driver — including nvidia — can auto-bind to the GPU. The kernel honours
+# this even when nvidia.ko's pci_register_driver runs at insmod time:
+# probe is silently skipped and dmesg reports "NVIDIA probe routine was not
+# called for 1 device(s)".
+# Clear the override (only when set to a non-nvidia value) so this container
+# is a self-sufficient loader after a remove.sh teardown.
+override_path="/sys/bus/pci/devices/${EGPU_BDF}/driver_override"
+if [[ -e "$override_path" ]]; then
+    cur="$(cat "$override_path" 2>/dev/null || true)"
+    case "$cur" in
+        ""|"(null)"|"nvidia")
+            : # nothing to do
+            ;;
+        *)
+            log "driver_override blocking nvidia (was: '${cur}') — clearing"
+            # sysfs accepts empty write to clear; trailing newline is stripped.
+            if ! printf '\n' > "$override_path" 2>/dev/null; then
+                warn "failed to clear driver_override at ${override_path};
+       insmod will succeed but nvidia probe will not fire on ${EGPU_BDF}.
+       Resolve manually:  echo > ${override_path}"
+            fi
+            ;;
+    esac
+fi
+
+# ============================================================================
 # Step 2: BAR1 verify
 # ============================================================================
 
