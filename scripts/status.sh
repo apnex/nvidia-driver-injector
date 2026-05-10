@@ -200,9 +200,11 @@ fi
 # ============================================================================
 section "6. NVreg parameters (production posture from modprobe.d)"
 # ============================================================================
-# Only meaningful when nvidia is loaded. modprobe.d's options DO take
-# effect at module load time only — runtime params reflect what was set
-# at load.
+# Only meaningful when nvidia is loaded. Most NVreg_* options are
+# write-only at module-load time — they aren't exposed at runtime
+# under /sys/module/nvidia/parameters/. We verify the ones we can
+# (LeverMRecoverEnable IS exposed) and trust section 7's /dev/nvidia*
+# perm check to indirectly confirm NVreg_DeviceFile* applied.
 if mod_loaded nvidia; then
     re=$(cat /sys/module/nvidia/parameters/NVreg_TbEgpuLeverMRecoverEnable 2>/dev/null || echo "?")
     if [[ "$re" == "1" ]]; then
@@ -212,18 +214,8 @@ if mod_loaded nvidia; then
     else
         warn "Lever M-recover: unknown (RecoverEnable=$re)"
     fi
-    dfm=$(cat /sys/module/nvidia/parameters/NVreg_DeviceFileMode 2>/dev/null || echo "?")
-    if [[ "$dfm" == "432" ]]; then
-        ok "NVreg_DeviceFileMode = 432 (0660)"
-    else
-        warn "NVreg_DeviceFileMode = $dfm (expected 432)"
-    fi
-    rmf=$(cat /sys/module/nvidia/parameters/NVreg_RegistryDwords 2>/dev/null | head -1)
-    if [[ "$rmf" == *"RmForceExternalGpu=1"* ]]; then
-        ok "RmForceExternalGpu=1 (Lever A)"
-    else
-        warn "RmForceExternalGpu not in NVreg_RegistryDwords"
-    fi
+    info "NVreg_DeviceFile* + RmForceExternalGpu are write-only at load;"
+    info "  see section 7 (perm check) for indirect verification of DeviceFileMode/UID/GID."
 fi
 
 # ============================================================================
