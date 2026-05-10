@@ -22,9 +22,22 @@ for f in /usr/local/sbin/aorus-egpu-* \
 done
 
 # modprobe.d files.
-for f in /etc/modprobe.d/aorus-egpu-*.conf \
-         /etc/modprobe.d/zz-aorus-egpu-*.conf; do
+# Note: /etc/modprobe.d/zz-aorus-egpu-blacklist.conf is the *transition*
+# stub that aorus-5090-egpu's remove.sh deliberately installs to keep
+# stock nvidia from auto-loading during the gap between remove.sh and
+# whatever new install runs next. It is the documented "clean teardown
+# signal", NOT an active-state artifact. install-host.sh removes it as
+# part of dropping in our own modprobe.d (which provides equivalent
+# blacklist coverage). So we don't flag it here.
+for f in /etc/modprobe.d/aorus-egpu-*.conf; do
     [[ -e "$f" ]] && aorus_artifacts+=("$f")
+done
+# Other zz-aorus-egpu-*.conf files (anything other than blacklist)
+# would still indicate an unclean teardown.
+for f in /etc/modprobe.d/zz-aorus-egpu-*.conf; do
+    [[ -e "$f" ]] || continue
+    [[ "$(basename "$f")" == "zz-aorus-egpu-blacklist.conf" ]] && continue
+    aorus_artifacts+=("$f")
 done
 
 # systemd units.
