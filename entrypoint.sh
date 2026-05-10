@@ -324,8 +324,13 @@ if [[ -r "$recover_enable_path" ]]; then
     fi
 fi
 
-# Verify GPU bound to nvidia
-sleep 1
+# Verify GPU bound to nvidia. Wait briefly for kernel + udev to finish
+# binding the device — bind-time creates /dev/nvidia0 and /dev/nvidiactl
+# via devtmpfs, which the perms step below depends on.
+for _ in 1 2 3 4 5; do
+    if [[ -e "/sys/bus/pci/devices/${EGPU_BDF}/driver" ]]; then break; fi
+    sleep 1
+done
 if [[ -e "/sys/bus/pci/devices/${EGPU_BDF}/driver" ]]; then
     bound_drv="$(basename "$(readlink "/sys/bus/pci/devices/${EGPU_BDF}/driver")")"
     if [[ "$bound_drv" == "nvidia" ]]; then
@@ -333,27 +338,6 @@ if [[ -e "/sys/bus/pci/devices/${EGPU_BDF}/driver" ]]; then
     else
         warn "${EGPU_BDF} bound to '${bound_drv}' (expected 'nvidia') — check driver_override on host"
     fi
-fi
-
-# ============================================================================
-# Step 4.5: /dev/nvidia* permissions (Gap #4)
-# ============================================================================
-# NVreg_DeviceFile* options handle /dev/nvidia0 + /dev/nvidiactl, but
-# nvidia_uvm has no equivalent. Belt-and-suspenders chmod here so all
-# device files end up at the project's preferred 0660 root:ollama.
-# Skipped silently if the ollama group doesn't exist (host hasn't
-# completed Layer 1 install — falls back to whatever NVreg defaults are
-# in effect).
-if getent group ollama >/dev/null 2>&1; then
-    for dev in /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
-        if [[ -e "$dev" ]]; then
-            chgrp ollama "$dev" 2>/dev/null && chmod 0660 "$dev" 2>/dev/null && \
-                log "perms ✓ — ${dev}: 0660 root:ollama"
-        fi
-    done
-else
-    warn "ollama group not present on host — leaving /dev/nvidia* perms at NVreg defaults
-       (run install-host.sh on the host to create the group + udev rule)"
 fi
 
 # ============================================================================
@@ -367,6 +351,42 @@ if command -v nvidia-modprobe >/dev/null 2>&1; then
     nvidia-modprobe -u -c 0 || warn "nvidia-modprobe -u -c 0 failed (non-fatal)"
 else
     warn "nvidia-modprobe not in container PATH — /dev/nvidia-uvm-tools may be missing"
+fi
+
+# ============================================================================
+# Step 6: /dev/nvidia* permissions (Gap #4)
+# ============================================================================
+# Done AFTER nvidia-modprobe so all four canonical devices exist:
+#   - /dev/nvidia0, /dev/nvidiactl   (created by nvidia.ko at bind time)
+#   - /dev/nvidia-uvm, -uvm-tools    (created by nvidia-modprobe -u -c 0)
+#
+# NVreg_DeviceFileMode/UID/GID in /etc/modprobe.d already sets perms on
+# /dev/nvidia0 and /dev/nvidiactl at module-load time — chgrp/chmod here
+# is belt-and-suspenders. The nvidia_uvm submodule has no NVreg
+# equivalent, so this is the ONLY place /dev/nvidia-uvm gets group
+# permissions tightened.
+#
+# udevadm settle synchronises with host udev so we don't race the
+# rule's GROUP="ollama" MODE="0660" assignments. Bounded to 5s.
+if command -v udevadm >/dev/null 2>&1; then
+    udevadm settle --timeout=5 2>/dev/null || true
+fi
+
+if getent group ollama >/dev/null 2>&1; then
+    for dev in /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
+        if [[ -e "$dev" ]]; then
+            if chgrp ollama "$dev" 2>/dev/null && chmod 0660 "$dev" 2>/dev/null; then
+                log "perms ✓ — ${dev}: 0660 root:ollama"
+            else
+                warn "could not chgrp/chmod ${dev} — host udev may have it locked"
+            fi
+        else
+            warn "${dev} not present after nvidia-modprobe — perms skipped"
+        fi
+    done
+else
+    warn "ollama group not present on host — leaving /dev/nvidia* perms at NVreg defaults
+       (run install-host.sh on the host to create the group + udev rule)"
 fi
 
 ls -la /dev/nvidia* 2>/dev/null | sed 's/^/  /' || true

@@ -152,8 +152,15 @@ else
         done
     )
     if [[ -n "${bridge_bdf:-}" ]] && command -v grubby >/dev/null 2>&1; then
-        ra_arg="pci=resource_alignment=35@${bridge_bdf}"
-        if ! grep -q -- "$ra_arg" <<<"$current_cmdline"; then
+        # Match the directive substring (without the `pci=` prefix) so
+        # we recognise both forms:
+        #   pci=resource_alignment=35@<bdf>             (standalone arg)
+        #   pci=realloc=off,...,resource_alignment=35@<bdf>  (compound)
+        # Without this, install-host.sh re-adds a redundant arg every
+        # run on a host where the compound form was previously set.
+        ra_match="resource_alignment=35@${bridge_bdf}"
+        ra_arg="pci=${ra_match}"
+        if ! grep -q -- "$ra_match" <<<"$current_cmdline"; then
             yellow "  missing PCI resource_alignment for ${bridge_bdf}"
             act "grubby --update-kernel=ALL --args='${ra_arg}'"
             CMDLINE_CHANGED=1
