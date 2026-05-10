@@ -53,6 +53,15 @@
 #   CAP_TARGET_SPEED=2 nvidia-driver-injector-bridge-link-cap apply
 #   nvidia-driver-injector-bridge-link-cap restore     # clear bit 5
 #   nvidia-driver-injector-bridge-link-cap status
+#
+# === TB-tunneled gate ===
+#
+# `apply` is a clean no-op (exit 0) if the GPU is NOT behind a
+# Thunderbolt/USB4 tunnel. The cap mechanism is specifically a
+# workaround for TB controller / GSP firmware handshake quirks; on
+# direct PCIe slots the vendor-default behaviour is presumably correct
+# and a Gen3 cap could be wrong. Override with FORCE_TB=1 to apply
+# regardless, or FORCE_TB=0 to skip even on TB hardware.
 
 set -u
 
@@ -111,12 +120,72 @@ detect_bridge() {
     return 1
 }
 
+# Walk the parent chain from the GPU upward; report success if any
+# parent's lspci description contains "Thunderbolt" or "USB4". This
+# is more robust than matching specific TB controller VID:DIDs (the
+# list grows with each new chip generation), and the kernel's
+# pci_dev->is_thunderbolt struct field is not exposed via sysfs.
+#
+# Returns 0 (true) if TB-tunneled, 1 (false) otherwise. Override
+# detection via FORCE_TB=1 (treat as TB) or FORCE_TB=0 (treat as
+# direct PCIe).
+is_tb_tunneled() {
+    local start_bdf="$1"
+    if [[ "${FORCE_TB:-}" == "1" ]]; then return 0; fi
+    if [[ "${FORCE_TB:-}" == "0" ]]; then return 1; fi
+    local cur="/sys/bus/pci/devices/$start_bdf"
+    local depth=0 parent parent_bdf desc
+    while [[ $depth -lt 10 ]]; do
+        parent="$(dirname "$(readlink -f "$cur" 2>/dev/null)" 2>/dev/null)"
+        parent_bdf="$(basename "$parent" 2>/dev/null)"
+        [[ "$parent_bdf" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\. ]] || return 1
+        desc="$(lspci -s "$parent_bdf" 2>/dev/null)"
+        grep -qiE 'Thunderbolt|USB4' <<<"$desc" && return 0
+        cur="$parent"
+        depth=$((depth+1))
+    done
+    return 1
+}
+
 # Override via BRIDGE= env if needed (e.g. for testing with a known BDF).
 BRIDGE="${BRIDGE:-$(detect_bridge || true)}"
 
 if [[ -z "$BRIDGE" ]]; then
     yellow "No AORUS RTX 5090 (${VENDOR_ID}:${DEVICE_ID}) found on PCI bus"
     yellow "(this is expected if the eGPU is disconnected; oneshot exits clean)"
+    exit 0
+fi
+
+# Need the GPU's BDF for TB-tunneled detection. detect_bridge already
+# walked /sys/bus/pci/devices so re-walking is cheap.
+detect_gpu_bdf() {
+    local d v dv
+    for d in /sys/bus/pci/devices/*; do
+        [[ -r "$d/vendor" && -r "$d/device" ]] || continue
+        v=$(<"$d/vendor"); dv=$(<"$d/device")
+        if [[ "$v" == "$VENDOR_ID" && "$dv" == "$DEVICE_ID" ]]; then
+            basename "$(readlink -f "$d")"
+            return 0
+        fi
+    done
+    return 1
+}
+GPU_BDF="$(detect_gpu_bdf || true)"
+
+# Gate the cap on TB-tunneled connectivity. The cap's mechanism (and
+# its hard-won Gen3+bit5 default) is specifically a workaround for the
+# TB controller / GSP firmware handshake. On non-TB hardware (eGPU in
+# an internal slot, OcuLink, or another non-TB attachment) the
+# vendor-default link behaviour is presumably correct, and writing a
+# Gen3 cap could degrade things or just be wrong. So: cap only when
+# the GPU is actually downstream of a TB tunnel.
+#
+# Override via FORCE_TB=1 to apply anyway (e.g. for hardware where
+# our detection misses a TB controller), or FORCE_TB=0 to skip.
+if ! is_tb_tunneled "$GPU_BDF"; then
+    yellow "GPU at ${GPU_BDF} is not behind a Thunderbolt/USB4 tunnel"
+    yellow "(parent chain has no Thunderbolt/USB4 device; skipping cap)"
+    yellow "Override with FORCE_TB=1 ${0##*/} apply if your hardware is misdetected"
     exit 0
 fi
 
