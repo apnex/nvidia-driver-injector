@@ -1,0 +1,27 @@
+=== systemd unit Environment ===
+Environment=
+
+=== drop-in overrides ===
+(none)
+
+=== drop-in contents ===
+(none)
+
+=== service status (first 30 lines) ===
+● nvidia-driver-injector-bridge-link-cap.service - NVIDIA driver-injector bridge link cap (Lever H17 — sets LnkCtl2 Target=Gen1 + bit 5 on the eGPU's parent bridge before nvidia binds)
+     Loaded: loaded (/etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service; enabled; preset: disabled)
+    Drop-In: /usr/lib/systemd/system/service.d
+             └─10-timeout-abort.conf
+     Active: active (exited) since Sun 2026-05-10 14:01:27 AEST; 1min 50s ago
+ Invocation: 52e5dc8026a44e84b8bc919c63da1ef4
+       Docs: https://github.com/apnex/nvidia-driver-injector/blob/main/docs/bridge-link-cap-mechanism.md
+    Process: 1177 ExecStart=/usr/local/sbin/nvidia-driver-injector-bridge-link-cap apply (code=exited, status=0/SUCCESS)
+   Main PID: 1177 (code=exited, status=0/SUCCESS)
+   Mem peak: 2.8M
+        CPU: 9ms
+
+May 10 14:01:27 obpc systemd[1]: Starting nvidia-driver-injector-bridge-link-cap.service - NVIDIA driver-injector bridge link cap (Lever H17 — sets LnkCtl2 Target=Gen1 + bit 5 on the eGPU's parent bridge before nvidia binds)...
+May 10 14:01:27 obpc nvidia-driver-injector-bridge-link-cap[1177]: bridge=0000:03:00.0  setting bit 5 + Target=Gen1
+May 10 14:01:27 obpc nvidia-driver-injector-bridge-link-cap[1177]:   LnkCtl2 0x0044 → 0x0061
+May 10 14:01:27 obpc nvidia-driver-injector-bridge-link-cap[1177]:   retrain triggered
+May 10 14:01:27 obpc systemd[1]: Finished nvidia-driver-injector-bridge-link-cap.service - NVIDIA driver-injector bridge link cap (Lever H17 — sets LnkCtl2 Target=Gen1 + bit 5 on the eGPU's parent bridge before nvidia binds).

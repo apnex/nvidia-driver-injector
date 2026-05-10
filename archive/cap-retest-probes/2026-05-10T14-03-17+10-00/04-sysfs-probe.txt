@@ -1,0 +1,38 @@
+=== /proc/modules nvidia ===
+nvidia_uvm 2670592 0 - Live 0xffffffffc2a04000 (OE)
+nvidia 16408576 1 nvidia_uvm, Live 0xffffffffc2600000 (OE)
+
+=== /sys/module/nvidia/parameters (NVreg_TbEgpu*) ===
+NVreg_TbEgpuLeverMMaxAttempts = 3
+NVreg_TbEgpuLeverMMinAttemptIntervalMs = 30000
+NVreg_TbEgpuLeverMRecoverEnable = 1
+NVreg_TbEgpuLeverMResetSettleMs = 500
+NVreg_TbEgpuLeverMSurrenderResetSec = 300
+NVreg_TbEgpuLeverMTestForceTrigger = 0
+NVreg_TbEgpuUncMaskClearEnable = 1
+NVreg_TbEgpuWatchdogEnable = 1
+NVreg_TbEgpuWatchdogIntervalMs = 200
+
+=== /sys/bus/pci/devices/0000:04:00.0/ ===
+  vendor = 0x10de
+  device = 0x2b85
+  class = 0x030000
+cat: '/sys/bus/pci/devices/0000:04:00.0/driver': Is a directory
+  driver = 
+  power_state = D0
+  current_link_speed = 2.5 GT/s PCIe
+  current_link_width = 4
+
+=== /dev/nvidia* nodes (no open, just stat) ===
+crw-rw----. 1 root ollama 508, 0 May 10 14:01 /dev/nvidia-uvm
+crw-rw----. 1 root ollama 508, 1 May 10 14:01 /dev/nvidia-uvm-tools
+
+/dev/nvidia-caps:
+total 0
+drwxr-xr-x.  2 root root     80 May 10 14:01 .
+drwxr-xr-x. 22 root root   4800 May 10 14:01 ..
+cr--------.  1 root root 511, 1 May 10 14:01 nvidia-cap1
+cr--r--r--.  1 root root 511, 2 May 10 14:01 nvidia-cap2
+
+=== existing /dev/nvidia* holders (lsof) ===
+(none)
