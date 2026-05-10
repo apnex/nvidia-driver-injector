@@ -2,33 +2,46 @@
 
 ## TL;DR
 
-The "cap" the bridge-link-cap service applies is **not a bandwidth cap**.
-It is a *controlled retrain trigger* whose stability depends on which
-Target Link Speed value gets handshook between the Thunderbolt
-controller firmware and the GPU's GSP firmware.
-On TB-tunneled paths the link can never actually converge above Gen1
-(upstream-of-tunnel bridges are virtualized at LnkCap=Gen1),
-so any Target value above Gen1 is effectively a request that cannot
-be granted.
+The "cap" the bridge-link-cap service applies has TWO simultaneous
+effects:
 
-Observed on this hardware (Meteor Lake-P TB4 + AORUS RTX 5090 TB5
-dock,
-2026-05-10):
-**something during the GPU's stop_device path rewrites Target to
-Gen1,**
-regardless of what we set.
-The exact rewriter is one of (bridge auto-sync, GSP firmware,
-TB controller firmware) — I have not pinned it down.
-The kernel's `pcie_failed_link_retrain()` quirk is a theoretical
-recovery path but does not fire on this hardware (DLLLA stays up
-during our cap retrain).
+1. **Stability:** the boot-time retrain handshake between the TB
+   controller firmware and the GPU GSP firmware can deadlock at some
+   Target values (Gen4 froze the host on 2026-05-10 22:00) and
+   succeeds cleanly at others (Gen3 PASS on n=1 retest 2026-05-10
+   13:11).
+2. **Bandwidth:** the Target value at the BOOT-TIME retrain commits
+   the TB tunnel rate for the rest of the session. Subsequent
+   runtime LnkCtl2 writes do NOT move the tunnel rate. Measured
+   2026-05-10:
+   Gen1+bit5 from boot → 0.61 GB/s H2D (Gen1 x4 saturated);
+   Gen3+bit5 from boot → 2.83 GB/s H2D (TB4 saturated).
 
-**Empirical recommendation: Target=Gen1 + bit 5.**
-It matches the post-shutdown converged state from the start,
-so no transition involving a contested handshake at higher virtual
-speeds is ever attempted —
-which is the regime that deadlocked the TB firmware on 2026-05-10
-22:00 (Gen4+bit5 cap → host freeze on `nvidia-smi`).
+**Empirical recommendation: Target=Gen3 + bit 5.**
+It is the boot-time-validated stability PASS AND the
+TB4-saturated-bandwidth setting.
+Gen1+bit5 is safe but costs ~80% of bandwidth and provides no
+stability advantage.
+Gen4+bit5 is dangerous (froze the host).
+Bit 5 is independently load-bearing for boot-time GSP stability
+across all Target values.
+
+What lspci shows is misleading: the upstream-of-tunnel ports advertise
+LnkCap=Gen1 and the eGPU-side bridge often reports LnkSta=Gen1
+regardless of the actual tunnel rate.
+Use `nvbandwidth` (real bytes/sec) to know what's really happening.
+
+What the kernel does NOT do:
+the `pcie_failed_link_retrain()` quirk in `drivers/pci/quirks.c` is
+a theoretical recovery path but does NOT fire on this hardware
+(its dmesg pci_info is absent;
+M-recover diag traces show DLLLA stayed up during our retrains,
+so the quirk's `!DLLLA && LBMS_seen` trigger is never met).
+The Target=Gen3→Gen1 transition we observed during stop_device on
+LAST-CLOSE is done by an unidentified entity (bridge auto-sync,
+GSP firmware via BR04 LinkCtrlStat2, or TB controller firmware) —
+but that transition is purely a register cosmetic;
+it does NOT move the tunnel rate.
 
 ## What the cap binary writes
 
@@ -125,30 +138,44 @@ The bridge advertises Gen4 x4 in its LnkCap — but the link can never
 converge above Gen1 because the upstream port is virtualized at Gen1.
 PCIe spec: the link converges at the slowest port in the chain.
 
-So when our cap writes Target=Gen3 + retrain:
+When our cap writes Target=Gen3+bit5 + retrain at boot:
 
-1. The bridge attempts to renegotiate at Gen3 with the GPU
-   (its downstream device).
-2. The TB controller does not move LnkSta above Gen1 — but DLLLA
-   stays up,
-   LBMS gets set,
-   and Br_LnkSta becomes `0x7043` (Speed=Gen3 visually,
-   Width=x4,
-   DLLLA=Y,
-   LBMS=Y).
-3. The cap remains at Target=Gen3 across the workload (we observed
-   this — Target=Gen3 stayed stable through nvbandwidth and
-   nvidia-smi -L).
-4. **During the GPU's stop_device path on the LAST close of
-   `/dev/nvidia0`, Target gets rewritten to Gen1 by some entity
-   (bridge auto-sync, GSP firmware, or TB controller firmware —
-   not pinned down).**
-5. After post-shutdown the cap is Target=Gen1, LnkSta=Gen1,
-   stable until next cap-script apply.
+1. The TB controller and GPU GSP firmware run their initial
+   PCIe-virtual handshake.
+2. The handshake commits a TB tunnel rate that maps roughly to
+   Gen3 throughput — measured ~2.83 GB/s H2D, consistent with TB4
+   saturation.
+3. From the kernel's perspective:
+   bridge LnkCtl2 = `0x0063` (Target=Gen3, bit 5 set);
+   bridge LnkSta = `0x7043` (Speed=Gen3 visually, Width=x4,
+   DLLLA=Y, LBMS=Y).
+   The Speed=Gen3 in LnkSta is the TB controller's virtualized
+   representation;
+   the upstream-of-tunnel ports still report LnkCap=Gen1.
+4. The cap stays at Target=Gen3 across the workload.
+5. During the GPU's stop_device path on LAST-CLOSE of
+   `/dev/nvidia0`, Target gets rewritten from Gen3 to Gen1 by some
+   entity (bridge auto-sync, GSP firmware, or TB controller firmware
+   — not pinned down).
+   This is purely a register cosmetic;
+   the tunnel rate is unchanged and will resume at full bandwidth
+   on the next workload.
 
-Bandwidth is unchanged — TB4 saturates at ~2.83 GB/s H2D regardless,
-verified with nvbandwidth at both Gen1 and Gen3 cap states (2.84 and
-2.83 GB/s respectively, well within measurement noise).
+When our cap writes Target=Gen1+bit5 + retrain at boot:
+
+1. Same handshake as above but at Gen1.
+2. **The TB tunnel commits at Gen1 x4 throughput — measured
+   0.61 GB/s H2D — and stays there for the rest of the session.**
+3. Live-writing Target=Gen3 after this boot does NOT move the
+   tunnel rate (verified empirically 2026-05-10).
+4. On stop_device, Target stays at Gen1 (no rewrite needed since
+   it's already there).
+
+The boot-time Target value is therefore load-bearing for both
+stability AND bandwidth.
+Higher Targets give higher tunnel rates (up to TB4 saturation at
+Gen3) but expose the firmware-handshake surface that froze us at
+Gen4.
 
 ## What bit 5 does (still load-bearing)
 
@@ -231,63 +258,67 @@ is undetermined.
 
 ## Implications for cap policy
 
-| Setting | What happens | Recommendation |
-|---|---|---|
-| Target=Gen1 + bit 5 | Matches the natural converged state from the start → no contested handshake ever attempted → stable | **Default — universally safe for TB-tunneled** |
-| Target=Gen2 + bit 5 | Initial retrain converges at Gen1 LnkSta but Target stays Gen2 in LnkCtl2; gets resynced to Gen1 during stop_device | Works, no observed failures, but no advantage over Gen1 |
-| Target=Gen3 + bit 5 | Same pattern as Gen2; n=1 PASS on this stack 2026-05-10 13:11 | Works, no observed failures, but no advantage over Gen1 |
-| Target=Gen4 + bit 5 | n=1 host freeze 2026-05-10 22:00 — most plausible mechanism is the TB-firmware handshake deadlocking on the contested virtual-Gen4 retrain | **Dangerous** |
-| No cap (vendor default Gen4 + bit 5=0) | Hardware autonomous Gen3↔Gen4 oscillation → 36 GSP_LOCKDOWN_NOTICE events during GSP boot | Confirmed bad (project history) |
+Cap behaviour at boot:
 
-Gen1+bit5 is preferred not because anything actively rescues us from
-higher Targets,
-but because the higher-Target cases are pure exposure to a firmware
-handshake that we don't fully understand and that has demonstrated
-the ability to deadlock the host (Gen4 case).
-Gen2 and Gen3 happen to work with no observed failures —
-but with zero performance benefit and no recovery story if the
-firmware ever changes behaviour,
-they're strictly more risk than Gen1.
+| Setting | Stability | Bandwidth (measured 2026-05-10) | Recommendation |
+|---|---|---|---|
+| Target=Gen1 + bit 5 | ✓ safe | **0.61 GB/s** (Gen1 x4 saturated; ~80% loss vs TB4) | Diagnostic / fallback only |
+| Target=Gen2 + bit 5 | untested | expected ~2 GB/s (Gen2 x4 max) | Untested; no reason to choose over Gen3 |
+| **Target=Gen3 + bit 5** | ✓ n=1 PASS 2026-05-10 13:11 | **2.83 GB/s** (TB4 saturated) | **DEFAULT** |
+| Target=Gen4 + bit 5 | ✗ n=1 freeze 2026-05-10 22:00 | n/a | **Dangerous** |
+| No cap (vendor default Gen4 + bit 5=0) | ✗ 36 GSP_LOCKDOWN_NOTICE | n/a | Confirmed bad (project history) |
+
+Gen3+bit5 is the empirically validated sweet spot:
+high enough that the TB tunnel commits at full bandwidth,
+low enough that the firmware handshake doesn't enter the
+deadlock-prone Gen4-virtual regime,
+combined with bit 5 that prevents firmware-autonomous re-oscillation.
+
+Bit 5 is independently load-bearing across all Target values:
+without bit 5,
+the link autonomously oscillates Gen3↔Gen4 at boot and GSP fires
+36 LOCKDOWN_NOTICE events.
+With bit 5,
+both Gen1+bit5 and Gen3+bit5 boot cleanly (different bandwidth,
+same stability).
 
 ## Universality
 
-The reasoning behind "Gen1 is universally safe" is mechanism-based,
-not data-based — we have one Linux host, one TB controller, one GPU.
-Caveats apply.
+The Gen3+bit5 default is empirically validated only on this hardware
+(NUC 15 Pro+ Meteor Lake-P TB4 + AORUS RTX 5090 TB5/USB4 dock,
+n=1 boot-time PASS).
+Other hardware combinations may differ.
 
-Mechanism arguments for universality:
+Mechanism observations that are likely generalizable:
 
-- TB tunnel bandwidth is set at the TB layer (TB3/TB4/TB5) and is
-  decoupled from the PCIe-virtual Target value seen by the OS.
-  This appears to be intrinsic to how TB virtualizes PCIe.
-- Intel TB controllers virtualize upstream-of-tunnel PCIe ports with
-  LnkCap=Gen1 across the Intel TB family
-  (verified on Meteor Lake-P TB4 + JHL9480 TB5;
-  same pattern reported on earlier Intel TB hosts).
-- Bit 5 (Hardware Autonomous Speed Disable) is part of the PCIe
-  base spec and present on every PCIe Gen2+ device.
-- A Target=Gen1 cap therefore matches the post-shutdown converged
-  state on any TB-tunneled host;
-  no contested handshake at higher virtual speeds is ever attempted;
-  the firmware-deadlock surface that produced the 2026-05-10 freeze
-  is sidestepped entirely.
+- The TB controller's tunnel-rate handshake commits at boot.
+  Subsequent runtime LnkCtl2 changes are register cosmetics that
+  don't move the tunnel rate.
+  This appears to be how TB virtualization works in general.
+- Bit 5 (Hardware Autonomous Speed Disable) is PCIe-spec and applies
+  uniformly across vendors.
+- The kernel's `pcie_failed_link_retrain()` quirk is a generic
+  fallback but does not necessarily fire on TB hardware
+  (its DLLLA-down trigger is too-strict for TB controllers that
+  keep DLLLA up even when the requested speed isn't met).
 
-Concrete things I do NOT know:
+Things that may be hardware-specific:
 
-- Whether Intel TB controllers other than JHL9480 deadlock on Gen4
-  Target the same way — could be JHL9480-specific firmware.
-- Whether non-NVIDIA GPUs over TB exhibit the same handshake-
-  sensitivity at higher Target values.
-- Whether non-Intel TB controllers (e.g. AMD's USB4 implementations)
-  virtualize PCIe topology the same way.
+- The Gen4-virtual handshake deadlock observed on JHL9480 may be a
+  firmware bug specific to that controller.
+  Other TB controllers could deadlock at different Target values
+  or none at all.
+- The exact bandwidth-vs-Target curve depends on the TB controller's
+  internal tunnel-rate-selection logic.
+  Other controllers might not give the clean Gen1<<Gen3 step we see.
+- Non-NVIDIA GPUs may behave differently at the GSP-equivalent
+  firmware level.
 
-Use the Gen1+bit5 default as a strong baseline,
-not as a proven invariant.
-The injector repo's `tools/cap-retest-probe.sh` will exercise the
-relevant register state and bandwidth on any host that has the
-binary installed —
-running it at a few Target values is the right way to confirm before
-deploying on novel hardware.
+Use Gen3+bit5 as a strong starting point on novel hardware.
+`tools/cap-retest-probe.sh` exercises the relevant state and
+bandwidth at any cap setting —
+running it at a few Target values per hardware combination is the
+right way to confirm before locking in a default.
 
 ## References
 

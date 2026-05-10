@@ -1,5 +1,5 @@
 [Unit]
-Description=NVIDIA driver-injector bridge link cap (Lever H17 — sets LnkCtl2 Target=Gen1 + bit 5 on the eGPU's parent bridge before nvidia binds)
+Description=NVIDIA driver-injector bridge link cap (Lever H17 — sets LnkCtl2 Target=Gen3 + bit 5 on the eGPU's parent bridge before nvidia binds)
 Documentation=https://github.com/apnex/nvidia-driver-injector/blob/main/docs/bridge-link-cap-mechanism.md
 # Ordering: must run after Thunderbolt is up so the bridge BDF is
 # enumerated, and before docker so the cap is in place before any
@@ -26,21 +26,25 @@ ExecStart=/usr/local/sbin/nvidia-driver-injector-bridge-link-cap apply
 ExecStop=/usr/local/sbin/nvidia-driver-injector-bridge-link-cap restore
 RemainAfterExit=yes
 
-# Default behaviour (binary 2026-05-10 evening): set Target=Gen1 +
-# bit 5 (Hardware Autonomous Speed Disable). This matches what the
-# kernel's pcie_failed_link_retrain() quirk forces anyway on TB-
-# tunneled paths, so no contested handshake at higher virtual speeds
-# is ever attempted. Bandwidth unchanged (TB tunnel saturates at
-# ~2.83 GB/s H2D regardless).
+# Default behaviour (binary 2026-05-10 second iteration): set
+# Target=Gen3 + bit 5 (Hardware Autonomous Speed Disable). The TB
+# controller commits the tunnel rate at boot-time retrain, so
+# CAP_TARGET_SPEED at boot directly determines actual bandwidth:
+# Gen3+bit5 gives TB4-saturated 2.83 GB/s H2D; Gen1+bit5 gives
+# 0.61 GB/s (Gen1 x4 saturated).
+#
+# Gen3+bit5 was retest-validated 2026-05-10 13:11 (clean nvidia-smi,
+# 0 AER, 0 GSP_LOCKDOWN, 2.83 GB/s nvbandwidth) on the current stack.
+# Gen4+bit5 froze the host on 2026-05-10 22:00 (do not use).
 #
 # See docs/bridge-link-cap-mechanism.md for the full mechanism
-# (kernel quirk + TB virtualization + cap-script interaction) and
-# the 2026-05-10 22:00 Gen4+bit5 freeze incident.
+# (TB virtualization + boot-time-tunnel-rate-commit + cap-script
+# interaction) and the 2026-05-10 22:00 Gen4+bit5 freeze incident.
 #
 # Override Target Link Speed via drop-in (rarely needed):
 #   sudo systemctl edit nvidia-driver-injector-bridge-link-cap.service
 #   [Service]
-#   Environment="CAP_TARGET_SPEED=2"   # 1=Gen1 (default), 2-4=higher
+#   Environment="CAP_TARGET_SPEED=2"   # 3=Gen3 (default), 1=Gen1 etc.
 
 [Install]
 WantedBy=multi-user.target

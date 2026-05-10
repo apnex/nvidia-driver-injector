@@ -1,0 +1,22 @@
+=== bridge 0000:03:00.0 ===
+bridge=0000:03:00.0
+LnkCtl2=0x0061  TargetLinkSpeed=Gen1  HwAutoSpeedDisable(bit5)=1
+LnkSta=0x7041    LiveSpeed=Gen1  Width=x4  Active=1
+
+=== bridge raw setpci ===
+0c40
+7041
+0061
+  ^ LnkCtl(0x10), LnkSta(0x12), LnkCtl2(0x30)
+
+=== GPU 0000:04:00.0 LnkSta ===
+1041
+
+=== lspci LnkCap/LnkSta on bridge (vvv) ===
+		LnkCap:	Port #0, Speed 16GT/s, Width x4, ASPM L1, Exit Latency L1 <4us
+		LnkCtl:	ASPM Disabled; LnkDisable- CommClk+
+		LnkSta:	Speed 2.5GT/s, Width x4
+		LnkCap2: Supported Link Speeds: 2.5-16GT/s, Crosslink- Retimer+ 2Retimers+ DRS-
+		LnkCtl2: Target Link Speed: 2.5GT/s, EnterCompliance- SpeedDis+, Selectable De-emphasis: -3.5dB
+		LnkSta2: Current De-emphasis Level: -3.5dB, EqualizationComplete+ EqualizationPhase1+
+		LnkCtl3: LnkEquIntrruptEn- PerformEqu-

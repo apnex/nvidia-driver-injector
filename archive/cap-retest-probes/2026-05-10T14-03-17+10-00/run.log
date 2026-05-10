@@ -1,0 +1,42 @@
+[2026-05-10T14:03:17+10:00] === cap-retest-probe start ===
+[2026-05-10T14:03:17+10:00] GPU BDF:    0000:04:00.0
+[2026-05-10T14:03:17+10:00] Bridge BDF: 0000:03:00.0
+[2026-05-10T14:03:17+10:00] Run dir:    /root/nvidia-driver-injector/archive/cap-retest-probes/2026-05-10T14-03-17+10-00
+[2026-05-10T14:03:17+10:00] step 0: record expected config
+[2026-05-10T14:03:17+10:00] step 1: capture cap state (bridge + GPU LnkSta)
+[2026-05-10T14:03:17+10:00]   cap state captured (3 LnkCtl2 lines)
+[2026-05-10T14:03:17+10:00] step 2: AER baseline counters
+[2026-05-10T14:03:17+10:00] step 3: dmesg pre-trigger snapshot
+[2026-05-10T14:03:17+10:00]   1933 lines
+[2026-05-10T14:03:17+10:00]   boot-time AER UE-Non-Fatal events in dmesg: 0
+0
+[2026-05-10T14:03:17+10:00] step 4: sysfs-only probe (driver bound? GPU readable without open?)
+[2026-05-10T14:03:18+10:00] step 5: TRIGGER — nvidia-smi -L
+[2026-05-10T14:03:18+10:00]   if the host is going to freeze, it freezes here
+[2026-05-10T14:03:18+10:00]   (last-written file before this means: probe got past step 4 cleanly)
+[2026-05-10T14:03:21+10:00]   trigger returned (we did NOT freeze!)
+[2026-05-10T14:03:21+10:00] step 6: settle (10s) + dmesg post
+[2026-05-10T14:03:31+10:00]   2135 lines (202 new)
+[2026-05-10T14:03:31+10:00] step 7: AER counters post
+[2026-05-10T14:03:31+10:00] step 8: cap state post
+[2026-05-10T14:03:32+10:00] 
+[2026-05-10T14:03:32+10:00] === SUMMARY ===
+[2026-05-10T14:03:32+10:00]   bridge LnkCtl2 BEFORE trigger:
+    LnkCtl2=0x0061  TargetLinkSpeed=Gen1  HwAutoSpeedDisable(bit5)=1
+[2026-05-10T14:03:32+10:00]   bridge LnkCtl2 AFTER  trigger:
+    LnkCtl2=0x0061  TargetLinkSpeed=Gen1  HwAutoSpeedDisable(bit5)=1
+[2026-05-10T14:03:32+10:00] 
+[2026-05-10T14:03:32+10:00]   AER UE-Non-Fatal in dmesg pre  : 0
+?
+[2026-05-10T14:03:32+10:00]   AER UE-Non-Fatal in dmesg post : 0
+?
+[2026-05-10T14:03:32+10:00]   GSP_LOCKDOWN_NOTICE pre        : 0
+?
+[2026-05-10T14:03:32+10:00]   GSP_LOCKDOWN_NOTICE post       : 0
+?
+[2026-05-10T14:03:32+10:00] 
+[2026-05-10T14:03:32+10:00]   trigger output exit codes:
+    exit_code=0
+    exit_code=0
+[2026-05-10T14:03:32+10:00] 
+[2026-05-10T14:03:32+10:00] Probe complete. Dossier: /root/nvidia-driver-injector/archive/cap-retest-probes/2026-05-10T14-03-17+10-00

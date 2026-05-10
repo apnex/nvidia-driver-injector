@@ -1,0 +1,8 @@
+=== nvidia-smi -L ===
+GPU 0: NVIDIA GeForce RTX 5090 (UUID: GPU-90b9424e-7236-fd4d-d903-44e565e1bd42)
+exit_code=0
+
+=== nvidia-smi --query-gpu=name,pci.bus_id,pstate --format=csv ===
+name, pci.bus_id, pstate
+NVIDIA GeForce RTX 5090, 00000000:04:00.0, P0
+exit_code=0

@@ -1,0 +1,3 @@
+bridge=0000:03:00.0
+LnkCtl2=0x0061  TargetLinkSpeed=Gen1  HwAutoSpeedDisable(bit5)=1
+LnkSta=0x7041    LiveSpeed=Gen1  Width=x4  Active=1
