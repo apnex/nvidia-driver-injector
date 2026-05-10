@@ -1,42 +1,58 @@
 #!/usr/bin/env bash
 # nvidia-driver-injector-bridge-link-cap
 #
-# Caps the PCIe link speed on the upstream Thunderbolt switch
-# downstream port (the parent bridge of the AORUS RTX 5090) BEFORE
-# nvidia.ko binds, eliminating link-speed renegotiation during the
-# GSP DMA setup window — the trigger for GSP_LOCKDOWN_NOTICE / "GPU
-# lost from the bus" failures on this hardware.
+# Sets LnkCtl2 bit 5 (Hardware Autonomous Speed Disable) on the parent
+# PCIe bridge of the AORUS RTX 5090, BEFORE nvidia.ko binds. This
+# eliminates the autonomous Gen3↔Gen4 link-speed renegotiation storm
+# that triggers GSP_LOCKDOWN_NOTICE / "GPU lost from the bus" failures
+# during GSP boot on this hardware.
+#
+# Empirical finding (apnex/aorus-5090-egpu, 2026-05-08 evening):
+#   - LnkCtl2 Target Link Speed (bits[3:0]) is "preferred initial
+#     retrain speed" on this Intel TB controller — NOT a hard ceiling.
+#     Driver/kernel software-driven retrains can exceed it.
+#   - LnkCtl2 bit 5 (Hardware Autonomous Speed Disable) IS load-bearing.
+#     It disables hardware-initiated autonomous speed changes — the
+#     dangerous oscillation that crashes GSP boot.
+#   - The historical "Gen3 without bit 5: 36 LOCKDOWN events ✗" test
+#     wasn't really about Gen3 vs Gen2 vs Gen1 — it was about bit 5
+#     being absent. With bit 5 set, both Gen1+bit5 and Gen3+bit5 stay
+#     clean. Without bit 5, the link oscillates and GSP fails.
+#
+# This script defaults to setting ONLY bit 5, leaving Target Link Speed
+# alone. The Target setting is opt-in via env (CAP_TARGET_SPEED), useful
+# only for influencing the *initial* retrain speed at boot.
 #
 # Mechanism:
 #   1. Read LnkCtl2 (PCIe Express Capability offset 0x30, word).
-#   2. Mask bits [3:0] (Target Link Speed); set to desired generation
-#      without disturbing other bits.
-#   3. Trigger Retrain Link via LnkCtl bit 5 (offset 0x10) so the new
-#      target takes effect (without retrain, the kernel/bridge will
-#      sync LnkCtl2 back to the active speed).
-#
-# Target speed defaults to Gen2 (production-validated as stable on
-# this hardware: GSP_LOCKDOWN cascade observed at Gen3, intermittent
-# at Gen4-uncapped; Gen1 also stable but bandwidth-limited).
-# Override via CAP_TARGET_SPEED env (1=Gen1, 2=Gen2, 3=Gen3).
+#   2. OR with 0x20 to set bit 5 (HW Autonomous Speed Disable).
+#   3. (Optional) If CAP_TARGET_SPEED is set, also overwrite bits[3:0].
+#   4. Write back via setpci.
+#   5. Trigger Retrain Link via LnkCtl bit 5 (offset 0x10) so the change
+#      takes effect (without retrain, kernel/bridge re-syncs LnkCtl2
+#      back to the active speed).
 #
 # Usage:
-#   nvidia-driver-injector-bridge-link-cap apply
-#   nvidia-driver-injector-bridge-link-cap restore   # let bridge default re-take
+#   nvidia-driver-injector-bridge-link-cap apply        # default: bit 5 only
+#   CAP_TARGET_SPEED=2 nvidia-driver-injector-bridge-link-cap apply
+#   nvidia-driver-injector-bridge-link-cap restore     # clear bit 5
 #   nvidia-driver-injector-bridge-link-cap status
-#
-# Cleanroom equivalent of the same operation in apnex/aorus-5090-egpu;
-# this file ships with this repo so the injector deployment can stand
-# alone without depending on that repo.
 
 set -u
 
 VENDOR_ID="0x10de"        # NVIDIA
 DEVICE_ID="0x2b85"        # RTX 5090
-TARGET_SPEED="${CAP_TARGET_SPEED:-2}"   # default Gen2
+
+# CAP_TARGET_SPEED: optional. If unset (default), don't touch bits[3:0].
+# If set (e.g. "2" for Gen2), also overwrite bits[3:0]. Hardware
+# does not strictly enforce this on this TB controller — it's an
+# initial-retrain-speed hint, not a ceiling.
+TARGET_SPEED_OVERRIDE="${CAP_TARGET_SPEED:-}"
 
 LNKCTL2_OFFSET="CAP_EXP+0x30.W"
 LNKCTL_OFFSET="CAP_EXP+0x10.W"
+LNKCTL2_BIT5_HW_AUTO_SPEED_DISABLE=0x20
+LNKCTL_BIT5_RETRAIN=0x20
 
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
@@ -44,8 +60,7 @@ red() { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 
 # Find the PCI bridge directly above the AORUS RTX 5090 by walking
 # /sys/bus/pci/devices for the matching vendor:device, then taking
-# the parent in the device tree. Works on either NUC TB4 port (the
-# bridge BDF differs per port).
+# the parent in the device tree. Works on either NUC TB4 port.
 detect_bridge() {
     local d v dv
     for d in /sys/bus/pci/devices/*; do
@@ -79,8 +94,6 @@ write_word() {
 }
 
 cmd_apply() {
-    green "bridge=${BRIDGE}  target=Gen${TARGET_SPEED}"
-
     local cur
     cur=$(read_word "$LNKCTL2_OFFSET")
     if [[ -z "$cur" ]]; then
@@ -88,23 +101,34 @@ cmd_apply() {
         exit 2
     fi
 
-    # cur is hex string like "1042"; mask off bits [3:0], set to TARGET_SPEED
     local cur_int new_int new_hex
     cur_int=$((0x$cur))
-    new_int=$(( (cur_int & ~0xF) | (TARGET_SPEED & 0xF) ))
+
+    # Always: set bit 5 (HW Autonomous Speed Disable). This is the
+    # load-bearing mitigation per project history.
+    new_int=$(( cur_int | LNKCTL2_BIT5_HW_AUTO_SPEED_DISABLE ))
+
+    # Optional: overwrite Target Link Speed if env override given.
+    if [[ -n "$TARGET_SPEED_OVERRIDE" ]]; then
+        new_int=$(( (new_int & ~0xF) | (TARGET_SPEED_OVERRIDE & 0xF) ))
+        green "bridge=${BRIDGE}  setting bit 5 + Target=Gen${TARGET_SPEED_OVERRIDE}"
+    else
+        green "bridge=${BRIDGE}  setting bit 5 only (Target Link Speed left at vendor value)"
+    fi
+
     new_hex=$(printf '%04x' "$new_int")
 
     if [[ "$cur" == "$new_hex" ]]; then
-        green "  LnkCtl2 already 0x${cur} — no change"
+        green "  LnkCtl2 already 0x${cur} — no change needed"
     else
         write_word "$LNKCTL2_OFFSET" "$new_hex"
         green "  LnkCtl2 0x${cur} → 0x${new_hex}"
 
-        # Retrain link so the new target takes effect.
+        # Retrain link so the change takes effect.
         local lnkctl lnkctl_int retrain_int retrain_hex
         lnkctl=$(read_word "$LNKCTL_OFFSET")
         lnkctl_int=$((0x$lnkctl))
-        retrain_int=$(( lnkctl_int | 0x20 ))    # bit 5 = Retrain Link
+        retrain_int=$(( lnkctl_int | LNKCTL_BIT5_RETRAIN ))
         retrain_hex=$(printf '%04x' "$retrain_int")
         write_word "$LNKCTL_OFFSET" "$retrain_hex"
         green "  retrain triggered"
@@ -112,30 +136,37 @@ cmd_apply() {
 }
 
 cmd_restore() {
-    # Restore Target Link Speed to "max supported" (vendor default).
-    # Per PCIe spec, target=0 means "use max supported speed", which
-    # lets the bridge negotiate up. This is the pre-cap state.
+    # Clear bit 5 of LnkCtl2 (re-enable hardware autonomous speed
+    # changes). This reverts the cap. If CAP_TARGET_SPEED was set on a
+    # previous apply, we don't try to remember + restore the original
+    # Target Link Speed — the original is whatever the bridge had at
+    # cold-boot, which we don't track.
     local cur cur_int new_int new_hex
     cur=$(read_word "$LNKCTL2_OFFSET")
     cur_int=$((0x$cur))
-    new_int=$(( cur_int & ~0xF ))           # clear bits [3:0] → target=0
+    new_int=$(( cur_int & ~LNKCTL2_BIT5_HW_AUTO_SPEED_DISABLE ))
     new_hex=$(printf '%04x' "$new_int")
-    write_word "$LNKCTL2_OFFSET" "$new_hex"
-    yellow "bridge=${BRIDGE}  LnkCtl2 0x${cur} → 0x${new_hex}  (target=max-supported)"
+    if [[ "$cur" == "$new_hex" ]]; then
+        yellow "bridge=${BRIDGE}  bit 5 already clear — no change"
+    else
+        write_word "$LNKCTL2_OFFSET" "$new_hex"
+        yellow "bridge=${BRIDGE}  LnkCtl2 0x${cur} → 0x${new_hex}  (bit 5 cleared)"
+    fi
 }
 
 cmd_status() {
     local lnkctl2 lnksta
     lnkctl2=$(read_word "$LNKCTL2_OFFSET")
     lnksta=$(setpci -s "$BRIDGE" CAP_EXP+0x12.W 2>/dev/null)
-    local target speed width active
+    local target bit5 speed width active
     target=$(( 0x$lnkctl2 & 0xF ))
+    bit5=$(( (0x$lnkctl2 >> 5) & 1 ))
     speed=$(( 0x$lnksta & 0xF ))
     width=$(( (0x$lnksta >> 4) & 0x3F ))
     active=$(( (0x$lnksta >> 12) & 1 ))
     cat <<EOF
 bridge=${BRIDGE}
-LnkCtl2=0x${lnkctl2}  TargetLinkSpeed=Gen${target}
+LnkCtl2=0x${lnkctl2}  TargetLinkSpeed=Gen${target}  HwAutoSpeedDisable(bit5)=${bit5}
 LnkSta=0x${lnksta}    LiveSpeed=Gen${speed}  Width=x${width}  Active=${active}
 EOF
 }
@@ -146,6 +177,9 @@ case "${1:-}" in
     status)  cmd_status ;;
     *)
         red "Usage: $0 {apply|restore|status}"
+        red ""
+        red "Default 'apply' sets only bit 5 (Hardware Autonomous Speed Disable)."
+        red "To also set Target Link Speed, use:  CAP_TARGET_SPEED=2 $0 apply"
         exit 1
         ;;
 esac

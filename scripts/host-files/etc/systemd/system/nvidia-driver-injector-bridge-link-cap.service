@@ -1,5 +1,5 @@
 [Unit]
-Description=NVIDIA driver-injector bridge link speed cap (Lever H17 — caps PCIe link to Gen2 before nvidia binds)
+Description=NVIDIA driver-injector bridge link cap (Lever H17 — sets LnkCtl2 bit 5 / HW Autonomous Speed Disable on the eGPU's parent bridge before nvidia binds)
 Documentation=https://github.com/apnex/nvidia-driver-injector/blob/main/docs/architecture.md
 # Ordering: must run after Thunderbolt is up so the bridge BDF is
 # enumerated, and before docker so the cap is in place before any
@@ -26,11 +26,18 @@ ExecStart=/usr/local/sbin/nvidia-driver-injector-bridge-link-cap apply
 ExecStop=/usr/local/sbin/nvidia-driver-injector-bridge-link-cap restore
 RemainAfterExit=yes
 
-# Default cap target is Gen2 (production-stable on this hardware).
-# Override via drop-in override.conf if you need a different speed:
+# Default behaviour: set ONLY LnkCtl2 bit 5 (Hardware Autonomous Speed
+# Disable). Target Link Speed is left at whatever the bridge boots with
+# (typically Gen4 on this NUC) — that's fine because Target Link Speed
+# is "preferred initial retrain speed" on this TB controller, NOT a
+# hard ceiling. The load-bearing mitigation is bit 5; Target is
+# cosmetic on this hardware.
+#
+# To ALSO set Target Link Speed (e.g. as a hint for initial retrain),
+# add a drop-in:
 #   sudo systemctl edit nvidia-driver-injector-bridge-link-cap.service
 #   [Service]
-#   Environment="CAP_TARGET_SPEED=1"
+#   Environment="CAP_TARGET_SPEED=2"
 
 [Install]
 WantedBy=multi-user.target

@@ -162,13 +162,20 @@ else
         lnkctl2=$(setpci -s "$BRIDGE_BDF" CAP_EXP+0x30.W 2>/dev/null)
         speed=$(( 0x$lnksta & 0xF ))
         target=$(( 0x$lnkctl2 & 0xF ))
+        bit5=$(( (0x$lnkctl2 >> 5) & 1 ))
         active=$(( (0x$lnksta >> 12) & 1 ))
-        if [[ "$target" -ge 1 && "$target" -le 2 && "$active" -eq 1 ]]; then
-            ok "bridge link: live=Gen$speed target=Gen$target active (Lever H17 in force)"
-        elif [[ "$target" -eq 0 || "$target" -ge 3 ]]; then
-            fail_ "bridge link: target=Gen$target (uncapped — wedge risk on next nvidia bind)"
+        # The load-bearing check is LnkCtl2 bit 5 (Hardware Autonomous
+        # Speed Disable) — NOT the Target Link Speed. Target is cosmetic
+        # on this Intel TB controller (kernel/driver rewrites it to
+        # match live link speed). Bit 5 actually prevents the
+        # autonomous Gen3↔Gen4 oscillation that triggers GSP_LOCKDOWN.
+        if [[ "$bit5" -eq 1 && "$active" -eq 1 ]]; then
+            ok "bridge link: live=Gen$speed active, bit5=1 (Lever H17 in force)"
+            info "  LnkCtl2=0x$lnkctl2 — Target=Gen$target (cosmetic; bit 5 is what protects)"
+        elif [[ "$bit5" -eq 0 ]]; then
+            fail_ "bridge link: LnkCtl2 bit 5 NOT set — autonomous speed changes still possible (wedge risk)"
         else
-            warn "bridge link: live=Gen$speed target=Gen$target active=$active (unusual)"
+            warn "bridge link: bit5=$bit5 active=$active (unusual)"
         fi
     fi
 fi
