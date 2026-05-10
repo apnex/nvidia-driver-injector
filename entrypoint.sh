@@ -271,7 +271,7 @@ if [[ -f "/etc/modprobe.d/nvidia-driver-injector.conf" ]]; then
 else
     warn "host /etc/modprobe.d not bind-mounted; falling back to insmod with no NVreg options.
        For production reliability, mount the host's modprobe.d into the container
-       (see docker-compose.yml) and run install-host.sh first."
+       (see docker-compose.yml) and run apply.sh first."
 fi
 
 load_module() {
@@ -320,7 +320,7 @@ if [[ -r "$recover_enable_path" ]]; then
         warn "NVreg_TbEgpuLeverMRecoverEnable=${re_val} (expected 1).
        Production posture not applied; the recovery state machine is OFF.
        Check that /etc/modprobe.d/nvidia-driver-injector.conf is bind-mounted
-       and that install-host.sh has been run on the host."
+       and that apply.sh has been run on the host."
     fi
 fi
 
@@ -386,7 +386,7 @@ if getent group ollama >/dev/null 2>&1; then
     done
 else
     warn "ollama group not present on host — leaving /dev/nvidia* perms at NVreg defaults
-       (run install-host.sh on the host to create the group + udev rule)"
+       (run apply.sh on the host to create the group + udev rule)"
 fi
 
 ls -la /dev/nvidia* 2>/dev/null | sed 's/^/  /' || true

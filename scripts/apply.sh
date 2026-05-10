@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-host.sh — Layer 1 host bring-up for the nvidia-driver-injector
+# apply.sh — Layer 1 host bring-up for the nvidia-driver-injector
 # deployment geometry.
 #
 # Idempotent. Run once at install time, again after kernel upgrades, or
@@ -57,7 +57,7 @@ for arg in "$@"; do
         --skip-cmdline)  SKIP_CMDLINE=1 ;;
         --skip-icd)      SKIP_ICD=1 ;;
         -h|--help)
-            sed -n '/^# install-host\.sh/,/^set -euo/p' "$0" | sed 's/^# \?//' | head -n -1
+            sed -n '/^# apply\.sh/,/^set -euo/p' "$0" | sed 's/^# \?//' | head -n -1
             exit 0
             ;;
         *)
@@ -66,7 +66,7 @@ for arg in "$@"; do
 done
 
 if [[ "$EUID" -ne 0 && "$NO_ACT" -eq 0 ]]; then
-    echo "install-host.sh must be run as root (or with --no-act)" >&2
+    echo "apply.sh must be run as root (or with --no-act)" >&2
     exit 1
 fi
 
@@ -156,7 +156,7 @@ else
         # we recognise both forms:
         #   pci=resource_alignment=35@<bdf>             (standalone arg)
         #   pci=realloc=off,...,resource_alignment=35@<bdf>  (compound)
-        # Without this, install-host.sh re-adds a redundant arg every
+        # Without this, apply.sh re-adds a redundant arg every
         # run on a host where the compound form was previously set.
         ra_match="resource_alignment=35@${bridge_bdf}"
         ra_arg="pci=${ra_match}"

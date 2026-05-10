@@ -7,7 +7,7 @@
 # overlapping modprobe.d, systemd services, and udev rules will fight
 # each other and produce confusing failures.
 #
-# Sourced by install-host.sh; sets exit code 0 = clear, 1 = conflict.
+# Sourced by apply.sh; sets exit code 0 = clear, 1 = conflict.
 
 # shellcheck disable=SC2148
 
@@ -26,7 +26,7 @@ done
 # stub that aorus-5090-egpu's remove.sh deliberately installs to keep
 # stock nvidia from auto-loading during the gap between remove.sh and
 # whatever new install runs next. It is the documented "clean teardown
-# signal", NOT an active-state artifact. install-host.sh removes it as
+# signal", NOT an active-state artifact. apply.sh removes it as
 # part of dropping in our own modprobe.d (which provides equivalent
 # blacklist coverage). So we don't flag it here.
 for f in /etc/modprobe.d/aorus-egpu-*.conf; do
@@ -82,9 +82,9 @@ Resolution paths:
   2. Switch fully to nvidia-driver-injector:
        cd /path/to/aorus-5090-egpu && sudo ./remove.sh && sudo reboot
        cd /path/to/nvidia-driver-injector
-       sudo ./scripts/install-host.sh
+       sudo ./scripts/apply.sh
   3. Force-install anyway (not recommended; you own the consequences):
-       sudo ./scripts/install-host.sh --force-coexist
+       sudo ./scripts/apply.sh --force-coexist
 
 EOF
     return 1

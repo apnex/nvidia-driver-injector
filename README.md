@@ -57,10 +57,10 @@ A correctly-deployed system has:
   (vLLM, OpenCode runtime, etc.):
   pure userspace, depends on `/dev/nvidia*` working.
 
-Layer 1 setup is automated by `sudo ./scripts/install-host.sh`
+Layer 1 setup is automated by `sudo ./scripts/apply.sh`
 (refuses to install if `apnex/aorus-5090-egpu` artifacts are present —
 the two are alternative geometries, not stackable);
-`sudo ./scripts/uninstall-host.sh` reverses it.
+`sudo ./scripts/remove.sh` reverses it.
 
 See [`docs/architecture.md`](docs/architecture.md) for the full layered diagram,
 component-ownership table,
@@ -78,12 +78,12 @@ and the gap-status table tracking the current implementation against the target.
 
 | Concern | Layer | Owner |
 |---|---|---|
-| Kernel cmdline (`iommu=off`, etc.) | 1 | `scripts/install-host.sh` (auto-detects bridge BDF for `pci=resource_alignment`) |
-| `/etc/modprobe.d/nvidia-driver-injector.conf` (blacklists + NVreg options including LeverMRecoverEnable=1) | 1 | `scripts/install-host.sh` |
-| Lever H17 LnkCtl2 cap (`nvidia-driver-injector-bridge-link-cap.service`, ordered `Before=docker.service`) | 1 | `scripts/install-host.sh` |
-| `/etc/udev/rules.d/79-nvidia-driver-injector.rules` (`/dev/nvidia*` group) | 1 | `scripts/install-host.sh` |
-| Vulkan/EGL/OpenCL ICD disable | 1 | `scripts/install-host.sh` |
-| `kernel-devel` for `$(uname -r)` | 1 | `scripts/install-host.sh` (dnf or apt) |
+| Kernel cmdline (`iommu=off`, etc.) | 1 | `scripts/apply.sh` (auto-detects bridge BDF for `pci=resource_alignment`) |
+| `/etc/modprobe.d/nvidia-driver-injector.conf` (blacklists + NVreg options including LeverMRecoverEnable=1) | 1 | `scripts/apply.sh` |
+| Lever H17 LnkCtl2 cap (`nvidia-driver-injector-bridge-link-cap.service`, ordered `Before=docker.service`) | 1 | `scripts/apply.sh` |
+| `/etc/udev/rules.d/79-nvidia-driver-injector.rules` (`/dev/nvidia*` group) | 1 | `scripts/apply.sh` |
+| Vulkan/EGL/OpenCL ICD disable | 1 | `scripts/apply.sh` |
+| `kernel-devel` for `$(uname -r)` | 1 | `scripts/apply.sh` (dnf or apt) |
 | **Kernel module build + load** (`modprobe --ignore-install nvidia` against the patched .ko) | **2** | **this container's entrypoint** ✓ |
 | **`nvidia-modprobe -u -c 0`** (UVM device files) | **2** | **this container's entrypoint** ✓ |
 | `/dev/nvidia*` chown/chmod (belt-and-suspenders to udev rule) | 2 | this container's entrypoint ✓ |
@@ -164,9 +164,9 @@ boltctl list                          # status: authorized
 sudo git clone https://github.com/apnex/nvidia-driver-injector \
     /root/nvidia-driver-injector
 cd /root/nvidia-driver-injector
-sudo ./scripts/install-host.sh        # idempotent; refuses on aorus-5090-egpu hosts
+sudo ./scripts/apply.sh        # idempotent; refuses on aorus-5090-egpu hosts
 
-# 2. Reboot if install-host.sh prompts (kernel cmdline change)
+# 2. Reboot if apply.sh prompts (kernel cmdline change)
 sudo reboot
 
 # 3. Build + start the injector container (Layer 2)

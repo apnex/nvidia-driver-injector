@@ -21,7 +21,7 @@ For the architecture this implements, see
   the scripts handle Fedora and Debian/Ubuntu package paths.
 - **No active aorus-5090-egpu install on this host.**
   The two are alternative geometries —
-  install-host.sh refuses to install on top of an existing
+  apply.sh refuses to install on top of an existing
   aorus-egpu setup
   (see the [migration](#migration-from-aorus-5090-egpu)
   section if you want to switch).
@@ -96,7 +96,7 @@ cd /root/nvidia-driver-injector
 ### Step 3 — Run Layer 1 host bring-up
 
 ```bash
-sudo ./scripts/install-host.sh
+sudo ./scripts/apply.sh
 ```
 
 Idempotent. Refuses to install if `apnex/aorus-5090-egpu`
@@ -126,7 +126,7 @@ Useful flags:
 
 ### Step 4 — Reboot if instructed
 
-If `install-host.sh` changed the kernel cmdline,
+If `apply.sh` changed the kernel cmdline,
 its summary tells you to reboot:
 
 ```bash
@@ -220,7 +220,7 @@ cd /path/to/your/workload && docker compose down
 
 # 2. Tear down aorus-5090-egpu's host stack.
 #    It leaves /etc/modprobe.d/zz-aorus-egpu-blacklist.conf as a
-#    transition stub to keep nvidia from auto-loading. install-host.sh
+#    transition stub to keep nvidia from auto-loading. apply.sh
 #    recognises and replaces this stub — no manual cleanup needed.
 cd /root/aorus-5090-egpu && sudo ./remove.sh
 
@@ -229,7 +229,7 @@ sudo reboot
 
 # 4. After reboot, install + start the injector.
 cd /root/nvidia-driver-injector
-sudo ./scripts/install-host.sh
+sudo ./scripts/apply.sh
 sudo reboot                        # only if cmdline changed; usually
                                    # not needed in the migration case
                                    # since aorus-egpu's apply.sh sets
@@ -239,7 +239,7 @@ docker compose up -d
 
 In practice, since aorus-5090-egpu and this repo apply equivalent
 kernel cmdline tuning, the second reboot in step 4 is rare —
-`install-host.sh` will report "all required cmdline args already present"
+`apply.sh` will report "all required cmdline args already present"
 and skip the reboot prompt.
 
 ---
@@ -258,7 +258,7 @@ docker compose run --rm driver-injector uninstall   # rmmod nvidia_uvm + nvidia
 docker compose down
 
 # 1. Remove host-side install
-sudo ./scripts/uninstall-host.sh
+sudo ./scripts/remove.sh
 # Add --revert-cmdline if you want kernel args reverted too.
 # Default leaves cmdline alone (the iommu=off etc. tuning is
 # generally useful, not specific to this deployment).
