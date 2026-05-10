@@ -1,0 +1,36 @@
+=== systemd unit Environment ===
+Environment=CAP_TARGET_SPEED=3
+
+=== drop-in overrides ===
+total 4
+drwxr-xr-x. 1 root root   40 May 10 13:02 .
+drwxr-xr-x. 1 root root 2112 May 10 13:02 ..
+-rw-r--r--. 1 root root  233 May 10 13:02 cap-target-test.conf
+
+=== drop-in contents ===
+/etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service.d/cap-target-test.conf:# Test override 2026-05-10: Gen3+bit5 retest on Port A
+/etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service.d/cap-target-test.conf:# Default in the binary is now Gen2; this overrides to Gen3 for one
+/etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service.d/cap-target-test.conf:# specific reboot test. Remove this file after the test concludes.
+/etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service.d/cap-target-test.conf:[Service]
+/etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service.d/cap-target-test.conf:Environment="CAP_TARGET_SPEED=3"
+
+=== service status (first 30 lines) ===
+● nvidia-driver-injector-bridge-link-cap.service - NVIDIA driver-injector bridge link cap (Lever H17 — sets LnkCtl2 bit 5 / HW Autonomous Speed Disable on the eGPU's parent bridge before nvidia binds)
+     Loaded: loaded (/etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service; enabled; preset: disabled)
+    Drop-In: /usr/lib/systemd/system/service.d
+             └─10-timeout-abort.conf
+             /etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service.d
+             └─cap-target-test.conf
+     Active: active (exited) since Sun 2026-05-10 13:09:59 AEST; 1min 36s ago
+ Invocation: fca3ad37173a4937a6f086dfe4b8476e
+       Docs: https://github.com/apnex/nvidia-driver-injector/blob/main/docs/architecture.md
+    Process: 1168 ExecStart=/usr/local/sbin/nvidia-driver-injector-bridge-link-cap apply (code=exited, status=0/SUCCESS)
+   Main PID: 1168 (code=exited, status=0/SUCCESS)
+   Mem peak: 2.9M
+        CPU: 9ms
+
+May 10 13:09:59 obpc systemd[1]: Starting nvidia-driver-injector-bridge-link-cap.service - NVIDIA driver-injector bridge link cap (Lever H17 — sets LnkCtl2 bit 5 / HW Autonomous Speed Disable on the eGPU's parent bridge before nvidia binds)...
+May 10 13:09:59 obpc nvidia-driver-injector-bridge-link-cap[1168]: bridge=0000:03:00.0  setting bit 5 + Target=Gen3
+May 10 13:09:59 obpc nvidia-driver-injector-bridge-link-cap[1168]:   LnkCtl2 0x0044 → 0x0063
+May 10 13:09:59 obpc nvidia-driver-injector-bridge-link-cap[1168]:   retrain triggered
+May 10 13:09:59 obpc systemd[1]: Finished nvidia-driver-injector-bridge-link-cap.service - NVIDIA driver-injector bridge link cap (Lever H17 — sets LnkCtl2 bit 5 / HW Autonomous Speed Disable on the eGPU's parent bridge before nvidia binds).
