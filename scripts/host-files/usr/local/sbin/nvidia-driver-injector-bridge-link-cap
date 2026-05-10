@@ -1,39 +1,47 @@
 #!/usr/bin/env bash
 # nvidia-driver-injector-bridge-link-cap
 #
-# Sets LnkCtl2 bit 5 (Hardware Autonomous Speed Disable) on the parent
-# PCIe bridge of the AORUS RTX 5090, BEFORE nvidia.ko binds. This
-# eliminates the autonomous Gen3↔Gen4 link-speed renegotiation storm
-# that triggers GSP_LOCKDOWN_NOTICE / "GPU lost from the bus" failures
-# during GSP boot on this hardware.
+# Sets LnkCtl2 (Target Link Speed + bit 5 = Hardware Autonomous Speed
+# Disable) on the parent PCIe bridge of the AORUS RTX 5090, BEFORE
+# nvidia.ko binds. Eliminates the autonomous link-speed renegotiation
+# storm that triggers GSP_LOCKDOWN_NOTICE during GSP boot.
 #
-# Empirical finding (apnex/aorus-5090-egpu, 2026-05-08 evening):
-#   - LnkCtl2 Target Link Speed (bits[3:0]) is "preferred initial
-#     retrain speed" on this Intel TB controller — NOT a hard ceiling.
-#     Driver/kernel software-driven retrains can exceed it.
-#   - LnkCtl2 bit 5 (Hardware Autonomous Speed Disable) IS load-bearing.
-#     It disables hardware-initiated autonomous speed changes — the
-#     dangerous oscillation that crashes GSP boot.
-#   - The historical "Gen3 without bit 5: 36 LOCKDOWN events ✗" test
-#     wasn't really about Gen3 vs Gen2 vs Gen1 — it was about bit 5
-#     being absent. With bit 5 set, both Gen1+bit5 and Gen3+bit5 stay
-#     clean. Without bit 5, the link oscillates and GSP fails.
+# === Mechanism (TB-tunneled paths — see docs/bridge-link-cap-mechanism.md) ===
 #
-# This script defaults to setting ONLY bit 5, leaving Target Link Speed
-# alone. The Target setting is opt-in via env (CAP_TARGET_SPEED), useful
-# only for influencing the *initial* retrain speed at boot.
+# bit 5 of LnkCtl2 = "Hardware Autonomous Speed Disable" — blocks
+# firmware-initiated autonomous speed oscillation. Project history:
+# without bit 5 the link oscillates Gen3↔Gen4 at boot and GSP fires
+# 36 LOCKDOWN_NOTICE events. With bit 5, GSP boots clean.
 #
-# Mechanism:
-#   1. Read LnkCtl2 (PCIe Express Capability offset 0x30, word).
-#   2. OR with 0x20 to set bit 5 (HW Autonomous Speed Disable).
-#   3. (Optional) If CAP_TARGET_SPEED is set, also overwrite bits[3:0].
-#   4. Write back via setpci.
-#   5. Trigger Retrain Link via LnkCtl bit 5 (offset 0x10) so the change
-#      takes effect (without retrain, kernel/bridge re-syncs LnkCtl2
-#      back to the active speed).
+# Target Link Speed (bits[3:0]) is NOT a bandwidth cap on TB-tunneled
+# paths — bandwidth is set by the TB tunnel (TB4 → ~2.83 GB/s H2D
+# regardless). What it IS: the requested speed for the next retrain
+# handshake between the TB controller firmware and the GPU's GSP
+# firmware.
 #
-# Usage:
-#   nvidia-driver-injector-bridge-link-cap apply        # default: bit 5 only
+# When this script writes Target=Gen2/3/4 + retrain on a TB-tunneled
+# bridge, LnkSta never actually moves off Gen1 (upstream-of-tunnel
+# ports are virtualized at LnkCap=Gen1). LnkCtl2 stays at the
+# requested Target throughout the workload, then gets rewritten to
+# Gen1 during the GPU's stop_device path by an unidentified entity
+# (bridge auto-sync, GSP firmware, or TB controller firmware — NOT
+# the kernel's pcie_failed_link_retrain quirk on this hardware,
+# verified by absence of its dmesg pci_info AND by M-recover diag
+# traces showing DLLLA stayed up so the quirk's trigger was never
+# met).
+#
+# Target=Gen4 + retrain on the JHL9480 TB controller froze the host
+# on 2026-05-10 22:00 (n=1, no kernel trace preserved). Most
+# plausible mechanism: TB firmware deadlocking on the Gen4-virtual
+# handshake — cannot prove without trace-preserving reproduction.
+#
+# Target=Gen1 + bit 5 is the safe default: it matches the natural
+# converged state from the start, so no contested handshake at
+# higher virtual speeds is ever attempted.
+#
+# === Usage ===
+#
+#   nvidia-driver-injector-bridge-link-cap apply        # default: Gen1+bit5
 #   CAP_TARGET_SPEED=2 nvidia-driver-injector-bridge-link-cap apply
 #   nvidia-driver-injector-bridge-link-cap restore     # clear bit 5
 #   nvidia-driver-injector-bridge-link-cap status
@@ -43,29 +51,30 @@ set -u
 VENDOR_ID="0x10de"        # NVIDIA
 DEVICE_ID="0x2b85"        # RTX 5090
 
-# CAP_TARGET_SPEED: defaults to Gen2.
+# CAP_TARGET_SPEED: defaults to Gen1 + bit 5.
 #
-# Empirical lesson 2026-05-10 22:00 (this hardware, Port A bridge
-# 0000:03:00.0): bit 5 alone with Target left at vendor Gen4 default
-# is INSUFFICIENT. At idle the link sat at Gen4 cleanly, but workload
-# triggered by nvidia-smi froze the host hard. Hypothesis: Gen4 signal-
-# integrity issues fire under DMA load; bit 5 prevents autonomous
-# fallback to a sustainable speed; bus stalls; kernel deadlocks.
+# Why Gen1 (per docs/bridge-link-cap-mechanism.md):
 #
-# Project history (apnex/aorus-5090-egpu) shows BOTH knobs needed:
-#   - bit 5: prevents autonomous Gen3↔Gen4 oscillation (boot-time)
-#   - Target ≤ Gen2 on Port A: prevents link sitting at unstable Gen4
-#     under workload (runtime)
-# They protect against different failure modes; both required.
+# On TB-tunneled paths the kernel's pcie_failed_link_retrain() quirk
+# (drivers/pci/quirks.c) writes Target=Gen1 within milliseconds of
+# any cap-write that requests Gen2+, because the retrain attempt at
+# Gen2/3/4-virtual fails to bring DLLLA up cleanly (TB controller
+# refuses to actually retrain past Gen1-virtual). Setting Target=Gen1
+# from the start matches what the kernel will settle on anyway, and
+# avoids the contested-handshake window where the Gen4-virtual case
+# deadlocked the TB firmware on 2026-05-10 22:00.
 #
-# Default Gen2: empirically PROD-OK on Port A across the project's
-# test history. Override via CAP_TARGET_SPEED env:
-#   1 = Gen1 (most conservative; bandwidth-limited)
-#   2 = Gen2 (DEFAULT — production-stable on Port A)
-#   3 = Gen3 (Port B only — fails on Port A per project test n=2)
-#   0 or unset = no Target change (NOT recommended on Port A; this is
-#     the config that froze the host on 2026-05-10 22:00)
-TARGET_SPEED_OVERRIDE="${CAP_TARGET_SPEED:-2}"
+# Bandwidth is unchanged by Target value — TB tunnel saturates at
+# ~2.83 GB/s H2D regardless (verified by nvbandwidth at both Gen1
+# and Gen3 cap states 2026-05-10).
+#
+# Override via CAP_TARGET_SPEED env:
+#   1 = Gen1 (DEFAULT — universally safe for TB-tunneled)
+#   2 = Gen2 (PROD-OK fallback; kernel quirk overrules to Gen1 in ms)
+#   3 = Gen3 (n=1 PASS 2026-05-10; kernel quirk overrules to Gen1)
+#   4 = Gen4 (DANGEROUS — froze the host on 2026-05-10)
+#   0 or unset = no Target change (NOT recommended on Port A)
+TARGET_SPEED_OVERRIDE="${CAP_TARGET_SPEED:-1}"
 
 LNKCTL2_OFFSET="CAP_EXP+0x30.W"
 LNKCTL_OFFSET="CAP_EXP+0x10.W"
