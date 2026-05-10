@@ -176,7 +176,9 @@ if [[ "$REVERT_CMDLINE" -eq 1 ]]; then
         )
         # Remove pci=resource_alignment too (best-effort — its value
         # depends on bridge BDF we may no longer be able to detect).
-        current=$(grubby --info=ALL 2>/dev/null | awk -F\" '/^args=/ {print $2; exit}')
+        # Buffer grubby first to avoid SIGPIPE from awk-exit.
+        grubby_out=$(grubby --info=ALL 2>/dev/null || true)
+        current=$(printf '%s\n' "$grubby_out" | awk -F\" '/^args=/ {print $2; exit}')
         ra_match=$(grep -oE 'pci=resource_alignment=35@[0-9a-f]+:[0-9a-f]+:[0-9a-f]+\.[0-9a-f]+' \
                    <<<"$current" | head -1 || true)
         [[ -n "$ra_match" ]] && REVERT_ARGS+=("$ra_match")

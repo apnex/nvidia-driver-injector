@@ -119,7 +119,10 @@ else
         yellow "  kernel cmdline args yourself, by whatever means your distro uses:"
         printf '    %s\n' "${REQUIRED_ARGS[@]}" >&2
     else
-        current_cmdline=$(grubby --info=ALL 2>/dev/null | awk -F\" '/^args=/ {print $2; exit}')
+        # Avoid SIGPIPE from `awk ... exit` against grubby. Buffer
+        # grubby's full output, then extract the first args= line.
+        grubby_out=$(grubby --info=ALL 2>/dev/null || true)
+        current_cmdline=$(printf '%s\n' "$grubby_out" | awk -F\" '/^args=/ {print $2; exit}')
         missing_args=()
         for a in "${REQUIRED_ARGS[@]}"; do
             if ! grep -q -- "$a" <<<"$current_cmdline"; then
@@ -204,6 +207,19 @@ fi
 # Step 4: modprobe.d
 # ===========================================================================
 step "4/9 /etc/modprobe.d/nvidia-driver-injector.conf"
+
+# Clean up the aorus-5090-egpu transition stub if it exists. remove.sh
+# from that repo installs zz-aorus-egpu-blacklist.conf as a temporary
+# guard against stock nvidia auto-loading during the gap between
+# remove.sh and the next install. Our nvidia-driver-injector.conf
+# provides equivalent blacklist coverage, so the transition stub is
+# now redundant.
+transition_stub="/etc/modprobe.d/zz-aorus-egpu-blacklist.conf"
+if [[ -f "$transition_stub" ]]; then
+    yellow "  found aorus-5090-egpu transition blacklist stub — removing"
+    yellow "  (this repo's modprobe.d provides equivalent coverage)"
+    act "rm -f ${transition_stub}"
+fi
 
 src="${HOST_FILES}/etc/modprobe.d/nvidia-driver-injector.conf"
 dst="/etc/modprobe.d/nvidia-driver-injector.conf"
