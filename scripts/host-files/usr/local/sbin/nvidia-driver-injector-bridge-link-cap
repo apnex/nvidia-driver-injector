@@ -43,11 +43,29 @@ set -u
 VENDOR_ID="0x10de"        # NVIDIA
 DEVICE_ID="0x2b85"        # RTX 5090
 
-# CAP_TARGET_SPEED: optional. If unset (default), don't touch bits[3:0].
-# If set (e.g. "2" for Gen2), also overwrite bits[3:0]. Hardware
-# does not strictly enforce this on this TB controller — it's an
-# initial-retrain-speed hint, not a ceiling.
-TARGET_SPEED_OVERRIDE="${CAP_TARGET_SPEED:-}"
+# CAP_TARGET_SPEED: defaults to Gen2.
+#
+# Empirical lesson 2026-05-10 22:00 (this hardware, Port A bridge
+# 0000:03:00.0): bit 5 alone with Target left at vendor Gen4 default
+# is INSUFFICIENT. At idle the link sat at Gen4 cleanly, but workload
+# triggered by nvidia-smi froze the host hard. Hypothesis: Gen4 signal-
+# integrity issues fire under DMA load; bit 5 prevents autonomous
+# fallback to a sustainable speed; bus stalls; kernel deadlocks.
+#
+# Project history (apnex/aorus-5090-egpu) shows BOTH knobs needed:
+#   - bit 5: prevents autonomous Gen3↔Gen4 oscillation (boot-time)
+#   - Target ≤ Gen2 on Port A: prevents link sitting at unstable Gen4
+#     under workload (runtime)
+# They protect against different failure modes; both required.
+#
+# Default Gen2: empirically PROD-OK on Port A across the project's
+# test history. Override via CAP_TARGET_SPEED env:
+#   1 = Gen1 (most conservative; bandwidth-limited)
+#   2 = Gen2 (DEFAULT — production-stable on Port A)
+#   3 = Gen3 (Port B only — fails on Port A per project test n=2)
+#   0 or unset = no Target change (NOT recommended on Port A; this is
+#     the config that froze the host on 2026-05-10 22:00)
+TARGET_SPEED_OVERRIDE="${CAP_TARGET_SPEED:-2}"
 
 LNKCTL2_OFFSET="CAP_EXP+0x30.W"
 LNKCTL_OFFSET="CAP_EXP+0x10.W"
@@ -108,12 +126,13 @@ cmd_apply() {
     # load-bearing mitigation per project history.
     new_int=$(( cur_int | LNKCTL2_BIT5_HW_AUTO_SPEED_DISABLE ))
 
-    # Optional: overwrite Target Link Speed if env override given.
-    if [[ -n "$TARGET_SPEED_OVERRIDE" ]]; then
+    # Apply Target Link Speed unless explicitly opted out (CAP_TARGET_SPEED=0
+    # or empty). Default = "2" (Gen2) per the empirical-lesson note above.
+    if [[ -n "$TARGET_SPEED_OVERRIDE" && "$TARGET_SPEED_OVERRIDE" != "0" ]]; then
         new_int=$(( (new_int & ~0xF) | (TARGET_SPEED_OVERRIDE & 0xF) ))
         green "bridge=${BRIDGE}  setting bit 5 + Target=Gen${TARGET_SPEED_OVERRIDE}"
     else
-        green "bridge=${BRIDGE}  setting bit 5 only (Target Link Speed left at vendor value)"
+        green "bridge=${BRIDGE}  setting bit 5 ONLY (Target Link Speed left at vendor value — NOT recommended on Port A)"
     fi
 
     new_hex=$(printf '%04x' "$new_int")
