@@ -12,7 +12,7 @@
 #                        # uninstall subcommand:
 #                        #   docker compose run --rm driver-injector uninstall
 #
-# Prerequisites on host (handled by `sudo ./scripts/install-host.sh`
+# Prerequisites on host (handled by `sudo ./scripts/apply.sh`
 # in this repo — see docs/architecture.md):
 #   - kernel cmdline tuning (iommu=off, host_reset=false, etc.)
 #   - kernel-devel installed for $(uname -r)
@@ -48,7 +48,7 @@ services:
       # apply production NVreg options (LeverMRecoverEnable=1, etc.).
       # WITHOUT this mount, the entrypoint falls back to insmod with
       # no options and the recovery state machine is OFF (Gap #1 in
-      # docs/architecture.md). Layer 1 install-host.sh installs the
+      # docs/architecture.md). Layer 1 apply.sh installs the
       # config file this picks up.
       - /etc/modprobe.d:/etc/modprobe.d:ro
       # Host /etc/group so the container can resolve the ollama gid

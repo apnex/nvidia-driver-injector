@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# uninstall-host.sh — reverse install-host.sh.
+# remove.sh — reverse apply.sh.
 #
-# Idempotent. Safe to run on a host where install-host.sh was never run
+# Idempotent. Safe to run on a host where apply.sh was never run
 # (it'll just print "already absent" for everything).
 #
 # What this does:
@@ -41,7 +41,7 @@ for arg in "$@"; do
         --no-act)         NO_ACT=1 ;;
         --revert-cmdline) REVERT_CMDLINE=1 ;;
         -h|--help)
-            sed -n '/^# uninstall-host\.sh/,/^set -euo/p' "$0" | sed 's/^# \?//' | head -n -1
+            sed -n '/^# remove\.sh/,/^set -euo/p' "$0" | sed 's/^# \?//' | head -n -1
             exit 0
             ;;
         *)
@@ -50,7 +50,7 @@ for arg in "$@"; do
 done
 
 if [[ "$EUID" -ne 0 && "$NO_ACT" -eq 0 ]]; then
-    echo "uninstall-host.sh must be run as root (or with --no-act)" >&2
+    echo "remove.sh must be run as root (or with --no-act)" >&2
     exit 1
 fi
 
@@ -72,9 +72,9 @@ if grep -q '^nvidia ' /proc/modules 2>/dev/null; then
     yellow "  1. cd /path/to/this/repo"
     yellow "  2. docker compose run --rm driver-injector uninstall"
     yellow "  3. docker compose down"
-    yellow "  4. sudo ./scripts/uninstall-host.sh   ← you are here"
+    yellow "  4. sudo ./scripts/remove.sh   ← you are here"
     yellow ""
-    yellow "Continuing anyway; uninstall-host.sh only touches host config files."
+    yellow "Continuing anyway; remove.sh only touches host config files."
 fi
 
 # ===========================================================================

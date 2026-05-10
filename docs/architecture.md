@@ -130,7 +130,7 @@ Everything else can be containerised.
 # Layer 1 — host setup (one-time, idempotent)
 git clone https://github.com/apnex/nvidia-driver-injector /root/nvidia-driver-injector
 cd /root/nvidia-driver-injector
-sudo ./scripts/install-host.sh           # use --no-act first to dry-run
+sudo ./scripts/apply.sh           # use --no-act first to dry-run
   # Refuses if apnex/aorus-5090-egpu artifacts are detected
   # (override with --force-coexist; not recommended).
   # Does:
@@ -162,8 +162,8 @@ cd /root/nvidia-driver-injector
 docker compose run --rm driver-injector uninstall   # rmmod nvidia*
 docker compose down
 
-sudo ./scripts/uninstall-host.sh
-  # Reverses install-host.sh idempotently. Removes:
+sudo ./scripts/remove.sh
+  # Reverses apply.sh idempotently. Removes:
   #   - bridge-link-cap.service + binary
   #   - /etc/modprobe.d/nvidia-driver-injector.conf
   #   - /etc/udev/rules.d/79-nvidia-driver-injector.rules
@@ -229,7 +229,7 @@ Surfaced 2026-05-10 after a reboot incident
 | # | Gap | Effect | Status |
 |---|---|---|---|
 | 1 | Container uses `insmod nvidia.ko` directly, bypassing `/etc/modprobe.d/` | Production NVreg options not applied (e.g. `RecoverEnable=0` instead of `1`) — Lever M-recover doesn't fire on AER | **CLOSED** — entrypoint switched to `modprobe --ignore-install nvidia` with `/etc/modprobe.d` bind-mounted from host. Falls back to insmod if mount missing. Verifies `NVreg_TbEgpuLeverMRecoverEnable=1` post-load and warns if not. |
-| 2 | No host-side install script | Operator has to manually do Layer 1 setup | **CLOSED** — `scripts/install-host.sh` + `scripts/uninstall-host.sh` shipped. |
+| 2 | No host-side install script | Operator has to manually do Layer 1 setup | **CLOSED** — `scripts/apply.sh` + `scripts/remove.sh` shipped. |
 | 3 | No bridge-link-cap.service shipped with this repo | Must rely on a separate apply.sh from aorus-5090-egpu, OR live link comes up at whatever speed it happens to | **CLOSED** — cleanroom `nvidia-driver-injector-bridge-link-cap` binary + systemd unit shipped under `scripts/host-files/`, installed via Layer 1. |
 | 4 | No `chown` / `chmod` of `/dev/nvidia*` post-load | Permissions are 0666 root:root (works but wide open) | **CLOSED** — entrypoint chgrps to `ollama` and chmods 0660 if the group exists on host. |
 | 5 | No nvidia-persistenced inside container | Warmup-latency optimization not active | OPEN (low priority — close-path bug class already mitigated) |
