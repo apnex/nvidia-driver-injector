@@ -118,7 +118,7 @@ done
 # ============================================================================
 section "3. Layer 1 — bridge-link-cap systemd unit (Lever H17)"
 # ============================================================================
-if systemctl list-unit-files nvidia-driver-injector-bridge-link-cap.service 2>/dev/null | grep -q nvidia; then
+if systemctl cat nvidia-driver-injector-bridge-link-cap.service >/dev/null 2>&1; then
     if systemctl is-enabled nvidia-driver-injector-bridge-link-cap.service >/dev/null 2>&1; then
         ok "bridge-link-cap.service: enabled (will run at next boot)"
     else
