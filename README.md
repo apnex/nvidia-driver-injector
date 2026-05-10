@@ -150,18 +150,29 @@ If your workloads run as root, skip this step.
 
 ## Quick start — single-host Docker
 
+For the full step-by-step including Thunderbolt authorization,
+host-side bring-up, and the post-install verification suite,
+see [`docs/install-workflow.md`](docs/install-workflow.md).
+The condensed version:
+
 ```bash
-git clone https://github.com/apnex/nvidia-driver-injector.git
-cd nvidia-driver-injector
+# 0. Connect AORUS over TB; verify boltctl shows authorized
+boltctl list                          # status: authorized
+# (if status: connected but NOT authorized → sudo boltctl authorize <uuid>)
 
-# Build the image (one-time; ~5 min on first run, ~30s with cached layers)
-docker compose build
+# 1. Clone + Layer 1 host bring-up
+sudo git clone https://github.com/apnex/nvidia-driver-injector \
+    /root/nvidia-driver-injector
+cd /root/nvidia-driver-injector
+sudo ./scripts/install-host.sh        # idempotent; refuses on aorus-5090-egpu hosts
 
-# Run — builds + loads nvidia.ko on this host's kernel
-docker compose up
+# 2. Reboot if install-host.sh prompts (kernel cmdline change)
+sudo reboot
 
-# Watch the build + load output
-docker compose logs -f
+# 3. Build + start the injector container (Layer 2)
+docker compose build                  # ~3-5 min cold
+docker compose up -d
+docker compose logs -f                # watch the entrypoint
 ```
 
 After successful load:
