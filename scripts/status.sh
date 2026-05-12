@@ -306,14 +306,26 @@ for f in /usr/share/vulkan/icd.d/nvidia_icd.x86_64.json \
 done
 
 # ============================================================================
-section "10. Recent kernel error signals (last 24h)"
+section "10. Recent kernel error signals (since current module load)"
 # ============================================================================
-errors=$(journalctl -k --since='24 hours ago' --no-pager 2>/dev/null | \
+# Use the nvidia module's load time as the cutoff. Anything older came from
+# a previous module instance (e.g. a failed first boot during cutover) and
+# isn't relevant to the current driver's health. Falls back to "24 hours
+# ago" if the module isn't loaded (in which case the journal-scan label
+# matches the legacy behaviour).
+if [[ -d /sys/module/nvidia ]]; then
+    since_arg=$(stat -c %y /sys/module/nvidia 2>/dev/null | cut -d. -f1)
+    since_label="since module load at $since_arg"
+else
+    since_arg='24 hours ago'
+    since_label='in last 24h (nvidia not loaded)'
+fi
+errors=$(journalctl -k --since="$since_arg" --no-pager 2>/dev/null | \
          grep -iE 'Xid|fallen off the bus|GPU IS LOST|NVRM.*Failed|aer.*uncorrectable' | head -10)
 if [[ -z "$errors" ]]; then
-    ok "no Xid / fallen-off-bus / uncorrectable AER / NVRM Failed in last 24h"
+    ok "no Xid / fallen-off-bus / uncorrectable AER / NVRM Failed $since_label"
 else
-    fail_ "kernel error signals found:"
+    fail_ "kernel error signals found ($since_label):"
     printf '%s\n' "$errors" | sed 's/^/        /'
 fi
 
