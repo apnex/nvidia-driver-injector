@@ -14,8 +14,8 @@ Use this as the entry point when resuming work in a fresh session.
 | | |
 |---|---|
 | **Phase** | 2 of 5 |
-| **Patches landed** | P5 (commit `b2891e5`), P1 (commit `f5d0900`), P3 (commit `a19c1ac`), P2 (commit `e4cb622`) — 4 of 6 |
-| **Patches pending** | P4, P6 + metadata (P7) |
+| **Patches landed** | P5 (`b2891e5`), P1 (`f5d0900`), P3 (`a19c1ac`), P2 (`e4cb622`), P4 (`52b43f0`) — 5 of 6 |
+| **Patches pending** | P6 + metadata (P7) |
 | **Branch** | `refactor/p1-p6` in `/root/nvidia-driver-injector` |
 | **Legacy patches** | All 29 retained at `patches/legacy/` (fallback during transition) |
 | **Container image tag** | `apnex/nvidia-driver-injector:refactor-rc1` (refactor build); `:595.71.05-aorus.12` (legacy production build) |
@@ -148,15 +148,21 @@ patches/0007-tb-egpu-version-mark-and-kbuild.patch     (build metadata)
 | Validation | git apply --check vs vanilla 595.71.05 with P1+P5+P3 stacked OK; container build (refactor-rc1) OK |
 | Deviations (carry forward) | (a) **S2 (DIAG-AER2) deferred to P6** — extends `tb_egpu_lever_m_diag_dump` which legacy 0018 introduces (= P6 territory). P6 will own: introduction of `diag_dump` from 0018, the S2 expansion, and re-introducing the `diag_dump` call sites in P2's err_handlers (the AER-capture call already lives here). (b) Gate helper takes a `pdev` parameter (not in original brief) so `GATE_SURRENDER` can emit `PERMANENT_FAIL` uevent in-helper. |
 
-### P4 — close-path safety (PENDING — write NEXT)
+### P4 — close-path observability (DONE)
 
 | | |
 |---|---|
-| Estimated patch file | `patches/0005-tb-egpu-close-path-safety.patch` |
-| Legacy source | parts of 0029, 0030 (specifically: the close-path safety bits; err_handlers parts already in P2; DIAG bits go to P6) |
-| Estimated final size | ~300 lines |
-| Dependencies | P2 (recovery state ref needed) |
-| Key changes | Strip the legacy DIAG bits (those go to P6); keep only the close-path mitigation. Note: legacy 0029 err_handlers callbacks (mmio_enabled + cor_error_detected) already landed in P2. |
+| Commit | `52b43f0` |
+| Patch file | `patches/0005-tb-egpu-close-path-safety.patch` (691 lines incl. header) |
+| Legacy source | 0029 (RM-side close-path DIAG, minus err_handlers parts already in P2), 0030 (UVM-side close-path DIAG) |
+| Net code | +423 / -2 across 7 files |
+| New files | `kernel-open/nvidia-uvm/nv-tb-egpu-uvm.{c,h}` (project-private UVM-side cluster) |
+| RM-side call sites (`nv.c`) | close-entry, pre-stop, post-shutdown, close-exit |
+| UVM-side call sites (`uvm.c`) | uvm-open-entry, uvm-release-entry, uvm-pre-destroy, uvm-post-destroy, uvm-release-exit |
+| Cross-module exports | `tb_egpu_dump_aer_trigger_event` (now EXPORT_SYMBOL_GPL — was internal in P2), `tb_egpu_close_diag_pdev`, `tb_egpu_get_gpu_pdev` |
+| Sovereignty/cohesion wins | (1) hardcoded BDF replaced by `tb_egpu_get_gpu_pdev()` (walks `nv_linux_devices`); (2) 60+ line inline blob in `uvm.c` moved to new `nv-tb-egpu-uvm.{c,h}` pair (uvm.c touch is now 1 include + 8 single-line calls); (3) `void *out` type-erasure eliminated; (4) 5 site-named atomic-pattern helpers; (5) reuses P2's WPR2 helper; (6) EXPORT_SYMBOL_GPL audit done. |
+| Cross-cluster | `tb_egpu_close_diag` (RM-side) uses its own `close_diag_pdev` for state capture — does NOT depend on P6's `recover_diag_dump`. P4 lands fully functional without P6. P4 also promotes P2's `tb_egpu_dump_aer_trigger_event` to `EXPORT_SYMBOL_GPL`. |
+| Validation | git apply --check vs vanilla 595.71.05 with P1+P5+P3+P2 stacked OK; container build (refactor-rc1) OK |
 
 ### P6 — Diagnostic telemetry surface (PENDING — Kconfig-gated)
 
@@ -384,4 +390,5 @@ sed -n '/^### P3 /,/^### P/p' /root/nvidia-driver-injector/docs/patch-refactor-i
 | 2026-05-12 | continued | Phase 2 (3/6) | P3 written + committed (a19c1ac); legacy 0023 split — P3 owns S3 storage + sysfs, P2 will own AER-capture helper + call site |
 | 2026-05-12 | continued | Phase 2 (3.5/6) | Renumber chore (aacf661): P3 file 0004→0003, P2 reserved as 0004 (correct apply-time dependency direction after Option-1 split) |
 | 2026-05-12 | continued | Phase 2 (4/6) | P2 written via subagent + committed (e4cb622); 5 consolidation wins; S2/DIAG-AER2 deferred to P6 (host function lives in legacy 0018 = P6 territory); gate helper takes pdev |
-| _next_ | resume | Phase 2 (5/6) | P4 — close-path safety (the close-path bits of legacy 0029 + 0030; legacy 0029 err_handlers already landed in P2) |
+| 2026-05-12 | continued | Phase 2 (5/6) | P4 written + committed (52b43f0); UVM-side helpers moved to new nv-tb-egpu-uvm.{c,h} pair (cohesion win); hardcoded BDF replaced by walker; close_diag uses pdev variant — no P6 dependency |
+| _next_ | resume | Phase 2 (6/6) | P6 — Kconfig-gated DIAG telemetry: introduce `tb_egpu_recover_diag_dump` (legacy 0018), apply S2/DIAG-AER2 expansion (legacy 0023 S2), re-introduce `diag_dump` call inside P2's `mmio_enabled` callback; plus 0020 / 0021 contents; drop legacy 0009 |
