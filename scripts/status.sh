@@ -242,16 +242,16 @@ section "6. NVreg parameters (production posture from modprobe.d)"
 # Only meaningful when nvidia is loaded. Most NVreg_* options are
 # write-only at module-load time — they aren't exposed at runtime
 # under /sys/module/nvidia/parameters/. We verify the ones we can
-# (LeverMRecoverEnable IS exposed) and trust section 7's /dev/nvidia*
+# (RecoverEnable IS exposed) and trust section 7's /dev/nvidia*
 # perm check to indirectly confirm NVreg_DeviceFile* applied.
 if mod_loaded nvidia; then
-    re=$(cat /sys/module/nvidia/parameters/NVreg_TbEgpuLeverMRecoverEnable 2>/dev/null || echo "?")
+    re=$(cat /sys/module/nvidia/parameters/NVreg_TbEgpuRecoverEnable 2>/dev/null || echo "?")
     if [[ "$re" == "1" ]]; then
-        ok "Lever M-recover: armed (RecoverEnable=1)"
+        ok "tb_egpu recover: armed (RecoverEnable=1)"
     elif [[ "$re" == "0" ]]; then
-        fail_ "Lever M-recover: NOT armed (RecoverEnable=0; modprobe.d not in load path)"
+        fail_ "tb_egpu recover: NOT armed (RecoverEnable=0; modprobe.d not in load path)"
     else
-        warn "Lever M-recover: unknown (RecoverEnable=$re)"
+        warn "tb_egpu recover: unknown (RecoverEnable=$re)"
     fi
     info "NVreg_DeviceFile* + RmForceExternalGpu are write-only at load;"
     info "  see section 7 (perm check) for indirect verification of DeviceFileMode/UID/GID."
@@ -279,8 +279,8 @@ fi
 section "8. Q-watchdog kthread (Mode B detector)"
 # ============================================================================
 if mod_loaded nvidia; then
-    if pgrep -af '\[aorus-qwd-' >/dev/null 2>&1; then
-        kt=$(pgrep -af '\[aorus-qwd-' | awk '{print $NF}')
+    if pgrep -af '\[tb-egpu-qwd-' >/dev/null 2>&1; then
+        kt=$(pgrep -af '\[tb-egpu-qwd-' | awk '{print $NF}')
         ok "Q-watchdog kthread running: $kt"
     else
         warn "Q-watchdog kthread NOT running"

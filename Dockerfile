@@ -106,7 +106,7 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 LABEL org.opencontainers.image.source="https://github.com/apnex/nvidia-driver-injector"
-LABEL org.opencontainers.image.description="Patched NVIDIA open kernel module (595.71.05-aorus.12) packaged as a kernel-injector container — Approach B (host /lib/modules bind-mount); distro-neutral."
+LABEL org.opencontainers.image.description="Patched NVIDIA open kernel module packaged as a kernel-injector container — Approach B (host /lib/modules bind-mount); distro-neutral. Module version is read from upstream version.mk at build time (see kernel-open/Kbuild)."
 LABEL org.opencontainers.image.licenses="GPL-2.0"
 
 ENTRYPOINT ["/entrypoint.sh"]

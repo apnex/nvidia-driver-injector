@@ -76,10 +76,10 @@ References
 
 ---
  kernel-open/nvidia/nv-pci.c              |  12 ++
- kernel-open/nvidia/nv-tb-egpu-aer.c      | 134 +++++++++++++++++++++++
+ kernel-open/nvidia/nv-tb-egpu-aer.c      | 131 +++++++++++++++++++++++
  kernel-open/nvidia/nv-tb-egpu-aer.h      |  46 ++++++++
  kernel-open/nvidia/nvidia-sources.Kbuild |   1 +
- 4 files changed, 193 insertions(+)
+ 4 files changed, 190 insertions(+)
  create mode 100644 kernel-open/nvidia/nv-tb-egpu-aer.c
  create mode 100644 kernel-open/nvidia/nv-tb-egpu-aer.h
 
@@ -118,7 +118,7 @@ new file mode 100644
 index 0000000..df18690
 --- /dev/null
 +++ b/kernel-open/nvidia/nv-tb-egpu-aer.c
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,131 @@
 +/*
 + * SPDX-FileCopyrightText: Copyright (c) 2026 nvidia-driver-injector project
 + * SPDX-License-Identifier: MIT
@@ -169,9 +169,6 @@ index 0000000..df18690
 +#include <linux/pci_regs.h>
 +#include <linux/module.h>
 +#include <linux/kernel.h>
-+
-+#include "nv-misc.h"
-+#include "os-interface.h"
 +
 +/* Module parameter: gate the AER mask clear at module load.
 + *

@@ -30,7 +30,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: apnex/nvidia-driver-injector:595.71.05-aorus.12
+    image: apnex/nvidia-driver-injector:refactor-rc1
     container_name: nvidia-driver-injector
     privileged: true
     pid: host
@@ -54,6 +54,12 @@ services:
       # Host /etc/group so the container can resolve the gpu gid
       # for chgrp on /dev/nvidia* (Gap #4).
       - /etc/group:/etc/group:ro
+      # Host /lib/firmware writable so the entrypoint can create the
+      # versioned firmware symlink ($NVIDIA_VERSION → 595.71.05) for
+      # the kernel's request_firmware path. Without this, every
+      # version-bump patch needs a manual symlink. See entrypoint.sh
+      # "firmware path link" step.
+      - /lib/firmware:/lib/firmware:rw
     restart: unless-stopped
     # Optional environment overrides (rare custom topology)
     # environment:
