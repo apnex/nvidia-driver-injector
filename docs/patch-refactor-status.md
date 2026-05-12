@@ -14,8 +14,8 @@ Use this as the entry point when resuming work in a fresh session.
 | | |
 |---|---|
 | **Phase** | 2 of 5 |
-| **Patches landed** | P5 (commit `b2891e5`), P1 (commit `f5d0900`), P3 (commit `a19c1ac`) — 3 of 6 |
-| **Patches pending** | P2, P4, P6 + metadata (P7) |
+| **Patches landed** | P5 (commit `b2891e5`), P1 (commit `f5d0900`), P3 (commit `a19c1ac`), P2 (commit `e4cb622`) — 4 of 6 |
+| **Patches pending** | P4, P6 + metadata (P7) |
 | **Branch** | `refactor/p1-p6` in `/root/nvidia-driver-injector` |
 | **Legacy patches** | All 29 retained at `patches/legacy/` (fallback during transition) |
 | **Container image tag** | `apnex/nvidia-driver-injector:refactor-rc1` (refactor build); `:595.71.05-aorus.12` (legacy production build) |
@@ -131,37 +131,44 @@ patches/0007-tb-egpu-version-mark-and-kbuild.patch     (build metadata)
 | Cross-cluster note | **P2 must add one line to `tb_egpu_qwd_thread` detect branch**: `tb_egpu_dump_aer_trigger_event(nvl->pci_dev, "qwd-detect", &qwd->last_aer);`. Until then, `last_aer.valid` stays 0 and `last_aer_summary` reads `(no detection event yet)`. |
 | Open items | (1) README.md lines 236 + 238 still reference old sysfs prefix `tb_egpu_qwatchdog` and old kthread name `aorus-qwd-0400`; updates scoped to Phase 4. (2) Sysfs path layout: chose per-attr (decision #3 below). |
 
-### P2 — PCIe error handlers + Lever M-recover (PENDING — biggest, write NEXT)
+### P2 — PCIe error handlers + recovery state machine (DONE)
 
 | | |
 |---|---|
-| Estimated patch file | `patches/0004-tb-egpu-pcie-error-handlers-recover.patch` |
-| Legacy source | 0007, 0016, 0017, 0024, 0026, 0027, 0028, **+ S1+S2 portions of 0023** (AER capture helper + DIAG-AER2) |
-| Estimated final size | ~1,400 lines (largest of all six) |
-| Dependencies | P1 (crash-safety guards; recovery state machine needs them); P3 (must add one-line call into `tb_egpu_qwd_thread` to populate `last_aer`) |
-| Key changes | State machine consolidation; sysfs `tb_egpu_recover_*` attrs; H1/H2 gate result extraction (inventory item — duplicated between trigger and `nv_pci_error_detected`); **`tb_egpu_dump_aer_trigger_event()` helper** (legacy 0023 S1) + DIAG-AER2 expansion (legacy 0023 S2) + the one-line invocation inside `tb_egpu_qwd_thread`'s detect latch (writes `qwd->last_aer`) |
-| Strategy | Delegate to subagent like P1; review carefully due to size + ordering invariants |
+| Commit | `e4cb622` |
+| Patch file | `patches/0004-tb-egpu-pcie-error-handlers-recover.patch` (1807 lines incl. header) |
+| Legacy source | 0007, 0016, 0017, **S1 portion of 0023** (S2 deferred to P6 — see below), 0024, 0026, 0027, 0028, err_handlers parts of 0029 |
+| Net code | +1521 / -5 (incl. new `nv-tb-egpu-recover.{c,h}`: 1074 + 255 lines) |
+| New files | `kernel-open/nvidia/nv-tb-egpu-recover.{c,h}` |
+| Module params | 6 × `NVreg_TbEgpuRecover*` (Enable default 0; TODO flip to 1 after Phase-3 soak) |
+| Sysfs surface | `tb_egpu_recover_{fires, successes, surrenders, last_fire_jiffies, force_trigger}` under `/sys/bus/pci/devices/<bdf>/`; registered via single `attribute_group` + `sysfs_create_group` |
+| Kill-switch file | `/var/lib/tb-egpu/recover-killswitch` (promoted to `TB_EGPU_RECOVER_KILLSWITCH_PATH`) |
+| Consolidation wins | (1) gate logic deduped via `enum tb_egpu_recover_gate` + `tb_egpu_recover_pre_schedule_gates()`; (2) WPR2 ioremap/read/iounmap triplet extracted to `tb_egpu_recover_read_wpr2()`; (3) `pdev_for_work` defensive branch removed (dead code per ordering audit, WARN_ON_ONCE tripwire kept); (4) AER-capture helper de-EXPORT_SYMBOL'd (internal to nvidia.ko); (5) inter-commit chronology comments stripped. |
+| Cross-cluster touch | One-line `tb_egpu_dump_aer_trigger_event(nvl->pci_dev, "qwd-detect", &qwd->last_aer)` added inside P3's `tb_egpu_qwd_thread` `!detected_logged` latch. With P2 in series, P3's `last_aer_summary` sysfs reads the full AER + DPC snapshot at first detect of each episode. |
+| Validation | git apply --check vs vanilla 595.71.05 with P1+P5+P3 stacked OK; container build (refactor-rc1) OK |
+| Deviations (carry forward) | (a) **S2 (DIAG-AER2) deferred to P6** — extends `tb_egpu_lever_m_diag_dump` which legacy 0018 introduces (= P6 territory). P6 will own: introduction of `diag_dump` from 0018, the S2 expansion, and re-introducing the `diag_dump` call sites in P2's err_handlers (the AER-capture call already lives here). (b) Gate helper takes a `pdev` parameter (not in original brief) so `GATE_SURRENDER` can emit `PERMANENT_FAIL` uevent in-helper. |
 
-### P4 — close-path safety (PENDING)
+### P4 — close-path safety (PENDING — write NEXT)
 
 | | |
 |---|---|
 | Estimated patch file | `patches/0005-tb-egpu-close-path-safety.patch` |
-| Legacy source | parts of 0029, 0030 |
+| Legacy source | parts of 0029, 0030 (specifically: the close-path safety bits; err_handlers parts already in P2; DIAG bits go to P6) |
 | Estimated final size | ~300 lines |
 | Dependencies | P2 (recovery state ref needed) |
-| Key changes | Strip the legacy DIAG bits (those go to P6); keep only the close-path mitigation |
+| Key changes | Strip the legacy DIAG bits (those go to P6); keep only the close-path mitigation. Note: legacy 0029 err_handlers callbacks (mmio_enabled + cor_error_detected) already landed in P2. |
 
 ### P6 — Diagnostic telemetry surface (PENDING — Kconfig-gated)
 
 | | |
 |---|---|
 | Estimated patch file | `patches/0006-tb-egpu-diag-telemetry.patch` |
-| Legacy source | 0009 (DROP — pure investigation probes), 0018, 0020, 0021, 0023 + diag parts of 0029, 0030 |
-| Estimated final size | ~600 lines |
-| Dependencies | P2 (telemetry hooks attach to recovery state machine) |
+| Legacy source | 0009 (DROP — pure investigation probes), 0018 (introduces `tb_egpu_lever_m_diag_dump` — rename to `tb_egpu_recover_diag_dump`), 0020, 0021, **S2 portion of 0023** (DIAG-AER2 expansion — deferred here from P2), diag parts of 0029 (re-introduce diag_dump call in mmio_enabled), 0030 |
+| Estimated final size | ~600 lines (slight bump from S2 deferral) |
+| Dependencies | P2 (telemetry hooks attach to recovery state machine; diag_dump call sites in err_handlers) |
 | Gating | `#ifdef CONFIG_NV_TB_EGPU_DIAG` |
 | Drop list | Patch 0009 (Lever P-probe) deleted entirely per inventory recommendation (purely investigation-period probes) |
+| Inherited scope (from P2 deviation) | Introduce `tb_egpu_recover_diag_dump` (legacy 0018), apply S2 (DIAG-AER2) expansion (legacy 0023 S2), re-introduce diag_dump call inside P2's mmio_enabled callback. P2 already declared `tb_egpu_recover_walk_to_root_port`, `tb_egpu_recover_read_dpc_state`, `tb_egpu_recover_read_aer_full` — reusable here. |
 
 ### P7 — version mark + kbuild (PENDING — trivial)
 
@@ -375,4 +382,6 @@ sed -n '/^### P3 /,/^### P/p' /root/nvidia-driver-injector/docs/patch-refactor-i
 | 2026-05-12 | continued | Phase 2 (1/6) | P5 written + committed (b2891e5); naming rename ("Windows" → spec-justified) |
 | 2026-05-12 | continued | Phase 2 (2/6) | P1 written + committed (f5d0900); 6 consolidation wins; semantic correction |
 | 2026-05-12 | continued | Phase 2 (3/6) | P3 written + committed (a19c1ac); legacy 0023 split — P3 owns S3 storage + sysfs, P2 will own AER-capture helper + call site |
-| _next_ | resume | Phase 2 (4/6) | P2 — PCIe error handlers + Lever M-recover (biggest; includes the S1+S2 portions of legacy 0023 and the one-line wire-in to P3's qwd detect path) |
+| 2026-05-12 | continued | Phase 2 (3.5/6) | Renumber chore (aacf661): P3 file 0004→0003, P2 reserved as 0004 (correct apply-time dependency direction after Option-1 split) |
+| 2026-05-12 | continued | Phase 2 (4/6) | P2 written via subagent + committed (e4cb622); 5 consolidation wins; S2/DIAG-AER2 deferred to P6 (host function lives in legacy 0018 = P6 territory); gate helper takes pdev |
+| _next_ | resume | Phase 2 (5/6) | P4 — close-path safety (the close-path bits of legacy 0029 + 0030; legacy 0029 err_handlers already landed in P2) |
