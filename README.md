@@ -46,7 +46,7 @@ A correctly-deployed system has:
   kernel cmdline,
   bridge LnkCtl2 cap (Lever H17, runs `Before=docker.service`),
   modprobe.d production NVreg options
-  (including `NVreg_TbEgpuLeverMRecoverEnable=1`),
+  (including `NVreg_TbEgpuRecoverEnable=1`),
   Vulkan/EGL/OpenCL ICD disable.
 - **Layer 2 — Driver injector container** (this repo):
   builds patched `nvidia.ko` against host kernel-devel,
@@ -90,7 +90,7 @@ and the gap-status table tracking the current implementation against the target.
 | **Kernel module build + load** (`modprobe --ignore-install nvidia` against the patched .ko) | **2** | **this container's entrypoint** ✓ |
 | **`nvidia-modprobe -u -c 0`** (UVM device files) | **2** | **this container's entrypoint** ✓ |
 | `/dev/nvidia*` chown/chmod (belt-and-suspenders to udev rule) | 2 | this container's entrypoint ✓ |
-| `NVreg_TbEgpuLeverMRecoverEnable=1` post-load verification | 2 | this container's entrypoint ✓ |
+| `NVreg_TbEgpuRecoverEnable=1` post-load verification | 2 | this container's entrypoint ✓ |
 | **`nvidia-smi -pm 1`** (persistence + GPU thermal engagement) | **2** | **this container's entrypoint** ✓ |
 | Workload `depends_on` healthcheck | 3 | TODO (Gap #6; documented in workload-side compose) |
 
@@ -231,11 +231,11 @@ cat /sys/module/nvidia/version
 ls -la /sys/bus/pci/devices/0000:04:00.0/driver
 # .../bus/pci/drivers/nvidia
 
-# 4. In-driver levers compiled in (Lever M-recover + Q-watchdog)
+# 4. In-driver levers compiled in (recovery state machine + Q-watchdog)
 ls /sys/module/nvidia/parameters/ | grep TbEgpu
-ls /sys/bus/pci/devices/0000:04:00.0/ | grep tb_egpu_qwatchdog
-ps -ef | grep -E "\[aorus-qwd-" | grep -v grep
-# the qwatchdog kthread should be present, e.g. [aorus-qwd-0400]
+ls /sys/bus/pci/devices/0000:04:00.0/ | grep tb_egpu_
+ps -ef | grep -E "\[tb-egpu-qwd-" | grep -v grep
+# the qwatchdog kthread should be present, e.g. [tb-egpu-qwd-0400]
 
 # 5. nvidia-smi reports the GPU
 nvidia-smi -L

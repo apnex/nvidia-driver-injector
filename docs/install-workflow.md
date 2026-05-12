@@ -159,8 +159,8 @@ PCI gate ✓ — GPU at 0000:04:00.0
 BAR1 verify ✓ — 32 GiB
 host modprobe.d detected — production NVreg options will apply
 modprobe --ignore-install nvidia ...
-load ✓ — nvidia version: 595.71.05-aorus.12
-Lever M-recover ✓ — NVreg_TbEgpuLeverMRecoverEnable=1
+load ✓ — nvidia version: 595.71.05-aorus.13
+tb_egpu recover ✓ — NVreg_TbEgpuRecoverEnable=1
 bind ✓ — 0000:04:00.0 bound to nvidia
 nvidia-modprobe -u -c 0 ...
 perms ✓ — /dev/nvidia0: 0660 root:gpu
@@ -169,7 +169,7 @@ perms ✓ — /dev/nvidia-uvm: 0660 root:gpu
 perms ✓ — /dev/nvidia-uvm-tools: 0660 root:gpu
 ==========================================
   nvidia driver loaded successfully
-  patches applied: 29
+  patches applied: 7
   upstream tag:    595.71.05
 ==========================================
 sleeping as container of intent — exit triggers restart policy
@@ -182,16 +182,16 @@ nvidia-smi -L
 # → "GPU 0: NVIDIA GeForce RTX 5090 (UUID: ...)"
 
 cat /sys/module/nvidia/version
-# → "595.71.05-aorus.12"
+# → "595.71.05-aorus.13"
 
 ls -la /dev/nvidia0
 # → "crw-rw---- 1 root gpu"
 
-cat /sys/module/nvidia/parameters/NVreg_TbEgpuLeverMRecoverEnable
+cat /sys/module/nvidia/parameters/NVreg_TbEgpuRecoverEnable
 # → "1"
 
-ps -ef | grep -E '\[aorus-qwd-' | grep -v grep
-# → "[aorus-qwd-0400]" — Q-watchdog kthread running
+ps -ef | grep -E '\[tb-egpu-qwd-' | grep -v grep
+# → "[tb-egpu-qwd-0400]" — Q-watchdog kthread running
 
 nvidia-smi --query-gpu=persistence_mode,power.draw,temperature.gpu --format=csv
 # → "Enabled, ~22 W, ~33 °C" — engaged. (NOT "Disabled, ~63 W, ~40 °C" — lazy)
