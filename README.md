@@ -142,11 +142,11 @@ Compute workloads typically run as a non-root user; copy the udev rule from the
 companion repo to permission `/dev/nvidia*` for an access group:
 
 ```bash
-sudo groupadd -r ollama 2>/dev/null || true
+sudo groupadd -r gpu 2>/dev/null || true
 sudo curl -fLo /etc/udev/rules.d/79-aorus-egpu-nvidia-permissions.rules \
   https://raw.githubusercontent.com/apnex/aorus-5090-egpu/main/etc/udev/rules.d/79-aorus-egpu-nvidia-permissions.rules
 sudo udevadm control --reload-rules
-sudo usermod -aG ollama "$USER"   # log out + back in for this to take effect
+sudo usermod -aG gpu "$USER"   # log out + back in for this to take effect
 ```
 
 If your workloads run as root, skip this step.

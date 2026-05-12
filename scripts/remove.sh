@@ -25,7 +25,7 @@
 #     modprobe.d guard is removed). --purge cleans those up so
 #     the host reaches a true blank-equivalent state. See below.
 #   - Remove kernel-devel.
-#   - Remove the ollama UNIX group (it may be in use by other things).
+#   - Remove the gpu UNIX group (it may be in use by other things).
 #   - Remove nvidia-persistenced or related RPM packages.
 #   - Stop / remove the injector container itself
 #     (run `docker compose run --rm driver-injector uninstall &&

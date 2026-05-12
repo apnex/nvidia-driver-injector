@@ -109,7 +109,7 @@ Does:
 | 0 | Conflict check | Refuses on aorus-5090-egpu host (see migration below) |
 | 1 | Set kernel cmdline via `grubby` | `iommu=off`, `thunderbolt.host_reset=false`, `pci=resource_alignment=35@<auto-detected bridge BDF>`, etc. |
 | 2 | Install `kernel-devel` for `$(uname -r)` | `dnf` or `apt`-aware; skipped if already present |
-| 3 | Create `ollama` UNIX group if absent | Used as the `/dev/nvidia*` access group |
+| 3 | Create `gpu` UNIX group if absent | Used as the `/dev/nvidia*` access group |
 | 4 | Install `/etc/modprobe.d/nvidia-driver-injector.conf` | Production NVreg options inc. `LeverMRecoverEnable=1`, `DeviceFileMode=0660` |
 | 5 | Install `nvidia-driver-injector-bridge-link-cap` binary + `.service` | Systemd unit `Before=docker.service`; enabled |
 | 6 | Install udev rules | `79-nvidia-driver-injector.rules` (`/dev/nvidia*` group perms) + `80-nvidia-driver-injector-disable-audio.rules` (unbind eGPU HDMI audio function — compute-only posture) |
@@ -163,10 +163,10 @@ load ✓ — nvidia version: 595.71.05-aorus.12
 Lever M-recover ✓ — NVreg_TbEgpuLeverMRecoverEnable=1
 bind ✓ — 0000:04:00.0 bound to nvidia
 nvidia-modprobe -u -c 0 ...
-perms ✓ — /dev/nvidia0: 0660 root:ollama
-perms ✓ — /dev/nvidiactl: 0660 root:ollama
-perms ✓ — /dev/nvidia-uvm: 0660 root:ollama
-perms ✓ — /dev/nvidia-uvm-tools: 0660 root:ollama
+perms ✓ — /dev/nvidia0: 0660 root:gpu
+perms ✓ — /dev/nvidiactl: 0660 root:gpu
+perms ✓ — /dev/nvidia-uvm: 0660 root:gpu
+perms ✓ — /dev/nvidia-uvm-tools: 0660 root:gpu
 ==========================================
   nvidia driver loaded successfully
   patches applied: 29
@@ -185,7 +185,7 @@ cat /sys/module/nvidia/version
 # → "595.71.05-aorus.12"
 
 ls -la /dev/nvidia0
-# → "crw-rw---- 1 root ollama"
+# → "crw-rw---- 1 root gpu"
 
 cat /sys/module/nvidia/parameters/NVreg_TbEgpuLeverMRecoverEnable
 # → "1"

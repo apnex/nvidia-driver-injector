@@ -19,7 +19,7 @@
 #   6. Install /etc/udev/rules.d/79-nvidia-driver-injector.rules
 #      (group permissions on /dev/nvidia*).
 #   7. Disable Vulkan/EGL/OpenCL ICD entries (compute-only posture).
-#   8. Ensure 'ollama' UNIX group exists (used as the device-file
+#   8. Ensure 'gpu' UNIX group exists (used as the device-file
 #      access group) and rewrite NVreg_DeviceFileGID in modprobe.d to
 #      match the host's actual GID.
 #   9. systemctl daemon-reload + udev reload.
@@ -197,17 +197,17 @@ else
 fi
 
 # ===========================================================================
-# Step 3: ollama group + rewrite NVreg_DeviceFileGID in modprobe.d
+# Step 3: gpu group + rewrite NVreg_DeviceFileGID in modprobe.d
 # ===========================================================================
-step "3/9 ollama UNIX group + GID-rewrite in modprobe.d"
+step "3/9 gpu UNIX group + GID-rewrite in modprobe.d"
 
-if getent group ollama >/dev/null 2>&1; then
-    OLLAMA_GID=$(getent group ollama | cut -d: -f3)
-    green "  ollama group exists (gid=${OLLAMA_GID})"
+if getent group gpu >/dev/null 2>&1; then
+    GPU_GID=$(getent group gpu | cut -d: -f3)
+    green "  gpu group exists (gid=${GPU_GID})"
 else
-    yellow "  ollama group absent — creating"
-    act "groupadd -r ollama"
-    OLLAMA_GID=$(getent group ollama 2>/dev/null | cut -d: -f3 || echo 968)
+    yellow "  gpu group absent — creating"
+    act "groupadd -r gpu"
+    GPU_GID=$(getent group gpu 2>/dev/null | cut -d: -f3 || echo 968)
 fi
 
 # ===========================================================================
@@ -233,11 +233,11 @@ dst="/etc/modprobe.d/nvidia-driver-injector.conf"
 
 if [[ "$NO_ACT" -eq 1 ]]; then
     printf '  [DRY-RUN] install %s -> %s (with NVreg_DeviceFileGID=%s)\n' \
-        "$src" "$dst" "$OLLAMA_GID"
+        "$src" "$dst" "$GPU_GID"
 else
-    sed "s/NVreg_DeviceFileGID=968/NVreg_DeviceFileGID=${OLLAMA_GID}/g" "$src" > "$dst"
+    sed "s/NVreg_DeviceFileGID=968/NVreg_DeviceFileGID=${GPU_GID}/g" "$src" > "$dst"
     chmod 0644 "$dst"
-    green "  installed ${dst} (NVreg_DeviceFileGID=${OLLAMA_GID})"
+    green "  installed ${dst} (NVreg_DeviceFileGID=${GPU_GID})"
 fi
 
 # ===========================================================================

@@ -11,8 +11,8 @@
 # permissions (or fall back to 0666 root:root, which is wide-open
 # but safe given the ICD-disable posture).
 
-KERNEL=="nvidia",            GROUP="ollama", MODE="0660"
-KERNEL=="nvidiactl",         GROUP="ollama", MODE="0660"
-KERNEL=="nvidia[0-9]*",      GROUP="ollama", MODE="0660"
-KERNEL=="nvidia-uvm",        GROUP="ollama", MODE="0660"
-KERNEL=="nvidia-uvm-tools",  GROUP="ollama", MODE="0660"
+KERNEL=="nvidia",            GROUP="gpu", MODE="0660"
+KERNEL=="nvidiactl",         GROUP="gpu", MODE="0660"
+KERNEL=="nvidia[0-9]*",      GROUP="gpu", MODE="0660"
+KERNEL=="nvidia-uvm",        GROUP="gpu", MODE="0660"
+KERNEL=="nvidia-uvm-tools",  GROUP="gpu", MODE="0660"

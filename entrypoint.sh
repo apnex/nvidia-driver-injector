@@ -367,16 +367,16 @@ fi
 # permissions tightened.
 #
 # udevadm settle synchronises with host udev so we don't race the
-# rule's GROUP="ollama" MODE="0660" assignments. Bounded to 5s.
+# rule's GROUP="gpu" MODE="0660" assignments. Bounded to 5s.
 if command -v udevadm >/dev/null 2>&1; then
     udevadm settle --timeout=5 2>/dev/null || true
 fi
 
-if getent group ollama >/dev/null 2>&1; then
+if getent group gpu >/dev/null 2>&1; then
     for dev in /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
         if [[ -e "$dev" ]]; then
-            if chgrp ollama "$dev" 2>/dev/null && chmod 0660 "$dev" 2>/dev/null; then
-                log "perms ✓ — ${dev}: 0660 root:ollama"
+            if chgrp gpu "$dev" 2>/dev/null && chmod 0660 "$dev" 2>/dev/null; then
+                log "perms ✓ — ${dev}: 0660 root:gpu"
             else
                 warn "could not chgrp/chmod ${dev} — host udev may have it locked"
             fi
@@ -385,7 +385,7 @@ if getent group ollama >/dev/null 2>&1; then
         fi
     done
 else
-    warn "ollama group not present on host — leaving /dev/nvidia* perms at NVreg defaults
+    warn "gpu group not present on host — leaving /dev/nvidia* perms at NVreg defaults
        (run apply.sh on the host to create the group + udev rule)"
 fi
 
