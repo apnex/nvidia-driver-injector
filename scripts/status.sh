@@ -141,24 +141,24 @@ else
     fail_ "bridge-link-cap.service: not installed"
 fi
 
-if systemctl cat nvidia-driver-injector-engage-persistence.service >/dev/null 2>&1; then
-    if systemctl is-enabled nvidia-driver-injector-engage-persistence.service >/dev/null 2>&1; then
-        ok "engage-persistence.service: enabled (will run at next boot)"
+if systemctl cat nvidia-driver-injector-gpu-engage.service >/dev/null 2>&1; then
+    if systemctl is-enabled nvidia-driver-injector-gpu-engage.service >/dev/null 2>&1; then
+        ok "gpu-engage.service: enabled (will run at next boot)"
     else
-        fail_ "engage-persistence.service: NOT enabled"
+        fail_ "gpu-engage.service: NOT enabled"
     fi
-    if systemctl is-active nvidia-driver-injector-engage-persistence.service >/dev/null 2>&1; then
-        ok "engage-persistence.service: active (persistence mode engaged)"
+    if systemctl is-active nvidia-driver-injector-gpu-engage.service >/dev/null 2>&1; then
+        ok "gpu-engage.service: active (persistence mode engaged)"
     else
-        fail_ "engage-persistence.service: NOT active"
+        fail_ "gpu-engage.service: NOT active"
     fi
     # Verify ordering — must be After=docker.service so the injector
     # container has finished binding nvidia.ko before we open /dev/nvidia0.
-    after=$(systemctl show -p After nvidia-driver-injector-engage-persistence.service --value 2>/dev/null)
+    after=$(systemctl show -p After nvidia-driver-injector-gpu-engage.service --value 2>/dev/null)
     if grep -q 'docker.service' <<<"$after"; then
-        ok "engage-persistence.service: ordered After=docker.service"
+        ok "gpu-engage.service: ordered After=docker.service"
     else
-        warn "engage-persistence.service: missing After=docker.service (may run before /dev/nvidia0 exists)"
+        warn "gpu-engage.service: missing After=docker.service (may run before /dev/nvidia0 exists)"
     fi
     # Verify the runtime effect — persistence_mode should be Enabled.
     if command -v nvidia-smi >/dev/null 2>&1; then
@@ -170,7 +170,7 @@ if systemctl cat nvidia-driver-injector-engage-persistence.service >/dev/null 2>
         fi
     fi
 else
-    fail_ "engage-persistence.service: not installed"
+    fail_ "gpu-engage.service: not installed"
 fi
 
 # ============================================================================
@@ -208,6 +208,25 @@ else
             fail_ "bridge link: LnkCtl2 bit 5 NOT set — autonomous speed changes still possible (wedge risk)"
         else
             warn "bridge link: bit5=$bit5 active=$active (unusual)"
+        fi
+    fi
+
+    # HDMI audio function (function .1) — compute-only host; should NOT
+    # be bound to snd_hda_intel. Driver-override sentinel from the
+    # 80-nvidia-driver-injector-disable-audio.rules should be in place.
+    audio_bdf="${GPU_BDF%.*}.1"
+    if [[ -d "/sys/bus/pci/devices/${audio_bdf}" ]]; then
+        if [[ -L "/sys/bus/pci/devices/${audio_bdf}/driver" ]]; then
+            adrv=$(basename "$(readlink "/sys/bus/pci/devices/${audio_bdf}/driver")")
+            fail_ "HDMI audio function ${audio_bdf} bound to ${adrv} (compute-only host — expected no binding; udev rule 80- should unbind)"
+        else
+            ok "HDMI audio function ${audio_bdf}: unbound (compute-only posture)"
+        fi
+        override=$(cat "/sys/bus/pci/devices/${audio_bdf}/driver_override" 2>/dev/null)
+        if [[ "$override" == "nvidia-driver-injector-disabled" ]]; then
+            ok "HDMI audio function ${audio_bdf}: driver_override sentinel set"
+        else
+            warn "HDMI audio function ${audio_bdf}: driver_override='${override}' (expected 'nvidia-driver-injector-disabled')"
         fi
     fi
 fi

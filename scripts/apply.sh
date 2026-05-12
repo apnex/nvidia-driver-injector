@@ -252,29 +252,36 @@ act "systemctl enable nvidia-driver-injector-bridge-link-cap.service"
 green "  bridge-link-cap installed + enabled"
 
 # ===========================================================================
-# Step 6: systemd unit + binary for engage-persistence
+# Step 6: systemd unit + binary for gpu-engage
 # ===========================================================================
 # Post-bind counterpart to bridge-link-cap: runs after docker starts the
 # injector container, opens /dev/nvidia0 once to trigger full hardware
 # bringup (GSP, PMU, AORUS thermal subsystem), and enables persistence
 # mode so the engagement survives client disconnect. Without this, the
 # GPU sits in lazy-init state and wastes ~41 W idle (measured 2026-05-12).
-step "6/10 nvidia-driver-injector-engage-persistence (binary + systemd unit)"
+step "6/10 nvidia-driver-injector-gpu-engage (binary + systemd unit)"
 
-act "install -m 0755 -D ${HOST_FILES}/usr/local/sbin/nvidia-driver-injector-engage-persistence /usr/local/sbin/nvidia-driver-injector-engage-persistence"
-act "install -m 0644 -D ${HOST_FILES}/etc/systemd/system/nvidia-driver-injector-engage-persistence.service /etc/systemd/system/nvidia-driver-injector-engage-persistence.service"
+act "install -m 0755 -D ${HOST_FILES}/usr/local/sbin/nvidia-driver-injector-gpu-engage /usr/local/sbin/nvidia-driver-injector-gpu-engage"
+act "install -m 0644 -D ${HOST_FILES}/etc/systemd/system/nvidia-driver-injector-gpu-engage.service /etc/systemd/system/nvidia-driver-injector-gpu-engage.service"
 act "systemctl daemon-reload"
-act "systemctl enable nvidia-driver-injector-engage-persistence.service"
-green "  engage-persistence installed + enabled"
+act "systemctl enable nvidia-driver-injector-gpu-engage.service"
+green "  gpu-engage installed + enabled"
 
 # ===========================================================================
-# Step 7: udev rule
+# Step 7: udev rules
 # ===========================================================================
-step "7/10 udev rule"
+# Two rules:
+#   79-nvidia-driver-injector.rules           — /dev/nvidia* permissions
+#   80-nvidia-driver-injector-disable-audio.rules — unbind the eGPU's HDMI
+#       audio function (compute-only host; keeps it out of D0 and off the
+#       snd_hda_intel autoload path)
+step "7/10 udev rules"
 
 act "install -m 0644 -D ${HOST_FILES}/etc/udev/rules.d/79-nvidia-driver-injector.rules /etc/udev/rules.d/79-nvidia-driver-injector.rules"
+act "install -m 0644 -D ${HOST_FILES}/etc/udev/rules.d/80-nvidia-driver-injector-disable-audio.rules /etc/udev/rules.d/80-nvidia-driver-injector-disable-audio.rules"
 act "udevadm control --reload-rules"
-green "  udev rule installed"
+act "udevadm trigger --subsystem-match=pci --attr-match=vendor=0x10de --attr-match=device=0x22e8 --action=add 2>/dev/null || true"
+green "  udev rules installed (perms + audio-disable)"
 
 # ===========================================================================
 # Step 7: Vulkan/EGL/OpenCL ICD disable (compute-only posture)

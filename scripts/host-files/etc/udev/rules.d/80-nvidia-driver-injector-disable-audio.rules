@@ -1,0 +1,24 @@
+# 80-nvidia-driver-injector-disable-audio.rules
+#
+# Disable the eGPU's HDMI audio function (PCI function .1).
+#
+# The AORUS RTX 5090 exposes two PCI functions:
+#   04:00.0  GB202 [GeForce RTX 5090]                 -> bound to nvidia
+#   04:00.1  GB202 High Definition Audio Controller   -> would bind to snd_hda_intel
+#
+# This is a compute-only host - we never play audio over the eGPU's HDMI
+# output, and binding to snd_hda_intel keeps the audio function in D0
+# (continuous power draw, no benefit). It can also perturb ASPM/PM
+# negotiation on the eGPU PCI tree.
+#
+# Mechanism:
+#   1. Set driver_override to a fictitious sentinel - any future udev
+#      autoload attempt will fail-closed instead of re-binding.
+#   2. Unbind from whatever currently binds it (typically snd_hda_intel).
+#
+# Matches only this specific GPU (vendor 0x10de + device 0x22e8 = GB202
+# HDMI audio). Other NVIDIA audio functions on the system are unaffected.
+
+ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{device}=="0x22e8", \
+  ATTR{driver_override}="nvidia-driver-injector-disabled", \
+  RUN+="/bin/sh -c '[ -L /sys/bus/pci/devices/%k/driver ] && echo %k > /sys/bus/pci/devices/%k/driver/unbind || true'"

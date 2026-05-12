@@ -126,11 +126,11 @@ else
 fi
 
 # ===========================================================================
-# Step 3: engage-persistence systemd unit
+# Step 3: gpu-engage systemd unit
 # ===========================================================================
-step "3/8 engage-persistence systemd unit"
+step "3/8 gpu-engage systemd unit"
 
-unit="nvidia-driver-injector-engage-persistence.service"
+unit="nvidia-driver-injector-gpu-engage.service"
 unit_path="/etc/systemd/system/${unit}"
 
 if systemctl list-unit-files "$unit" 2>/dev/null | grep -q "$unit"; then
@@ -143,11 +143,11 @@ else
 fi
 
 # ===========================================================================
-# Step 4: engage-persistence binary
+# Step 4: gpu-engage binary
 # ===========================================================================
-step "4/8 engage-persistence binary"
+step "4/8 gpu-engage binary"
 
-bin="/usr/local/sbin/nvidia-driver-injector-engage-persistence"
+bin="/usr/local/sbin/nvidia-driver-injector-gpu-engage"
 if [[ -f "$bin" ]]; then
     act "rm -f ${bin}"
     green "  removed ${bin}"
@@ -169,17 +169,23 @@ else
 fi
 
 # ===========================================================================
-# Step 4: udev rule
+# Step 6: udev rules
 # ===========================================================================
-step "6/8 /etc/udev/rules.d/79-nvidia-driver-injector.rules"
+step "6/8 /etc/udev/rules.d/{79,80}-nvidia-driver-injector*.rules"
 
-f="/etc/udev/rules.d/79-nvidia-driver-injector.rules"
-if [[ -f "$f" ]]; then
-    act "rm -f ${f}"
-    green "  removed ${f}"
-else
-    yellow "  ${f} already absent"
-fi
+for f in /etc/udev/rules.d/79-nvidia-driver-injector.rules \
+         /etc/udev/rules.d/80-nvidia-driver-injector-disable-audio.rules; do
+    if [[ -f "$f" ]]; then
+        act "rm -f ${f}"
+        green "  removed ${f}"
+    else
+        yellow "  ${f} already absent"
+    fi
+done
+
+# Audio function will re-bind to snd_hda_intel on next reboot / TB
+# re-enumeration once the disable rule is gone; no explicit unbind reverse
+# needed (driver_override is cleared by udev when the device disappears).
 
 # ===========================================================================
 # Step 5: re-enable ICDs

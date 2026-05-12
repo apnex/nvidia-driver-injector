@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# nvidia-driver-injector-engage-persistence
+# nvidia-driver-injector-gpu-engage
 #
 # Engage NVIDIA persistence mode after the injector container has
 # bound nvidia.ko. Runs as a host-side oneshot service after docker.service.
