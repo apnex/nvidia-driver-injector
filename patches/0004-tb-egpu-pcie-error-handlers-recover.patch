@@ -1,0 +1,1807 @@
+From: nvidia-driver-injector <noreply@example.invalid>
+Date: 2026-05-12
+Subject: [PATCH 0004/0007] tb-egpu: PCIe error handlers + recovery state machine (cluster P2)
+
+Consolidates these legacy patches into one coherent recovery cluster:
+
+  0007 — register nv_pci_err_handlers with the kernel AER subsystem
+  0016 — recovery state struct + work_handler + sysfs scaffolding
+  0017 — probe-time WPR2-stuck detection
+  0023 — S1 portion only: tb_egpu_dump_aer_trigger_event helper +
+         the call site in nv_pci_error_detected
+         (S2/DIAG-AER2 portion deferred to P6 — see "Deviations" below;
+          S3 already landed in P3)
+  0024 — H1 (MaxAttempts), H2 (rate-limit), H3 (kill-switch file),
+         post-rmInit-FAIL trigger, slot_reset + slot_reset_resume,
+         force_trigger sysfs, killswitch file
+  0026 — additional sysfs force_trigger surface
+  0027 — explicit slot_reset / slot_reset_resume dispatch from the
+         work handler
+  0028 — attempt_count semantics correction (reset only at post-rmInit-OK)
+  0029 — err_handlers parts only: mmio_enabled + cor_error_detected
+         callbacks (close-path safety in 0029 belongs to P4)
+
+Inventory items applied (per docs/patch-refactor-inventory.md "### P2"):
+
+- Rename map applied wholesale:
+    Lever-M / lever_m              -> recover
+    TB_EGPU_LEVER_M_WPR2_*         -> TB_EGPU_RECOVER_WPR2_*
+    NVreg_TbEgpuLeverM*            -> NVreg_TbEgpuRecover*
+    tb_egpu_lever_m_*              -> tb_egpu_recover_*
+    /var/lib/aorus-egpu/lever-m-killswitch
+                                   -> /var/lib/tb-egpu/recover-killswitch
+    files nv-lever-m-recover.{c,h} -> nv-tb-egpu-recover.{c,h}
+    field nvl->lever_m             -> nvl->recover
+
+- Gate logic deduplicated. The H1/H2/Enable gate evaluation was
+  previously duplicated between trigger_post_rminit_fail and
+  nv_pci_error_detected. Extracted to:
+
+      enum tb_egpu_recover_gate {
+          TB_EGPU_RECOVER_GATE_OK = 0,
+          TB_EGPU_RECOVER_GATE_DISABLED,
+          TB_EGPU_RECOVER_GATE_RATE_LIMITED,
+          TB_EGPU_RECOVER_GATE_SURRENDER,
+      };
+      enum tb_egpu_recover_gate tb_egpu_recover_pre_schedule_gates(
+          struct tb_egpu_recover_state *st,
+          struct pci_dev *pdev,
+          const char **reason_out);
+
+  Both call sites switch on the returned enum. The helper takes pdev
+  so GATE_SURRENDER can emit PERMANENT_FAIL uevent in-helper rather
+  than at both call sites; reason_out is a static string for logging.
+
+- WPR2 read path deduplicated. The ioremap -> ioread32 -> iounmap
+  triplet was duplicated 3x (probe-time check, trigger function,
+  slot_reset verify). Extracted to:
+
+      int tb_egpu_recover_read_wpr2(u64 bar0_phys, u32 *raw_out);
+
+  Returns 0 on success and stores raw value in *raw_out, or -errno
+  on ioremap failure.
+
+- Killswitch file path promoted to a #define:
+    TB_EGPU_RECOVER_KILLSWITCH_PATH "/var/lib/tb-egpu/recover-killswitch"
+
+- Sysfs surface consolidated: 5 separate device_create_file pairs
+  collapsed to a single static const struct attribute_group plus
+  sysfs_create_group / sysfs_remove_group calls (same pattern P3
+  established in nv-tb-egpu-qwd.c).
+
+- pdev_for_work race audit: removed the legacy "Defensive: stale
+  pdev_for_work" branch (which dropped a pci_dev_put refcount that
+  could not exist). Replaced with a WARN_ON_ONCE tripwire inside the
+  in_progress=1 guard. Ordering reasoning documented inline:
+    * trigger writes pdev_for_work BEFORE schedule_work (publishes)
+    * handler clears pdev_for_work BEFORE clearing in_progress
+    * atomic_xchg(&in_progress, 1) returning 0 implies handler ran C→D
+  The defensive branch was dead — surfaced and removed.
+
+- The AER-capture helper (tb_egpu_dump_aer_trigger_event) is no longer
+  EXPORT_SYMBOL — it's nvidia.ko-internal and declared only in the
+  project-private nv-tb-egpu-recover.h header.
+
+- Inter-commit chronology comments stripped. "Patch 0024 v1 NOT...",
+  "Patch 0028 (2026-05-08): attempt_count is NO LONGER reset here..."
+  etc. — design intent kept (one concise comment per invariant), the
+  history-of-getting-there belongs in git log.
+
+- Default for NVreg_TbEgpuRecoverEnable: 0 (OFF). Documented inline
+  with a TODO marker for the planned post-Phase-3 flip-to-1.
+
+Cross-cluster wire-in:
+
+- One-line call added to P3's tb_egpu_qwd_thread detect path (inside
+  the !detected_logged latch in kernel-open/nvidia/nv-tb-egpu-qwd.c):
+
+      tb_egpu_dump_aer_trigger_event(nvl->pci_dev, "qwd-detect",
+                                     &qwd->last_aer);
+
+  Populates the qwd->last_aer snapshot exposed by P3's
+  tb_egpu_qwd_last_aer_summary sysfs reader. With this wire-in,
+  last_aer.valid flips to 1 on first detect and the sysfs reader
+  emits the full AER + DPC + link snapshot. Until P3 + P2 are
+  stacked, P3 alone reports "(no detection event yet)".
+
+Deviations from inventory (flagged for status doc + future clusters):
+
+- **S2 (DIAG-AER2) portion of legacy 0023 deferred to P6.** S2
+  extends tb_egpu_lever_m_diag_dump, which is introduced by legacy
+  0018 — assigned to P6 (diagnostic telemetry surface). The function
+  does not exist in P1+P5+P3 baseline; the S2 expansion cannot land
+  before its host function. P6 owns: (a) introducing diag_dump from
+  0018, (b) the S2 expansion from 0023, (c) re-introducing the
+  diag_dump call sites in nv_pci.c's err_handlers callbacks (the
+  AER-capture call stays here in P2).
+
+- Legacy 0029's mmio_enabled callback originally invoked BOTH
+  tb_egpu_lever_m_diag_dump AND tb_egpu_dump_aer_trigger_event.
+  This patch keeps only the AER call. P6 will add back the
+  diag_dump call when it lands the function.
+
+- Gate function got a pdev parameter (not in the original brief).
+  Lets GATE_SURRENDER emit PERMANENT_FAIL uevent in-helper. Trade-off:
+  helper takes an extra arg vs. duplicating uevent emission at both
+  call sites. Single-source-of-truth chosen.
+
+- TB_EGPU_LOG_ONCE from P1's RM-side nv-tb-egpu.h is NOT used in P2
+  (kernel-open does not share the RM include path; only one log-once
+  site exists in P2). Kept the inline static-int latch pattern; not
+  worth a shared kernel-open header for one site.
+
+Validation: git apply --check vs vanilla 595.71.05 with P1 + P5 + P3
+stacked OK; container build (refactor-rc1) OK. Full kernel-module
+compile deferred to Phase 3 stack validation.
+
+Files touched:
+  kernel-open/common/inc/nv-linux.h        +8    (recover field)
+  kernel-open/nvidia/nv-pci.c              +162  (err_handlers + hooks)
+  kernel-open/nvidia/nv-tb-egpu-qwd.c      +5/-5 (AER wire-in)
+  kernel-open/nvidia/nv-tb-egpu-recover.c  new   (1074 lines)
+  kernel-open/nvidia/nv-tb-egpu-recover.h  new   (255 lines)
+  kernel-open/nvidia/nv.c                  +17   (post-rmInit hooks)
+  kernel-open/nvidia/nvidia-sources.Kbuild +1
+
+Userspace dependencies: the helper scripts under
+usr/local/sbin/aorus-egpu-lever-m* still reference the legacy
+sysfs/killswitch paths. Userspace + README updates are scoped to
+Phase 4 of the P1-P6 refactor.
+
+---
+ kernel-open/common/inc/nv-linux.h        |    8 +
+ kernel-open/nvidia/nv-pci.c              |  162 +++-
+ kernel-open/nvidia/nv-tb-egpu-qwd.c      |    9 +-
+ kernel-open/nvidia/nv-tb-egpu-recover.c  | 1074 ++++++++++++++++++++++
+ kernel-open/nvidia/nv-tb-egpu-recover.h  |  255 +++++
+ kernel-open/nvidia/nv.c                  |   17 +
+ kernel-open/nvidia/nvidia-sources.Kbuild |    1 +
+ 7 files changed, 1521 insertions(+), 5 deletions(-)
+ create mode 100644 kernel-open/nvidia/nv-tb-egpu-recover.c
+ create mode 100644 kernel-open/nvidia/nv-tb-egpu-recover.h
+
+diff --git a/kernel-open/common/inc/nv-linux.h b/kernel-open/common/inc/nv-linux.h
+index f99eaf7..5abd0fb 100644
+--- a/kernel-open/common/inc/nv-linux.h
++++ b/kernel-open/common/inc/nv-linux.h
+@@ -1443,6 +1443,14 @@ typedef struct nv_linux_state_s {
+      * headers. See kernel-open/nvidia/nv-tb-egpu-qwd.{c,h}.
+      */
+     struct tb_egpu_qwd *qwd;
++
++    /*
++     * tb_egpu in-driver recovery state machine (cluster P2). Forward-
++     * declared opaque pointer; full struct in nv-tb-egpu-recover.h.
++     * NULL when NVreg_TbEgpuRecoverEnable=0 at module load (or the
++     * persistent kill-switch file overrides it to 0).
++     */
++    struct tb_egpu_recover_state *recover;
+ } nv_linux_state_t;
+ 
+ extern nv_linux_state_t *nv_linux_devices;
+diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
+index f2616b8..1bd7c6a 100644
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -28,7 +28,8 @@
+ #include "nv-hypervisor.h"
+ #include "nv-reg.h"
+ #include "nv-tb-egpu-aer.h"
+-#include "nv-tb-egpu-qwd.h"  /* tb_egpu Q-watchdog (cluster P3) */
++#include "nv-tb-egpu-qwd.h"      /* tb_egpu Q-watchdog (cluster P3) */
++#include "nv-tb-egpu-recover.h"  /* tb_egpu recovery state machine (cluster P2) */
+ 
+ #if defined(NV_VGPU_KVM_BUILD)
+ #include "nv-vgpu-vfio-interface.h"
+@@ -1929,6 +1930,22 @@ nv_pci_probe
+     nvl->pci_dev           = pci_dev;
+     nvl->dma_dev.dev       = nvl->dev;
+ 
++    /*
++     * tb_egpu recovery state machine (cluster P2): allocate per-pdev
++     * recovery state early so the probe-time WPR2 check below has
++     * nvl->recover available. Failure is non-fatal — recover stays
++     * NULL and the check short-circuits.
++     */
++    (void)tb_egpu_recover_init(nvl);
++
++    /*
++     * tb_egpu recovery (cluster P2): probe-time WPR2-stuck check.
++     * Informational only — detection-only counter. The load-bearing
++     * trigger is the post-rmInit-FAIL hook in nv_start_device (nv.c).
++     */
++    (void)tb_egpu_recover_check_wpr2_at_probe(nvl,
++            nv->bars[NV_GPU_BAR_INDEX_REGS].cpu_address);
++
+     nv->pci_info.vendor_id = pci_dev->vendor;
+     nv->pci_info.device_id = pci_dev->device;
+     nv->subsystem_id       = pci_dev->subsystem_device;
+@@ -2300,6 +2317,13 @@ static void nv_pci_remove_helper(struct pci_dev *pci_dev, bool block_if_gpu_in_u
+      */
+     tb_egpu_qwd_stop(nvl);
+ 
++    /*
++     * tb_egpu recovery (cluster P2): drain any pending recovery work
++     * and free per-pdev state before nvl is torn down.
++     * cancel_work_sync inside guarantees the work handler has returned.
++     */
++    tb_egpu_recover_stop(nvl);
++
+ #if NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_disable_feature
+ #if defined(CONFIG_IOMMU_SVA) && \
+     (defined(NV_IOASID_GET_PRESENT) || defined(NV_MM_PASID_DROP_PRESENT))
+@@ -2781,6 +2805,141 @@ NvBool NV_API_CALL nv_grdma_pci_topology_supported(
+ extern struct dev_pm_ops nv_pm_ops;
+ #endif
+ 
++/*
++ * tb_egpu recovery (cluster P2): pci_error_handlers surface.
++ *
++ *   | Enable | attempts<Max | rate-limit OK | result        |
++ *   |--------|--------------|---------------|---------------|
++ *   |   0    |      —       |       —       | DISCONNECT    |  (M-base)
++ *   |   1    |     YES      |      YES      | NEED_RESET    |  (recover)
++ *   |   1    |      NO      |       —       | DISCONNECT    |  (surrender + PERMANENT_FAIL)
++ *   |   1    |     YES      |       NO      | DISCONNECT    |  (rate-limited; defer)
++ *
++ * On NEED_RESET the kernel performs the bus reset and dispatches
++ * slot_reset / resume. On DISCONNECT the kernel marks the device
++ * permanently failed; the existing GPU-lost crash-safety cleanup
++ * chain (cluster P1) runs.
++ *
++ * mmio_enabled and cor_error_detected are wired up for completeness
++ * and observability — see the helper comments below.
++ */
++static pci_ers_result_t
++nv_pci_error_detected(struct pci_dev *pci_dev, pci_channel_state_t state)
++{
++    static int s_error_detected_logged = 0;
++    nv_linux_state_t *nvl;
++    struct tb_egpu_recover_state *st = NULL;
++    enum tb_egpu_recover_gate gate;
++    const char *reason = "?";
++    pci_ers_result_t result;
++    const char *result_str;
++
++    if (!s_error_detected_logged)
++    {
++        s_error_detected_logged = 1;
++        nv_printf(NV_DBG_ERRORS,
++                  "tb_egpu recover: AER error_detected fired on %04x:%02x:%02x.%x "
++                  "(channel state=%d)\n",
++                  NV_PCI_DOMAIN_NUMBER(pci_dev), NV_PCI_BUS_NUMBER(pci_dev),
++                  NV_PCI_SLOT_NUMBER(pci_dev), PCI_FUNC(pci_dev->devfn),
++                  (int)state);
++
++        /* Trigger-event AER capture — dump full AER + DPC + link state. */
++        tb_egpu_dump_aer_trigger_event(pci_dev, "error-handler", NULL);
++    }
++
++    nvl = pci_get_drvdata(pci_dev);
++    if (nvl)
++        st = nvl->recover;
++
++    gate = tb_egpu_recover_pre_schedule_gates(st, pci_dev, &reason);
++
++    switch (gate)
++    {
++        case TB_EGPU_RECOVER_GATE_OK:
++            /*
++             * Ask the kernel to drive the bus reset. Success accounting
++             * happens in slot_reset / resume; update last_fire here so
++             * concurrent fires hit the H2 rate-limit.
++             */
++            atomic_inc(&st->fire_count);
++            st->last_fire_jiffies = jiffies;
++            tb_egpu_recover_emit_uevent(pci_dev, "RECOVERING");
++            result = PCI_ERS_RESULT_NEED_RESET;
++            result_str = "NEED_RESET";
++            break;
++
++        default:
++            result = PCI_ERS_RESULT_DISCONNECT;
++            result_str = "DISCONNECT";
++            break;
++    }
++
++    nv_printf(NV_DBG_ERRORS,
++        "tb_egpu recover: error_detected -> %s (%s; attempts=%d/%u)\n",
++        result_str, reason,
++        st ? atomic_read(&st->attempt_count) : -1,
++        NVreg_TbEgpuRecoverMaxAttempts);
++
++    return result;
++}
++
++/*
++ * mmio_enabled: kernel may dispatch this between error_detected
++ * returning CAN_RECOVER and slot_reset. We always return NEED_RESET
++ * from error_detected (H4 path), so the kernel's normal flow won't
++ * dispatch mmio_enabled — but kernel internals occasionally invoke it
++ * via pci_walk_bus during AER recovery. Wired up:
++ *   (a) closes the err_handlers callback surface for completeness,
++ *   (b) gives us observability if the kernel ever does call it,
++ *   (c) future-proofs against kernel API changes.
++ *
++ * Pure observability — emits an AER snapshot, returns RECOVERED. (P6
++ * will weave in DIAG dump alongside.)
++ */
++static pci_ers_result_t nv_pci_mmio_enabled(struct pci_dev *pci_dev)
++{
++    nv_printf(NV_DBG_ERRORS,
++              "tb_egpu recover: mmio_enabled callback fired on %s\n",
++              pci_name(pci_dev));
++    tb_egpu_dump_aer_trigger_event(pci_dev, "mmio-enabled", NULL);
++    return PCI_ERS_RESULT_RECOVERED;
++}
++
++/*
++ * cor_error_detected: proactive observability for correctable AER
++ * errors that don't reach the uncorrectable path. The Gen3 demotion
++ * observed 2026-05-07 (Br_AER_Cor=0x1 + GPU_AER_UncMsk=0x400000
++ * demoting Internal Error to Cor=0x2000) is exactly this class. No
++ * state change, no recovery action — pure observability.
++ */
++static void nv_pci_cor_error_detected(struct pci_dev *pci_dev)
++{
++    nv_printf(NV_DBG_ERRORS,
++              "tb_egpu recover: cor_error_detected callback fired on %s\n",
++              pci_name(pci_dev));
++    tb_egpu_dump_aer_trigger_event(pci_dev, "cor-error", NULL);
++}
++
++/* Thin dispatchers; bodies live in nv-tb-egpu-recover.c. */
++static pci_ers_result_t nv_pci_slot_reset(struct pci_dev *pci_dev)
++{
++    return tb_egpu_recover_slot_reset(pci_dev);
++}
++
++static void nv_pci_resume(struct pci_dev *pci_dev)
++{
++    tb_egpu_recover_slot_reset_resume(pci_dev);
++}
++
++static const struct pci_error_handlers nv_pci_err_handlers = {
++    .error_detected     = nv_pci_error_detected,
++    .mmio_enabled       = nv_pci_mmio_enabled,
++    .slot_reset         = nv_pci_slot_reset,
++    .resume             = nv_pci_resume,
++    .cor_error_detected = nv_pci_cor_error_detected,
++};
++
+ struct pci_driver nv_pci_driver = {
+     .name      = MODULE_NAME,
+     .id_table  = nv_pci_table,
+@@ -2795,6 +2954,7 @@ struct pci_driver nv_pci_driver = {
+     .driver.pm = &nv_pm_ops,
+ #endif
+     .driver.probe_type = PROBE_FORCE_SYNCHRONOUS,
++    .err_handler       = &nv_pci_err_handlers,
+ };
+ 
+ void nv_pci_unregister_driver(void)
+diff --git a/kernel-open/nvidia/nv-tb-egpu-qwd.c b/kernel-open/nvidia/nv-tb-egpu-qwd.c
+index 5f18750..6a54e18 100644
+--- a/kernel-open/nvidia/nv-tb-egpu-qwd.c
++++ b/kernel-open/nvidia/nv-tb-egpu-qwd.c
+@@ -62,6 +62,7 @@
+ #include "os-interface.h"
+ #include "nv-linux.h"
+ #include "nv-tb-egpu-qwd.h"
++#include "nv-tb-egpu-recover.h"  /* tb_egpu_dump_aer_trigger_event (cluster P2) */
+ 
+ #include <linux/kthread.h>
+ #include <linux/delay.h>
+@@ -184,13 +185,13 @@ static int tb_egpu_qwd_thread(void *data)
+                 /*
+                  * S3 persistent detection state — populate inside the
+                  * latch so it captures the first detection of an
+-                 * episode. The AER snapshot (qwd->last_aer) is left
+-                 * untouched here; cluster P2 patches in the call to
+-                 * tb_egpu_dump_aer_trigger_event() at this site to
+-                 * populate it.
++                 * episode. The AER snapshot (qwd->last_aer) is filled
++                 * by the cluster-P2 helper below.
+                  */
+                 qwd->last_detection_jiffies = jiffies;
+                 qwd->last_pmc_boot_0        = boot_0;
++                tb_egpu_dump_aer_trigger_event(nvl->pci_dev, "qwd-detect",
++                                               &qwd->last_aer);
+             }
+ 
+             os_pci_set_disconnected(nv->handle);
+diff --git a/kernel-open/nvidia/nv-tb-egpu-recover.c b/kernel-open/nvidia/nv-tb-egpu-recover.c
+new file mode 100644
+index 0000000..d2f9e4b
+--- /dev/null
++++ b/kernel-open/nvidia/nv-tb-egpu-recover.c
+@@ -0,0 +1,1074 @@
++/*
++ * SPDX-FileCopyrightText: nvidia-driver-injector contributors
++ * SPDX-License-Identifier: MIT
++ *
++ * nv-tb-egpu-recover.c — Thunderbolt-eGPU recovery state machine (cluster P2).
++ *
++ * In-driver recovery for two failure paths:
++ *
++ *   1. Post-rmInit-FAIL with WPR2 stuck. Trigger function reads the WPR2
++ *      status register at BAR0+0x88a828 immediately after rm_init_adapter
++ *      fails; on a stuck WPR2 it schedules a workqueue that runs
++ *      pci_reset_bus() on the upstream Thunderbolt bridge. The work
++ *      handler also dispatches our slot_reset / resume helpers
++ *      explicitly, since pci_reset_bus does NOT itself fire
++ *      err_handlers callbacks.
++ *
++ *   2. Runtime AER. nv_pci_error_detected runs the same H1/H2/H3 gates
++ *      and returns PCI_ERS_RESULT_NEED_RESET on success; the kernel
++ *      drives the bus reset and dispatches our slot_reset / resume
++ *      helpers via the err_handlers struct registered in nv-pci.c.
++ *
++ * Both trigger paths funnel through tb_egpu_recover_pre_schedule_gates()
++ * — a single source of truth for the gate logic so the two call sites
++ * stay in lockstep.
++ *
++ * Design references: docs/lever-catalog.md (Lever M-recover);
++ * docs/patch-refactor-inventory.md § P2.
++ *
++ * Sovereign layer: L1 (NVIDIA fork). Justified because the trigger and
++ * the recovery callbacks need direct access to nv_state_t internals
++ * (BAR0 physical address) and lifecycle-bound storage in nvl.
++ *
++ * DPM note: this driver runs with NVreg_DynamicPowerManagement=0 forced
++ * via etc/modprobe.d, plus udev keeps power/control=on and
++ * d3cold_allowed=0. The device stays in D0; all MMIO and PCI config
++ * reads in this file are safe by construction.
++ */
++
++#include "nv-tb-egpu-recover.h"
++#include "nv-linux.h"
++#include "nv-pci-types.h"
++#include "nv-tb-egpu-qwd.h"   /* struct tb_egpu_qwd_aer_snapshot */
++
++#include <linux/atomic.h>
++#include <linux/delay.h>      /* msleep */
++#include <linux/device.h>
++#include <linux/fs.h>
++#include <linux/io.h>
++#include <linux/jiffies.h>
++#include <linux/kernel_read_file.h>
++#include <linux/kobject.h>
++#include <linux/module.h>
++#include <linux/pci.h>
++#include <linux/pci_regs.h>
++#include <linux/slab.h>
++#include <linux/sysfs.h>
++#include <linux/types.h>
++#include <linux/vmalloc.h>
++#include <linux/workqueue.h>
++
++/* -----------------------------------------------------------------------
++ * Module parameters
++ *
++ * TODO: flip NVreg_TbEgpuRecoverEnable default to 1 once production soak
++ * passes (post-Phase 3, see docs/patch-refactor-status.md).
++ * --------------------------------------------------------------------- */
++
++unsigned int NVreg_TbEgpuRecoverEnable = 0;
++module_param(NVreg_TbEgpuRecoverEnable, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuRecoverEnable,
++    "tb_egpu: master enable for the in-driver recovery state machine "
++    "(0=off default, 1=engage). The killswitch file at "
++    "/var/lib/tb-egpu/recover-killswitch overrides to 0 when present "
++    "and content begins with '0'.");
++
++unsigned int NVreg_TbEgpuRecoverMaxAttempts = 3;
++module_param(NVreg_TbEgpuRecoverMaxAttempts, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuRecoverMaxAttempts,
++    "tb_egpu recover (H1): max bus-reset attempts per burst before "
++    "surrendering (default 3). Counter resets on a verified end-to-end "
++    "recovery (post-rmInit-OK) or after NVreg_TbEgpuRecoverSurrenderResetSec "
++    "of idle.");
++
++unsigned int NVreg_TbEgpuRecoverResetSettleMs = 500;
++module_param(NVreg_TbEgpuRecoverResetSettleMs, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuRecoverResetSettleMs,
++    "tb_egpu recover: settle delay (ms) after pci_reset_bus before "
++    "verification (default 500).");
++
++unsigned int NVreg_TbEgpuRecoverMinAttemptIntervalMs = 30000;
++module_param(NVreg_TbEgpuRecoverMinAttemptIntervalMs, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuRecoverMinAttemptIntervalMs,
++    "tb_egpu recover (H2): minimum interval (ms) between recovery "
++    "attempts (default 30000 = 30s). Earlier triggers are rate-limited.");
++
++unsigned int NVreg_TbEgpuRecoverSurrenderResetSec = 300;
++module_param(NVreg_TbEgpuRecoverSurrenderResetSec, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuRecoverSurrenderResetSec,
++    "tb_egpu recover (H1): seconds of idle after last_fire_jiffies "
++    "before attempt_count resets to 0 (default 300 = 5min).");
++
++unsigned int NVreg_TbEgpuRecoverTestForceTrigger = 0;
++module_param(NVreg_TbEgpuRecoverTestForceTrigger, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuRecoverTestForceTrigger,
++    "tb_egpu recover (test only): force the post-rmInit-FAIL trigger to "
++    "fire even when WPR2 is clear (default 0).");
++
++/* -----------------------------------------------------------------------
++ * Kill-switch file (H3 persistence)
++ * --------------------------------------------------------------------- */
++
++/*
++ * Read the persistent kill-switch file with a 16-byte hard cap.
++ * kernel_read_file_from_path allocates via vmalloc; we vfree it.
++ *
++ * Returns:
++ *    0 — file present, content begins '0' → kill switch ENGAGED
++ *    1 — file present, content begins '1' → kill switch released
++ *   -1 — file absent or unreadable → no override
++ */
++static int tb_egpu_recover_read_killswitch_file(void)
++{
++    void   *buf = NULL;
++    size_t  file_size = 0;
++    ssize_t bytes;
++    int     result = -1;
++    char    first;
++
++    bytes = kernel_read_file_from_path(
++        TB_EGPU_RECOVER_KILLSWITCH_PATH,
++        0, &buf, 16, &file_size, READING_UNKNOWN);
++
++    if (bytes < 0 || !buf)
++        return -1;
++
++    if (bytes > 0)
++    {
++        first = ((char *)buf)[0];
++        if (first == '0')
++            result = 0;
++        else if (first == '1')
++            result = 1;
++    }
++
++    vfree(buf);
++    return result;
++}
++
++/*
++ * Apply the kill-switch file override to NVreg_TbEgpuRecoverEnable.
++ * Idempotent across multiple devices. Called once from recover_init.
++ */
++static int tb_egpu_recover_apply_killswitch_file(void)
++{
++    int file_state = tb_egpu_recover_read_killswitch_file();
++
++    if (file_state == 0 && NVreg_TbEgpuRecoverEnable != 0)
++    {
++        nv_printf(NV_DBG_ERRORS,
++            "tb_egpu recover: killswitch file engaged "
++            "(%s=0); overriding NVreg_TbEgpuRecoverEnable to 0\n",
++            TB_EGPU_RECOVER_KILLSWITCH_PATH);
++        NVreg_TbEgpuRecoverEnable = 0;
++    }
++    return file_state;
++}
++
++/* -----------------------------------------------------------------------
++ * uevent emission
++ * --------------------------------------------------------------------- */
++
++void tb_egpu_recover_emit_uevent(struct pci_dev *pdev, const char *state)
++{
++    char  envbuf[64];
++    char *envp[2] = { envbuf, NULL };
++
++    if (!pdev || !state)
++        return;
++
++    (void)scnprintf(envbuf, sizeof(envbuf), "TB_EGPU_GPU_STATE=%s", state);
++    (void)kobject_uevent_env(&pdev->dev.kobj, KOBJ_CHANGE, envp);
++}
++
++/* -----------------------------------------------------------------------
++ * WPR2 helper
++ * --------------------------------------------------------------------- */
++
++/*
++ * Read the raw WPR2 status register at the GB100/GB202 published offset.
++ * Returns 0 on success and stores the raw value in *raw_out; returns
++ * -errno on ioremap failure. The mapping is page-bounded and released
++ * before return — no persistent state.
++ */
++static int tb_egpu_recover_read_wpr2(u64 bar0_phys, u32 *raw_out)
++{
++    void __iomem *tmp_map;
++    u64           page_aligned;
++    u32           page_offset;
++
++    if (!raw_out)
++        return -EINVAL;
++
++    *raw_out = 0;
++
++    if (bar0_phys == 0)
++        return -EINVAL;
++
++    page_aligned = (bar0_phys + TB_EGPU_RECOVER_WPR2_REG_OFFSET) & PAGE_MASK;
++    page_offset  = (bar0_phys + TB_EGPU_RECOVER_WPR2_REG_OFFSET) & ~PAGE_MASK;
++
++    tmp_map = ioremap(page_aligned, PAGE_SIZE);
++    if (!tmp_map)
++        return -ENOMEM;
++
++    *raw_out = ioread32(tmp_map + page_offset);
++    iounmap(tmp_map);
++
++    return 0;
++}
++
++/* -----------------------------------------------------------------------
++ * AER capture helper (legacy "Mode B telemetry S1")
++ *
++ * Walks GPU -> immediate bridge -> true host root port. The walker
++ * iterates pci_upstream_bridge until pci_pcie_type == ROOT_PORT
++ * (bounded to 8 hops), which is necessary on multi-bridge topologies
++ * like the AORUS hub where a one-hop walk lands on the hub upstream
++ * port instead of the host root port.
++ *
++ * Pure observability: every read is passive (PCI config space + the
++ * pcie_capability_* helpers). No state mutation.
++ * --------------------------------------------------------------------- */
++
++static struct pci_dev *tb_egpu_recover_walk_to_root_port(struct pci_dev *start)
++{
++    struct pci_dev *p = start;
++    int hops = 0;
++
++    while (p && hops < 8)
++    {
++        if (pci_pcie_type(p) == PCI_EXP_TYPE_ROOT_PORT)
++            return p;
++        p = pci_upstream_bridge(p);
++        hops++;
++    }
++    return NULL;
++}
++
++static void tb_egpu_recover_read_dpc_state(struct pci_dev *pdev,
++                                           bool *present_out,
++                                           u16 *dpc_status_out,
++                                           u16 *dpc_ctl_out)
++{
++    int dpc_pos;
++    u16 stat = 0, ctl = 0;
++
++    *present_out = false;
++    *dpc_status_out = 0;
++    *dpc_ctl_out = 0;
++
++    if (!pdev)
++        return;
++    dpc_pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_DPC);
++    if (!dpc_pos)
++        return;
++
++    *present_out = true;
++    (void)pci_read_config_word(pdev, dpc_pos + 0x04, &ctl);
++    (void)pci_read_config_word(pdev, dpc_pos + 0x06, &stat);
++    *dpc_ctl_out = ctl;
++    *dpc_status_out = stat;
++}
++
++static void tb_egpu_recover_read_aer_full(struct pci_dev *pdev,
++                                          int *pos_out,
++                                          u32 *uesta, u32 *uemsk, u32 *uesvrt,
++                                          u32 *cesta, u32 *cemsk,
++                                          u32 hdrlog[4],
++                                          u32 *rootcmd, u32 *rootsta,
++                                          u32 *errsrc)
++{
++    *pos_out = 0;
++    *uesta = *uemsk = *uesvrt = *cesta = *cemsk = 0;
++    if (hdrlog) { hdrlog[0] = hdrlog[1] = hdrlog[2] = hdrlog[3] = 0; }
++    if (rootcmd) *rootcmd = 0;
++    if (rootsta) *rootsta = 0;
++    if (errsrc)  *errsrc  = 0;
++
++    if (!pdev)
++        return;
++
++    *pos_out = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_ERR);
++    if (!*pos_out)
++        return;
++
++    (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_UNCOR_STATUS, uesta);
++    (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_UNCOR_MASK,   uemsk);
++    (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_UNCOR_SEVER,  uesvrt);
++    (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_COR_STATUS,   cesta);
++    (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_COR_MASK,     cemsk);
++    if (hdrlog)
++    {
++        (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_HEADER_LOG + 0,  &hdrlog[0]);
++        (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_HEADER_LOG + 4,  &hdrlog[1]);
++        (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_HEADER_LOG + 8,  &hdrlog[2]);
++        (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_HEADER_LOG + 12, &hdrlog[3]);
++    }
++    if (rootcmd) (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_ROOT_COMMAND, rootcmd);
++    if (rootsta) (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_ROOT_STATUS,  rootsta);
++    if (errsrc)  (void)pci_read_config_dword(pdev, *pos_out + PCI_ERR_ROOT_ERR_SRC, errsrc);
++}
++
++void tb_egpu_dump_aer_trigger_event(struct pci_dev *gpu_pdev,
++                                    const char *trigger,
++                                    struct tb_egpu_qwd_aer_snapshot *out)
++{
++    struct pci_dev *bridge, *root;
++    u16 gpu_lnksta = 0xffff, br_lnksta = 0xffff, root_lnksta = 0xffff;
++    u16 gpu_devsta = 0xffff, br_devsta = 0xffff, root_devsta = 0xffff;
++    int gpu_aer_pos = 0, br_aer_pos = 0, root_aer_pos = 0;
++    u32 gpu_uesta = 0, gpu_uemsk = 0, gpu_uesvrt = 0, gpu_cesta = 0, gpu_cemsk = 0;
++    u32 gpu_hdrlog[4] = {0, 0, 0, 0};
++    u32 br_uesta = 0, br_uemsk = 0, br_uesvrt = 0, br_cesta = 0, br_cemsk = 0;
++    u32 root_uesta = 0, root_uemsk = 0, root_uesvrt = 0, root_cesta = 0, root_cemsk = 0;
++    u32 root_rootcmd = 0, root_rootsta = 0, root_errsrc = 0;
++    bool dpc_present = false;
++    u16  dpc_status = 0, dpc_ctl = 0;
++    const char *trig = trigger ? trigger : "?";
++
++    if (!gpu_pdev)
++    {
++        pr_info("tb_egpu trigger [event=%s]: gpu_pdev=NULL\n", trig);
++        return;
++    }
++
++    bridge = pci_upstream_bridge(gpu_pdev);
++    root   = tb_egpu_recover_walk_to_root_port(gpu_pdev);
++
++    (void)pcie_capability_read_word(gpu_pdev, PCI_EXP_LNKSTA, &gpu_lnksta);
++    (void)pcie_capability_read_word(gpu_pdev, PCI_EXP_DEVSTA, &gpu_devsta);
++    tb_egpu_recover_read_aer_full(gpu_pdev, &gpu_aer_pos,
++                                  &gpu_uesta, &gpu_uemsk, &gpu_uesvrt,
++                                  &gpu_cesta, &gpu_cemsk,
++                                  gpu_hdrlog, NULL, NULL, NULL);
++    if (bridge)
++    {
++        (void)pcie_capability_read_word(bridge, PCI_EXP_LNKSTA, &br_lnksta);
++        (void)pcie_capability_read_word(bridge, PCI_EXP_DEVSTA, &br_devsta);
++        tb_egpu_recover_read_aer_full(bridge, &br_aer_pos,
++                                      &br_uesta, &br_uemsk, &br_uesvrt,
++                                      &br_cesta, &br_cemsk,
++                                      NULL, NULL, NULL, NULL);
++    }
++    if (root)
++    {
++        (void)pcie_capability_read_word(root, PCI_EXP_LNKSTA, &root_lnksta);
++        (void)pcie_capability_read_word(root, PCI_EXP_DEVSTA, &root_devsta);
++        tb_egpu_recover_read_aer_full(root, &root_aer_pos,
++                                      &root_uesta, &root_uemsk, &root_uesvrt,
++                                      &root_cesta, &root_cemsk,
++                                      NULL, &root_rootcmd, &root_rootsta,
++                                      &root_errsrc);
++        tb_egpu_recover_read_dpc_state(root, &dpc_present, &dpc_status, &dpc_ctl);
++    }
++
++    pr_info("tb_egpu trigger [event=%s]:\n"
++            "  GPU(%s)    LnkSta=0x%04x DevSta=0x%04x  AER UESta=0x%08x UEMsk=0x%08x UESvrt=0x%08x CESta=0x%08x CEMsk=0x%08x\n"
++            "             AER HdrLog=%08x_%08x_%08x_%08x\n"
++            "  Bridge(%s) LnkSta=0x%04x DevSta=0x%04x  AER UESta=0x%08x UEMsk=0x%08x UESvrt=0x%08x CESta=0x%08x CEMsk=0x%08x\n"
++            "  Root(%s)   LnkSta=0x%04x DevSta=0x%04x  AER UESta=0x%08x UEMsk=0x%08x CESta=0x%08x CEMsk=0x%08x\n"
++            "             RootCmd=0x%08x RootSta=0x%08x ErrorSrc=0x%08x\n"
++            "  DPC: %s\n",
++            trig,
++            pci_name(gpu_pdev), gpu_lnksta, gpu_devsta,
++            gpu_uesta, gpu_uemsk, gpu_uesvrt, gpu_cesta, gpu_cemsk,
++            gpu_hdrlog[0], gpu_hdrlog[1], gpu_hdrlog[2], gpu_hdrlog[3],
++            bridge ? pci_name(bridge) : "NULL",
++            br_lnksta, br_devsta,
++            br_uesta, br_uemsk, br_uesvrt, br_cesta, br_cemsk,
++            root ? pci_name(root) : "NULL",
++            root_lnksta, root_devsta,
++            root_uesta, root_uemsk, root_cesta, root_cemsk,
++            root_rootcmd, root_rootsta, root_errsrc,
++            dpc_present ? "(see follow-up)" : "absent");
++    if (dpc_present)
++    {
++        pr_info("tb_egpu trigger [event=%s]: DPC Status=0x%04x Ctl=0x%04x\n",
++                trig, dpc_status, dpc_ctl);
++    }
++
++    if (out)
++    {
++        out->gpu_aer_uesta  = gpu_uesta;
++        out->gpu_aer_cesta  = gpu_cesta;
++        out->br_aer_uesta   = br_uesta;
++        out->br_aer_cesta   = br_cesta;
++        out->root_aer_uesta = root_uesta;
++        out->root_aer_cesta = root_cesta;
++        out->root_rootsta   = root_rootsta;
++        out->dpc_status     = dpc_status;
++        out->valid          = 1;
++    }
++    (void)gpu_aer_pos; (void)br_aer_pos; (void)root_aer_pos;
++}
++
++/* -----------------------------------------------------------------------
++ * Gate function — single source of truth for the recovery schedule
++ * decision. Both the post-rmInit-FAIL trigger and the AER
++ * error_detected callback call this.
++ *
++ * Semantics:
++ *   - GATE_DISABLED       NVreg_TbEgpuRecoverEnable=0 or st=NULL
++ *   - GATE_RATE_LIMITED   last fire was < MinAttemptIntervalMs ago (H2)
++ *   - GATE_SURRENDER      attempt_count would exceed MaxAttempts (H1)
++ *   - GATE_OK             schedule the recovery
++ *
++ * Side effects (callers MUST be aware):
++ *   - If we cross the H1 burst boundary (idle > SurrenderResetSec) we
++ *     reset attempt_count to 0 here so the next increment opens a fresh
++ *     burst.
++ *   - On GATE_OK we atomic_inc_return(&attempt_count). The caller owns
++ *     the rest of the schedule (set last_fire_jiffies, fire_count,
++ *     in_progress, pdev_for_work, schedule_work, RECOVERING uevent).
++ *   - On GATE_SURRENDER we atomic_inc(&surrender_count) and emit a
++ *     PERMANENT_FAIL uevent against pdev — the caller does NOT need to
++ *     repeat that. We still atomic_inc_return on attempt_count to keep
++ *     the counter monotonic across surrenders.
++ *
++ * reason_out (optional) receives a short static string suitable for
++ * logging at the caller.
++ * --------------------------------------------------------------------- */
++
++enum tb_egpu_recover_gate tb_egpu_recover_pre_schedule_gates(
++    struct tb_egpu_recover_state *st,
++    struct pci_dev *pdev,
++    const char **reason_out)
++{
++    unsigned long elapsed_ms;
++    int attempts;
++
++    if (!st || !NVreg_TbEgpuRecoverEnable)
++    {
++        if (reason_out)
++            *reason_out = "disabled (NVreg_TbEgpuRecoverEnable=0 or state=NULL)";
++        return TB_EGPU_RECOVER_GATE_DISABLED;
++    }
++
++    /* H1 burst boundary — idle long enough to start a fresh burst. */
++    if (st->last_fire_jiffies != 0 &&
++        time_after(jiffies,
++                   st->last_fire_jiffies +
++                   msecs_to_jiffies(NVreg_TbEgpuRecoverSurrenderResetSec * 1000U)))
++    {
++        atomic_set(&st->attempt_count, 0);
++    }
++
++    /* H2 rate-limit gate — cheaper than H1, check first. */
++    if (st->last_fire_jiffies != 0)
++    {
++        elapsed_ms = jiffies_to_msecs(jiffies - st->last_fire_jiffies);
++        if (elapsed_ms < NVreg_TbEgpuRecoverMinAttemptIntervalMs)
++        {
++            if (reason_out)
++                *reason_out = "rate-limited (H2)";
++            return TB_EGPU_RECOVER_GATE_RATE_LIMITED;
++        }
++    }
++
++    /* H1 MaxAttempts gate. */
++    attempts = atomic_inc_return(&st->attempt_count);
++    if (attempts > (int)NVreg_TbEgpuRecoverMaxAttempts)
++    {
++        atomic_inc(&st->surrender_count);
++        tb_egpu_recover_emit_uevent(pdev, "PERMANENT_FAIL");
++        if (reason_out)
++            *reason_out = "surrender (H1 MaxAttempts exhausted)";
++        return TB_EGPU_RECOVER_GATE_SURRENDER;
++    }
++
++    if (reason_out)
++        *reason_out = "scheduling bus reset";
++    return TB_EGPU_RECOVER_GATE_OK;
++}
++
++/* -----------------------------------------------------------------------
++ * Probe-time WPR2-stuck detection (informational only)
++ *
++ * The probe-time check is preserved from the legacy series as a
++ * sanity-check counter incrementer — it's been empirically falsified
++ * as the production trigger (boot-persistence hypothesis disproven
++ * 2026-05-06), but it provides cheap fire-rate visibility and may
++ * still fire on legitimate WPR2-stuck scenarios. Detection-only: never
++ * schedules recovery from here.
++ * --------------------------------------------------------------------- */
++
++bool tb_egpu_recover_check_wpr2_at_probe(nv_linux_state_t *nvl,
++                                         u64 bar0_phys_addr)
++{
++    nv_state_t *nv;
++    u32         wpr2_raw = 0;
++    u32         wpr2_val;
++    int         rc;
++
++    if (!nvl)
++        return false;
++
++    if (!NVreg_TbEgpuRecoverEnable || !nvl->recover)
++        return false;
++
++    nv = NV_STATE_PTR(nvl);
++
++    rc = tb_egpu_recover_read_wpr2(bar0_phys_addr, &wpr2_raw);
++    if (rc != 0)
++    {
++        NV_DEV_PRINTF(NV_DBG_INFO, nv,
++            "tb_egpu recover: probe WPR2 check — read failed (rc=%d); "
++            "skipping (probe continues normally)\n", rc);
++        return false;
++    }
++
++    wpr2_val = wpr2_raw & TB_EGPU_RECOVER_WPR2_VAL_MASK;
++    if (wpr2_val == 0)
++    {
++        NV_DEV_PRINTF(NV_DBG_INFO, nv,
++            "tb_egpu recover: probe WPR2 clear (raw=0x%08x); "
++            "GSP boot should proceed normally\n", wpr2_raw);
++        return false;
++    }
++
++    atomic_inc(&nvl->recover->fire_count);
++    nvl->recover->last_fire_jiffies = jiffies;
++
++    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++        "tb_egpu recover: probe WPR2 DETECTED up (raw=0x%08x val=0x%08x). "
++        "Detection-only at probe; the load-bearing trigger is the "
++        "post-rmInit-FAIL hook in nv_start_device. fire_count=%d\n",
++        wpr2_raw, wpr2_val, atomic_read(&nvl->recover->fire_count));
++
++    return true;
++}
++
++/* -----------------------------------------------------------------------
++ * Work handler — runs pci_reset_bus on the upstream bridge, then
++ * explicitly dispatches our slot_reset / resume helpers.
++ *
++ * Why the explicit dispatch: pci_reset_bus() resets the secondary bus
++ * but does NOT invoke err_handlers->slot_reset / ->resume. Those fire
++ * only when the kernel's AER subsystem drives recovery via the
++ * NEED_RESET return path from error_detected. So the manual trigger
++ * path (post-rmInit-FAIL hook + sysfs force_trigger) must call those
++ * helpers itself to reach the same completion state — PMC_BOOT_0
++ * verify, success_count++, READY uevent — that the AER path gets for
++ * free. (The AER path is unchanged; pci_reset_bus is not called from
++ * the work handler when the kernel drives recovery, only from the
++ * manual trigger path.)
++ *
++ * pdev refcount: held by the trigger via pci_dev_get; we pci_dev_put
++ * before returning.
++ * --------------------------------------------------------------------- */
++
++static void tb_egpu_recover_reset_work_handler(struct work_struct *work)
++{
++    struct tb_egpu_recover_state *st =
++        container_of(work, struct tb_egpu_recover_state, reset_work);
++    struct pci_dev *pdev   = st->pdev_for_work;
++    struct pci_dev *bridge = NULL;
++    int rc;
++
++    if (!pdev)
++    {
++        nv_printf(NV_DBG_ERRORS,
++            "tb_egpu recover: reset_work fired but pdev_for_work=NULL; "
++            "recovery aborted\n");
++        atomic_set(&st->in_progress, 0);
++        return;
++    }
++
++    bridge = pci_upstream_bridge(pdev);
++    if (!bridge)
++    {
++        nv_printf(NV_DBG_ERRORS,
++            "tb_egpu recover: no upstream bridge for %s; cannot bus-reset; "
++            "surrendering\n", pci_name(pdev));
++        atomic_inc(&st->surrender_count);
++        tb_egpu_recover_emit_uevent(pdev, "PERMANENT_FAIL");
++        goto out_put;
++    }
++
++    nv_printf(NV_DBG_ERRORS,
++        "tb_egpu recover: bus-reset starting on bridge %s "
++        "(GPU=%s; attempt=%d/%u; settle=%ums)\n",
++        pci_name(bridge), pci_name(pdev),
++        atomic_read(&st->attempt_count), NVreg_TbEgpuRecoverMaxAttempts,
++        NVreg_TbEgpuRecoverResetSettleMs);
++
++    tb_egpu_recover_emit_uevent(pdev, "RECOVERING");
++
++    /* Serialise vs the kernel's PCI rescan/remove paths. */
++    pci_lock_rescan_remove();
++    rc = pci_reset_bus(bridge);
++    pci_unlock_rescan_remove();
++
++    /* Settle before verification; gives the link time to retrain. */
++    msleep(NVreg_TbEgpuRecoverResetSettleMs);
++
++    if (rc != 0)
++    {
++        nv_printf(NV_DBG_ERRORS,
++            "tb_egpu recover: pci_reset_bus(%s) FAILED rc=%d; "
++            "emitting PERMANENT_FAIL\n", pci_name(bridge), rc);
++        atomic_inc(&st->surrender_count);
++        tb_egpu_recover_emit_uevent(pdev, "PERMANENT_FAIL");
++        goto out_put;
++    }
++
++    nv_printf(NV_DBG_ERRORS,
++        "tb_egpu recover: pci_reset_bus(%s) OK; dispatching slot_reset + "
++        "resume helpers explicitly\n", pci_name(bridge));
++
++    /*
++     * Explicit dispatch — see file-level note. slot_reset reads
++     * PMC_BOOT_0; on RECOVERED, resume increments success_count and
++     * emits READY. On DISCONNECT, slot_reset itself handles the
++     * surrender accounting + PERMANENT_FAIL.
++     */
++    {
++        pci_ers_result_t rs = tb_egpu_recover_slot_reset(pdev);
++        if (rs == PCI_ERS_RESULT_RECOVERED)
++            tb_egpu_recover_slot_reset_resume(pdev);
++    }
++
++out_put:
++    pci_dev_put(pdev);
++    st->pdev_for_work = NULL;
++    atomic_set(&st->in_progress, 0);
++}
++
++/* -----------------------------------------------------------------------
++ * Post-rmInit-FAIL trigger
++ *
++ * Concurrency / ordering note (re: pdev_for_work race audit, refactor
++ * brief item 6):
++ *
++ *   pdev_for_work is owned exclusively under the in_progress=1 guard.
++ *   Order of operations on the trigger side:
++ *     1. atomic_xchg(&in_progress, 1) returns the previous value.
++ *     2. If previous was 1: another trigger is mid-flight; bail out
++ *        without touching pdev_for_work.
++ *     3. Otherwise we now own the slot. Run gates; on GATE_OK, write
++ *        pdev_for_work = pci_dev_get(pdev) BEFORE schedule_work().
++ *
++ *   Order on the handler side:
++ *     A. Read pdev_for_work (publishes-after the schedule_work
++ *        store-release in step 3).
++ *     B. ... do recovery ...
++ *     C. pci_dev_put(pdev); st->pdev_for_work = NULL;
++ *     D. atomic_set(&in_progress, 0).
++ *
++ *   Therefore: when atomic_xchg returns 0 here, the previous handler
++ *   (if any) has already executed C → D, so pdev_for_work is NULL.
++ *   The legacy "Defensive: stale pdev_for_work" branch (which dropped
++ *   a refcount before re-arming) was dead-defensive code; removed. We
++ *   keep a WARN_ON_ONCE as a tripwire in case the ordering ever
++ *   regresses.
++ * --------------------------------------------------------------------- */
++
++int tb_egpu_recover_trigger_post_rminit_fail(nv_linux_state_t *nvl)
++{
++    struct tb_egpu_recover_state *st;
++    nv_state_t                   *nv;
++    struct pci_dev               *pdev;
++    u64                           bar0_phys;
++    u32                           wpr2_raw = 0;
++    u32                           wpr2_val;
++    bool                          wpr2_stuck;
++    enum tb_egpu_recover_gate     gate;
++    const char                   *reason = "?";
++
++    if (!nvl)
++        return 0;
++
++    if (!NVreg_TbEgpuRecoverEnable || !nvl->recover)
++        return 0;   /* fall back to existing failure path */
++
++    st   = nvl->recover;
++    nv   = NV_STATE_PTR(nvl);
++    pdev = nvl->pci_dev;
++    bar0_phys = nv->bars[NV_GPU_BAR_INDEX_REGS].cpu_address;
++
++    if (!pdev || bar0_phys == 0)
++        return 0;
++
++    /* Step 1: read WPR2 (or honour TestForceTrigger). */
++    (void)tb_egpu_recover_read_wpr2(bar0_phys, &wpr2_raw);
++    wpr2_val   = wpr2_raw & TB_EGPU_RECOVER_WPR2_VAL_MASK;
++    wpr2_stuck = (wpr2_val != 0);
++
++    if (NVreg_TbEgpuRecoverTestForceTrigger && !wpr2_stuck)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "tb_egpu recover: TestForceTrigger=1 — forcing trigger even "
++            "though WPR2 is clear (raw=0x%08x)\n", wpr2_raw);
++        wpr2_stuck = true;
++    }
++
++    if (!wpr2_stuck)
++    {
++        NV_DEV_PRINTF(NV_DBG_INFO, nv,
++            "tb_egpu recover: post-rmInit-FAIL but WPR2 clear "
++            "(raw=0x%08x); not the WPR2-stuck failure mode; not triggering\n",
++            wpr2_raw);
++        return 0;
++    }
++
++    /* Step 2: re-entry guard (acquires exclusive ownership of pdev_for_work). */
++    if (atomic_xchg(&st->in_progress, 1) != 0)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "tb_egpu recover: trigger fired but in_progress=1; previous "
++            "attempt still running; skipping\n");
++        return 0;
++    }
++    WARN_ON_ONCE(st->pdev_for_work != NULL);
++
++    /* Step 3: H1/H2/Enable gates. */
++    gate = tb_egpu_recover_pre_schedule_gates(st, pdev, &reason);
++    switch (gate)
++    {
++        case TB_EGPU_RECOVER_GATE_OK:
++            break;
++
++        case TB_EGPU_RECOVER_GATE_DISABLED:
++        case TB_EGPU_RECOVER_GATE_RATE_LIMITED:
++            NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++                "tb_egpu recover: trigger gated (%s); deferring\n", reason);
++            atomic_set(&st->in_progress, 0);
++            return 0;
++
++        case TB_EGPU_RECOVER_GATE_SURRENDER:
++            NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++                "tb_egpu recover: trigger gated (%s); emitting PERMANENT_FAIL\n",
++                reason);
++            atomic_set(&st->in_progress, 0);
++            return 0;
++    }
++
++    /* Step 4: schedule the work. */
++    atomic_inc(&st->fire_count);
++    st->last_fire_jiffies = jiffies;
++    st->pdev_for_work     = pci_dev_get(pdev);
++
++    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++        "tb_egpu recover: scheduling recovery "
++        "(attempt=%d/%u, WPR2=0x%08x, ForceTrigger=%u, fires=%d)\n",
++        atomic_read(&st->attempt_count), NVreg_TbEgpuRecoverMaxAttempts,
++        wpr2_raw, NVreg_TbEgpuRecoverTestForceTrigger,
++        atomic_read(&st->fire_count));
++
++    schedule_work(&st->reset_work);
++    return 0;
++}
++
++/* -----------------------------------------------------------------------
++ * slot_reset / resume / post-rmInit-OK
++ * --------------------------------------------------------------------- */
++
++pci_ers_result_t tb_egpu_recover_slot_reset(struct pci_dev *pdev)
++{
++    nv_linux_state_t *nvl;
++    nv_state_t       *nv;
++    void __iomem     *tmp_map;
++    u64               bar0_phys;
++    u32               pmc_boot_0 = 0xffffffffu;
++
++    if (!pdev)
++        return PCI_ERS_RESULT_DISCONNECT;
++
++    nvl = pci_get_drvdata(pdev);
++    if (!nvl)
++        return PCI_ERS_RESULT_DISCONNECT;
++
++    nv = NV_STATE_PTR(nvl);
++    bar0_phys = nv->bars[NV_GPU_BAR_INDEX_REGS].cpu_address;
++    if (bar0_phys == 0)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "tb_egpu recover: slot_reset — bar0_phys=0; cannot verify; "
++            "DISCONNECT\n");
++        return PCI_ERS_RESULT_DISCONNECT;
++    }
++
++    tmp_map = ioremap(bar0_phys, PAGE_SIZE);
++    if (tmp_map)
++    {
++        pmc_boot_0 = ioread32(tmp_map);
++        iounmap(tmp_map);
++    }
++
++    if (pmc_boot_0 == 0xffffffffu)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "tb_egpu recover: slot_reset — PMC_BOOT_0=0xffffffff "
++            "(bus still down); DISCONNECT\n");
++        if (nvl->recover)
++        {
++            atomic_inc(&nvl->recover->surrender_count);
++            tb_egpu_recover_emit_uevent(pdev, "PERMANENT_FAIL");
++        }
++        return PCI_ERS_RESULT_DISCONNECT;
++    }
++
++    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++        "tb_egpu recover: slot_reset — PMC_BOOT_0=0x%08x; RECOVERED\n",
++        pmc_boot_0);
++    return PCI_ERS_RESULT_RECOVERED;
++}
++
++/*
++ * Resume callback. Bumps success_count and emits READY. The
++ * attempt_count reset lives at tb_egpu_recover_record_post_rminit_ok
++ * — slot_reset RECOVERED proves only that the bus is back, not that
++ * GSP / rm_init_adapter will succeed on the next attempt. Per design
++ * § H1 only verified end-to-end success clears the counter; resetting
++ * here would leave the H1 gate unreachable in real-world storms.
++ */
++void tb_egpu_recover_slot_reset_resume(struct pci_dev *pdev)
++{
++    nv_linux_state_t *nvl;
++
++    if (!pdev)
++        return;
++
++    nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->recover)
++        return;
++
++    atomic_inc(&nvl->recover->success_count);
++
++    nv_printf(NV_DBG_ERRORS,
++        "tb_egpu recover: resume — success_count=%d, bus reset done; "
++        "emitting READY (attempt_count cleared at next post-rmInit-OK)\n",
++        atomic_read(&nvl->recover->success_count));
++
++    tb_egpu_recover_emit_uevent(pdev, "READY");
++}
++
++void tb_egpu_recover_record_post_rminit_ok(nv_linux_state_t *nvl)
++{
++    int prev;
++
++    if (!nvl || !nvl->recover)
++        return;
++
++    prev = atomic_read(&nvl->recover->attempt_count);
++    if (prev > 0)
++    {
++        nv_printf(NV_DBG_ERRORS,
++            "tb_egpu recover: post-rmInit-OK observed with attempt_count=%d; "
++            "verified end-to-end recovery — resetting attempt_count to 0\n",
++            prev);
++    }
++    atomic_set(&nvl->recover->attempt_count, 0);
++}
++
++/* -----------------------------------------------------------------------
++ * sysfs surface
++ * --------------------------------------------------------------------- */
++
++static ssize_t tb_egpu_recover_fires_show(struct device *dev,
++                                          struct device_attribute *attr,
++                                          char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->recover)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%d\n",
++                     atomic_read(&nvl->recover->fire_count));
++}
++
++static ssize_t tb_egpu_recover_successes_show(struct device *dev,
++                                              struct device_attribute *attr,
++                                              char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->recover)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%d\n",
++                     atomic_read(&nvl->recover->success_count));
++}
++
++static ssize_t tb_egpu_recover_surrenders_show(struct device *dev,
++                                               struct device_attribute *attr,
++                                               char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->recover)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%d\n",
++                     atomic_read(&nvl->recover->surrender_count));
++}
++
++static ssize_t tb_egpu_recover_last_fire_jiffies_show(struct device *dev,
++                                                      struct device_attribute *attr,
++                                                      char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->recover)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%lu\n",
++                     nvl->recover->last_fire_jiffies);
++}
++
++/*
++ * Write-only force-trigger (Phase 3 test path). Calls the trigger
++ * function directly. All gates apply — if Enable=0 it's a no-op; if
++ * rate-limited it defers. With NVreg_TbEgpuRecoverTestForceTrigger=1
++ * the trigger's WPR2-clear branch is overridden, exercising the full
++ * recovery path on a healthy system without having to deliberately
++ * fail rm_init_adapter.
++ */
++static ssize_t tb_egpu_recover_force_trigger_store(struct device *dev,
++                                                   struct device_attribute *attr,
++                                                   const char *buf, size_t count)
++{
++    struct pci_dev    *pdev = to_pci_dev(dev);
++    nv_linux_state_t  *nvl;
++    unsigned long      val;
++    int                rc;
++
++    if (!pdev)
++        return -ENODEV;
++
++    nvl = pci_get_drvdata(pdev);
++    if (!nvl)
++        return -ENODEV;
++
++    rc = kstrtoul(buf, 0, &val);
++    if (rc != 0)
++        return rc;
++
++    if (val == 0)
++        return count;
++
++    nv_printf(NV_DBG_ERRORS,
++        "tb_egpu recover: sysfs force_trigger fired (val=%lu) — invoking "
++        "trigger as if from post-rmInit-FAIL\n", val);
++    (void)tb_egpu_recover_trigger_post_rminit_fail(nvl);
++
++    return count;
++}
++
++static DEVICE_ATTR(tb_egpu_recover_fires, 0444,
++                   tb_egpu_recover_fires_show, NULL);
++static DEVICE_ATTR(tb_egpu_recover_successes, 0444,
++                   tb_egpu_recover_successes_show, NULL);
++static DEVICE_ATTR(tb_egpu_recover_surrenders, 0444,
++                   tb_egpu_recover_surrenders_show, NULL);
++static DEVICE_ATTR(tb_egpu_recover_last_fire_jiffies, 0444,
++                   tb_egpu_recover_last_fire_jiffies_show, NULL);
++static DEVICE_ATTR(tb_egpu_recover_force_trigger, 0200,
++                   NULL, tb_egpu_recover_force_trigger_store);
++
++static struct attribute *tb_egpu_recover_attrs[] = {
++    &dev_attr_tb_egpu_recover_fires.attr,
++    &dev_attr_tb_egpu_recover_successes.attr,
++    &dev_attr_tb_egpu_recover_surrenders.attr,
++    &dev_attr_tb_egpu_recover_last_fire_jiffies.attr,
++    &dev_attr_tb_egpu_recover_force_trigger.attr,
++    NULL,
++};
++
++static const struct attribute_group tb_egpu_recover_attr_group = {
++    .attrs = tb_egpu_recover_attrs,
++};
++
++/* -----------------------------------------------------------------------
++ * Lifecycle
++ * --------------------------------------------------------------------- */
++
++int tb_egpu_recover_init(nv_linux_state_t *nvl)
++{
++    struct tb_egpu_recover_state *st;
++    nv_state_t                   *nv = NV_STATE_PTR(nvl);
++
++    /* H3 — persistent kill-switch file can force Enable to 0 even if
++     * the cmdline param says 1. Idempotent across multiple devices. */
++    (void)tb_egpu_recover_apply_killswitch_file();
++
++    if (!NVreg_TbEgpuRecoverEnable)
++    {
++        NV_DEV_PRINTF(NV_DBG_INFO, nv,
++            "tb_egpu recover: disabled at module load "
++            "(NVreg_TbEgpuRecoverEnable=0); state not allocated\n");
++        nvl->recover = NULL;
++        return 0;
++    }
++
++    st = kzalloc(sizeof(*st), GFP_KERNEL);
++    if (!st)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "tb_egpu recover: kzalloc failed; continuing without "
++            "in-driver recovery\n");
++        return -ENOMEM;
++    }
++
++    INIT_WORK(&st->reset_work, tb_egpu_recover_reset_work_handler);
++    atomic_set(&st->in_progress, 0);
++    atomic_set(&st->fire_count, 0);
++    atomic_set(&st->success_count, 0);
++    atomic_set(&st->surrender_count, 0);
++    atomic_set(&st->attempt_count, 0);
++    st->last_fire_jiffies = 0;
++    st->pdev_for_work     = NULL;
++
++    nvl->recover = st;
++
++    /* Publish sysfs surface. Failure is non-fatal — recovery still
++     * runs, just without userspace-visible counters. */
++    if (nvl->pci_dev)
++    {
++        int rc = sysfs_create_group(&nvl->pci_dev->dev.kobj,
++                                    &tb_egpu_recover_attr_group);
++        if (rc != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "tb_egpu recover: sysfs_create_group failed: %d\n", rc);
++    }
++
++    NV_DEV_PRINTF(NV_DBG_INFO, nv,
++        "tb_egpu recover: scaffolding initialised "
++        "(MaxAttempts=%u, SettleMs=%u, MinIntervalMs=%u, ResetSec=%u)\n",
++        NVreg_TbEgpuRecoverMaxAttempts,
++        NVreg_TbEgpuRecoverResetSettleMs,
++        NVreg_TbEgpuRecoverMinAttemptIntervalMs,
++        NVreg_TbEgpuRecoverSurrenderResetSec);
++
++    return 0;
++}
++
++void tb_egpu_recover_stop(nv_linux_state_t *nvl)
++{
++    struct tb_egpu_recover_state *st;
++
++    if (!nvl)
++        return;
++
++    /* Remove sysfs surface before tearing down state. */
++    if (nvl->pci_dev)
++    {
++        sysfs_remove_group(&nvl->pci_dev->dev.kobj,
++                           &tb_egpu_recover_attr_group);
++    }
++
++    st = nvl->recover;
++    if (!st)
++        return;
++
++    /* Drain any pending work item before freeing state. */
++    cancel_work_sync(&st->reset_work);
++
++    /* Drop any straggler refcount (handler normally pci_dev_puts). */
++    if (st->pdev_for_work)
++    {
++        pci_dev_put(st->pdev_for_work);
++        st->pdev_for_work = NULL;
++    }
++
++    kfree(st);
++    nvl->recover = NULL;
++}
+diff --git a/kernel-open/nvidia/nv-tb-egpu-recover.h b/kernel-open/nvidia/nv-tb-egpu-recover.h
+new file mode 100644
+index 0000000..d84cd90
+--- /dev/null
++++ b/kernel-open/nvidia/nv-tb-egpu-recover.h
+@@ -0,0 +1,255 @@
++/*
++ * SPDX-FileCopyrightText: nvidia-driver-injector contributors
++ * SPDX-License-Identifier: MIT
++ *
++ * nv-tb-egpu-recover.h — Thunderbolt-eGPU recovery state machine (cluster P2).
++ *
++ * Per-device in-driver recovery state for two failure paths:
++ *
++ *   1. Post-rmInit-FAIL with WPR2 stuck up — the cold-cold-boot failure
++ *      mode where WPR2 persists from a prior failed boot. Detected by
++ *      reading NV_HUBMMU_PRI_MMU_WPR2_ADDR_HI (BAR0 + 0x88a828) after
++ *      rm_init_adapter returns failure. Triggers a pci_reset_bus() on
++ *      the upstream Thunderbolt bridge from a workqueue context.
++ *
++ *   2. Runtime AER — the kernel's PCIe error-handler subsystem dispatches
++ *      error_detected on PCIe errors. With all gates passing we return
++ *      PCI_ERS_RESULT_NEED_RESET; the kernel drives the bus reset and
++ *      then dispatches our slot_reset / resume callbacks for verification
++ *      and counter reset.
++ *
++ * Hardening (H1/H2/H3): the post-rmInit-FAIL trigger and the
++ * error_detected callback share a gate function that enforces:
++ *   - kill-switch (H3): module param NVreg_TbEgpuRecoverEnable + a
++ *     persistent file at /var/lib/tb-egpu/recover-killswitch override
++ *   - rate limit (H2): NVreg_TbEgpuRecoverMinAttemptIntervalMs since
++ *     last fire
++ *   - max attempts (H1): NVreg_TbEgpuRecoverMaxAttempts per burst,
++ *     resetting only on a verified end-to-end recovery (post-rmInit-OK)
++ *     or after NVreg_TbEgpuRecoverSurrenderResetSec of idle
++ *
++ * Public surface (per device, via PCI sysfs):
++ *
++ *   tb_egpu_recover_fires               schedule_work invocations
++ *   tb_egpu_recover_successes           bus-reset cycles that completed
++ *   tb_egpu_recover_surrenders          H1 exhaustions / hard failures
++ *   tb_egpu_recover_last_fire_jiffies   last fire timestamp (jiffies)
++ *   tb_egpu_recover_force_trigger       (write-only, 0200) test harness
++ *
++ * Module parameters (runtime-toggleable, /sys/module/nvidia/parameters):
++ *
++ *   NVreg_TbEgpuRecoverEnable                 master enable (default 0)
++ *   NVreg_TbEgpuRecoverMaxAttempts            H1 cap (default 3)
++ *   NVreg_TbEgpuRecoverResetSettleMs          post-reset delay (500 ms)
++ *   NVreg_TbEgpuRecoverMinAttemptIntervalMs   H2 rate limit (30000 ms)
++ *   NVreg_TbEgpuRecoverSurrenderResetSec      H1 idle reset (300 s)
++ *   NVreg_TbEgpuRecoverTestForceTrigger       Phase 3 test override (0)
++ *
++ * Naming note (vs the pre-refactor legacy code): this state machine was
++ * developed as "Lever M-recover". The lever name was a process-history
++ * artefact; symbols here describe what the code does — recovery — not
++ * how it was discovered.
++ */
++
++#ifndef _NV_TB_EGPU_RECOVER_H_
++#define _NV_TB_EGPU_RECOVER_H_
++
++#include <linux/atomic.h>
++#include <linux/pci.h>      /* pci_ers_result_t */
++#include <linux/types.h>
++#include <linux/workqueue.h>
++
++struct nv_linux_state_s;
++typedef struct nv_linux_state_s nv_linux_state_t;
++struct pci_dev;
++struct tb_egpu_qwd_aer_snapshot;  /* full def in nv-tb-egpu-qwd.h */
++
++/*
++ * Persistent kill-switch file. If present and content begins with '0',
++ * the file overrides NVreg_TbEgpuRecoverEnable=1 (H3). This is the
++ * panic-mode disable when recovery itself misbehaves; udev / userspace
++ * helpers maintain it.
++ */
++#define TB_EGPU_RECOVER_KILLSWITCH_PATH \
++    "/var/lib/tb-egpu/recover-killswitch"
++
++/*
++ * WPR2 status register: NV_HUBMMU0_PRI_BASE + NV_HUBMMU_PRI_MMU_WPR2_ADDR_HI
++ * for Blackwell GB100/GB202 (per published headers
++ * src/common/inc/swref/published/blackwell/gb100/{hwproject.h,
++ * dev_hubmmu_base.h}). DRF field _VAL is bits [31:4]; non-zero means
++ * WPR2 is up.
++ */
++#define TB_EGPU_RECOVER_WPR2_REG_OFFSET   0x88a828u
++#define TB_EGPU_RECOVER_WPR2_VAL_MASK     0xfffffff0u    /* bits 31:4 */
++
++/*
++ * Per-device recovery state. Allocated in tb_egpu_recover_init when
++ * NVreg_TbEgpuRecoverEnable=1; nvl->recover stays NULL otherwise.
++ */
++struct tb_egpu_recover_state
++{
++    /*
++     * Recovery action serialised via this work item. Triggered from
++     * either the post-rmInit-FAIL hook or the AER NEED_RESET path.
++     */
++    struct work_struct  reset_work;
++
++    /*
++     * pdev refcounted at trigger via pci_dev_get; released at handler
++     * completion via pci_dev_put. Owned exclusively by the trigger
++     * (writer) under the in_progress guard and the work handler
++     * (reader + clearer). See the in_progress xchg ordering note in
++     * tb_egpu_recover_trigger_post_rminit_fail().
++     */
++    struct pci_dev     *pdev_for_work;
++
++    /*
++     * Re-entry guard. Set via atomic_xchg(1) at trigger; cleared at
++     * end of handler. Prevents recovery storms if multiple triggers
++     * fire simultaneously.
++     */
++    atomic_t            in_progress;
++
++    /* Cumulative counters for visibility. Read-only via sysfs. */
++    atomic_t            fire_count;       /* schedule_work invocations */
++    atomic_t            success_count;    /* recoveries that completed */
++    atomic_t            surrender_count;  /* H1 / hard failure counts  */
++
++    /*
++     * Last fire timestamp (jiffies). Doubles as the H2 rate-limit
++     * reference and the H1 burst-boundary timer
++     * (NVreg_TbEgpuRecoverSurrenderResetSec).
++     */
++    unsigned long       last_fire_jiffies;
++
++    /*
++     * Per-pdev attempt counter — current burst. Per design § H1, this
++     * resets to 0 ONLY at verified end-to-end recovery, i.e. when
++     * nv_start_device observes rm_init_adapter success
++     * (tb_egpu_recover_record_post_rminit_ok). Resetting any earlier
++     * (e.g. at slot_reset_resume) leaves the H1 gate unreachable in
++     * real-world recovery storms — a successful bus reset followed by
++     * another failed rm_init_adapter is still a failed recovery for H1
++     * accounting purposes.
++     */
++    atomic_t            attempt_count;
++};
++
++/* Module-parameter externs — defined in nv-tb-egpu-recover.c, referenced
++ * from nv-pci.c (H4 error_detected gates) and this header. */
++extern unsigned int NVreg_TbEgpuRecoverEnable;
++extern unsigned int NVreg_TbEgpuRecoverMaxAttempts;
++extern unsigned int NVreg_TbEgpuRecoverResetSettleMs;
++extern unsigned int NVreg_TbEgpuRecoverMinAttemptIntervalMs;
++extern unsigned int NVreg_TbEgpuRecoverSurrenderResetSec;
++extern unsigned int NVreg_TbEgpuRecoverTestForceTrigger;
++
++/* Lifecycle */
++int  tb_egpu_recover_init(nv_linux_state_t *nvl);
++void tb_egpu_recover_stop(nv_linux_state_t *nvl);
++
++/*
++ * Probe-time WPR2-stuck detection.
++ *
++ * Reads the GSP MMU WPR2 status register (BAR0 + 0x88a828). If bits
++ * [31:4] are non-zero, WPR2 was left up by a prior boot cycle and GSP
++ * boot will fail in the subsequent rm_init_adapter call.
++ *
++ * Detection-only (no recovery action): increments fire_count and emits
++ * an NV_DBG_ERRORS marker. Caller-side counterpart at probe time;
++ * complements tb_egpu_recover_trigger_post_rminit_fail() which is the
++ * load-bearing trigger path. Returns true iff WPR2 detected up.
++ */
++bool tb_egpu_recover_check_wpr2_at_probe(nv_linux_state_t *nvl,
++                                         u64 bar0_phys_addr);
++
++/*
++ * Post-rmInit-FAIL trigger. Called from nv_start_device() after
++ * rm_init_adapter returns failure. Reads WPR2; if non-zero (and gates
++ * pass) schedules an asynchronous upstream-bridge bus reset on the
++ * kernel-global workqueue. Returns 0 in all cases — the caller's
++ * existing failure path runs unchanged.
++ */
++int  tb_egpu_recover_trigger_post_rminit_fail(nv_linux_state_t *nvl);
++
++/*
++ * Post-rmInit-OK hook. Called from nv_start_device() after
++ * rm_init_adapter returns success — the verified end-to-end recovery
++ * moment per design § H1. Resets attempt_count to 0 so the next burst
++ * starts fresh. Idempotent on cold boot (counter is already 0).
++ */
++void tb_egpu_recover_record_post_rminit_ok(nv_linux_state_t *nvl);
++
++/*
++ * Emit TB_EGPU_GPU_STATE=<state> uevent on the pdev's kobject. State
++ * is one of "READY", "RECOVERING", "PERMANENT_FAIL". Userspace
++ * subscribers (udev rules, services) react to recovery lifecycle.
++ */
++void tb_egpu_recover_emit_uevent(struct pci_dev *pdev, const char *state);
++
++/*
++ * pci_error_handlers slot_reset / resume bodies. Called by the thin
++ * dispatchers in nv-pci.c (nv_pci_slot_reset / nv_pci_resume) and also
++ * directly from the work handler after pci_reset_bus succeeds (since
++ * pci_reset_bus does not itself dispatch err_handlers callbacks).
++ */
++pci_ers_result_t tb_egpu_recover_slot_reset(struct pci_dev *pdev);
++void             tb_egpu_recover_slot_reset_resume(struct pci_dev *pdev);
++
++/*
++ * Pre-schedule gate result. Used by both the post-rmInit-FAIL trigger
++ * (nv-tb-egpu-recover.c) and the AER error_detected callback (nv-pci.c).
++ */
++enum tb_egpu_recover_gate {
++    TB_EGPU_RECOVER_GATE_OK = 0,
++    TB_EGPU_RECOVER_GATE_DISABLED,
++    TB_EGPU_RECOVER_GATE_RATE_LIMITED,
++    TB_EGPU_RECOVER_GATE_SURRENDER,
++};
++
++/*
++ * Single source of truth for the H1/H2/Enable gate decision. Both
++ * the post-rmInit-FAIL trigger and the AER error_detected callback
++ * call this.
++ *
++ * Side effects (callers MUST be aware):
++ *   - At the H1 burst boundary (idle > SurrenderResetSec) attempt_count
++ *     is reset to 0 here.
++ *   - On GATE_OK: atomic_inc_return(&attempt_count). The caller then
++ *     owns the rest of the schedule (set last_fire_jiffies, fire_count,
++ *     in_progress, pdev_for_work, schedule_work, RECOVERING uevent).
++ *   - On GATE_SURRENDER: atomic_inc(&surrender_count) and a
++ *     PERMANENT_FAIL uevent against pdev. The attempt_count was already
++ *     incremented (kept monotonic across surrenders).
++ *
++ * reason_out (optional) receives a short static string for logging.
++ */
++enum tb_egpu_recover_gate tb_egpu_recover_pre_schedule_gates(
++    struct tb_egpu_recover_state *st,
++    struct pci_dev *pdev,
++    const char **reason_out);
++
++/*
++ * Trigger-event AER capture (legacy "Mode B telemetry S1").
++ *
++ * Walks GPU -> upstream bridge -> true host root port (bounded to 8
++ * hops via tb_egpu_recover_walk_to_root_port), dumps full AER + DPC +
++ * link state in one printk block, and optionally writes a compact
++ * snapshot to *out for sysfs persistence (the qwd S3 surface in cluster
++ * P3 owns *out).
++ *
++ * Called from:
++ *   - Q-watchdog detection (nv-tb-egpu-qwd.c, inside the detected_logged
++ *     latch), with out=&qwd->last_aer
++ *   - nv_pci_error_detected and nv_pci_mmio_enabled / nv_pci_cor_error_detected
++ *     callbacks, with out=NULL (no per-callback snapshot persistence)
++ *
++ * Internal-only — declared here for kernel-open consumers; not exported
++ * across module boundaries.
++ */
++void tb_egpu_dump_aer_trigger_event(struct pci_dev *gpu_pdev,
++                                    const char *trigger,
++                                    struct tb_egpu_qwd_aer_snapshot *out);
++
++#endif /* _NV_TB_EGPU_RECOVER_H_ */
+diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
+index c27955f..2c646af 100644
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -55,6 +55,7 @@
+ #include "nv-pat.h"
+ #include "nv-dmabuf.h"
+ #include "nv-caps-imex.h"
++#include "nv-tb-egpu-recover.h"  /* tb_egpu recovery (cluster P2) */
+ 
+ /*
+  * Commit aefb2f2e619b ("x86/bugs: Rename CONFIG_RETPOLINE =>
+@@ -1527,10 +1528,26 @@ int nv_start_device(nv_state_t *nv, nvidia_stack_t *sp)
+         NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
+                       "rm_init_adapter failed, device minor number %d\n",
+                       nvl->minor_num);
++        /*
++         * tb_egpu recovery (cluster P2): post-rmInit-FAIL trigger.
++         * Reads WPR2; if stuck (and gates pass) schedules an async
++         * upstream-bridge bus reset on the kernel-global workqueue.
++         * Returns immediately; the existing failure path below runs
++         * unchanged.
++         */
++        (void)tb_egpu_recover_trigger_post_rminit_fail(nvl);
+         rc = -EIO;
+         goto failed_release_irq;
+     }
+ 
++    /*
++     * tb_egpu recovery (cluster P2): verified end-to-end recovery —
++     * reset attempt_count so the H1 MaxAttempts gate measures
++     * consecutive failed full-recoveries rather than raw retry count.
++     * Idempotent on cold boot (attempt_count already 0).
++     */
++    tb_egpu_recover_record_post_rminit_ok(nvl);
++
+     /* Generate and cache the UUID for future callers */
+     (void)rm_get_gpu_uuid_raw(sp, nv);
+ 
+diff --git a/kernel-open/nvidia/nvidia-sources.Kbuild b/kernel-open/nvidia/nvidia-sources.Kbuild
+index 68dba37..eb237e8 100644
+--- a/kernel-open/nvidia/nvidia-sources.Kbuild
++++ b/kernel-open/nvidia/nvidia-sources.Kbuild
+@@ -13,6 +13,7 @@ NVIDIA_SOURCES += nvidia/nv.c
+ NVIDIA_SOURCES += nvidia/nv-pci.c
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-aer.c
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-qwd.c
++NVIDIA_SOURCES += nvidia/nv-tb-egpu-recover.c
+ NVIDIA_SOURCES += nvidia/nv-dmabuf.c
+ NVIDIA_SOURCES += nvidia/nv-nano-timer.c
+ NVIDIA_SOURCES += nvidia/nv-acpi.c
+-- 
+2.54.0
+
