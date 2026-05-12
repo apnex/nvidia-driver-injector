@@ -1,0 +1,322 @@
+From: nvidia-driver-injector <noreply@example.invalid>
+Date: 2026-05-12
+Subject: [PATCH 0002/0007] tb-egpu: clear AER UncMask at probe
+
+Cluster P5 of the P1-P6 refactor. Standalone — no dependencies on
+other clusters. Independent of NVreg_TbEgpuRecoverEnable; runs at
+probe whenever the eGPU is enumerated.
+
+What this changes
+-----------------
+
+At PCI probe time, clear the Uncorrectable Error Mask register on the
+NVIDIA GPU's AER extended capability. Without this, the Linux PCI core
++ AORUS BIOS leave UncMask bit 22 (Uncorrectable Internal Error) set,
+which causes Uncorrectable Internal Errors to be SILENTLY DOWNGRADED
+to Advisory Non-Fatal per PCIe r6 §6.2.3.2: UncStatus stays clear,
+Header Log is not captured, pci_error_handlers are NOT called.
+
+After this patch, those errors take the standard AER recovery path
+instead: status latched, Header Log populated, pcie_err_handlers fire.
+On hosts that enable Lever M-recover (P2), the in-driver state machine
+then dispatches slot_reset/resume — but that's a separate concern;
+this patch is useful even with M-recover disabled because it makes
+the errors visible in dmesg + lspci AER decode.
+
+How we discovered the default was wrong
+---------------------------------------
+
+We observed every Gen3 probe-end firing Cor=0x2000 with no Uncor capture
+and no recovery hook. Comparing AER register state against the Windows
+nvlddmkm driver on the same hardware (2026-05-07) showed Windows runs
+with UncMask = 0. The justification stands on its own merits — standard
+PCIe AER recovery requires UncStatus to be latched, which the mask
+demotion path bypasses — but the cross-OS comparison was how the
+regression was found.
+
+Implementation
+--------------
+
+New translation unit kernel-open/nvidia/nv-tb-egpu-aer.{c,h} exposing
+a single function:
+
+    int tb_egpu_aer_clear_uncor_mask(struct pci_dev *pdev);
+
+Called once from nv_pci_probe, right after the SR-IOV early-exit and
+before the rest of probe begins. SR-IOV virtual functions don't have
+the AER ext-cap and don't reach the call.
+
+Gated by NVreg_TbEgpuAerUncMaskClear (default 1). Bound-checks the
+ext-cap offset against [0x100, 0x1000) to refuse broken-hardware values.
+Read-then-write-if-needed pattern; logs old/new mask at info level when
+the mask was non-zero, debug level when already zero, warn on
+config-space errors. No mutation when the parameter is 0.
+
+Why a separate TU
+-----------------
+
+The legacy patch 0022 inlined the AER mask manipulation inside Lever
+M-recover's init function with an explicit comment that the coupling
+was wrong but expedient. The separate TU makes the independence real:
+P5 has no dependency on P2's state machine, can be tested standalone,
+and stands as a reasonable upstream-candidate change in isolation.
+
+Files changed
+-------------
+ kernel-open/nvidia/nv-tb-egpu-aer.c       NEW  (~115 lines)
+ kernel-open/nvidia/nv-tb-egpu-aer.h       NEW  (~48 lines)
+ kernel-open/nvidia/nv-pci.c               +12  (include + call site)
+ kernel-open/nvidia/nvidia-sources.Kbuild  +1   (add the new .c)
+
+References
+----------
+ PCIe r6 §6.2.3.2 — Advisory Non-Fatal demotion path
+ docs/lever-catalog.md — Lever G3-H (this empirical lever's history)
+ Legacy patch 0022 (now superseded; see patches/legacy/)
+
+---
+ kernel-open/nvidia/nv-pci.c              |  12 ++
+ kernel-open/nvidia/nv-tb-egpu-aer.c      | 134 +++++++++++++++++++++++
+ kernel-open/nvidia/nv-tb-egpu-aer.h      |  46 ++++++++
+ kernel-open/nvidia/nvidia-sources.Kbuild |   1 +
+ 4 files changed, 193 insertions(+)
+ create mode 100644 kernel-open/nvidia/nv-tb-egpu-aer.c
+ create mode 100644 kernel-open/nvidia/nv-tb-egpu-aer.h
+
+diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
+index 996d5c0..cc4a95f 100644
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -27,6 +27,7 @@
+ #include "nv-msi.h"
+ #include "nv-hypervisor.h"
+ #include "nv-reg.h"
++#include "nv-tb-egpu-aer.h"
+ 
+ #if defined(NV_VGPU_KVM_BUILD)
+ #include "nv-vgpu-vfio-interface.h"
+@@ -1810,6 +1811,17 @@ nv_pci_probe
+     }
+ #endif /* NV_PCI_SRIOV_SUPPORT */
+ 
++    /*
++     * Clear AER UncMask on the physical device so Uncorrectable Internal
++     * Errors route through the standard AER recovery path (pcie_err_handlers)
++     * instead of being silently demoted to Advisory Non-Fatal by the
++     * PCIe r6 §6.2.3.2 mask-driven demotion path. Patch cluster P5.
++     * Independent of Lever M-recover (P2): runs unconditionally for
++     * visibility, even when auto-recovery is disabled. See
++     * kernel-open/nvidia/nv-tb-egpu-aer.c for the full mechanism.
++     */
++    (void)tb_egpu_aer_clear_uncor_mask(pci_dev);
++
+     if (nv_kmem_cache_alloc_stack(&sp) != 0)
+     {
+         return -1;
+diff --git a/kernel-open/nvidia/nv-tb-egpu-aer.c b/kernel-open/nvidia/nv-tb-egpu-aer.c
+new file mode 100644
+index 0000000..df18690
+--- /dev/null
++++ b/kernel-open/nvidia/nv-tb-egpu-aer.c
+@@ -0,0 +1,134 @@
++/*
++ * SPDX-FileCopyrightText: Copyright (c) 2026 nvidia-driver-injector project
++ * SPDX-License-Identifier: MIT
++ *
++ * Thunderbolt-attached eGPU: AER configuration helpers — cluster P5.
++ *
++ * Single job: at PCI probe, clear the Uncorrectable Error Mask register
++ * on the eGPU so that Internal Errors fire as proper Uncorrectable
++ * Non-Fatal events instead of being silently demoted to Advisory Non-
++ * Fatal (Correctable bit 13).
++ *
++ * Why this matters
++ * ----------------
++ * Per PCIe r6 §6.2.3.2: an Uncorrectable error whose corresponding bit
++ * in the Uncorrectable Error Mask register is set gets downgraded to
++ * Advisory Non-Fatal. UncStatus is NOT updated, Header Log is NOT
++ * captured, and pcie_err_handlers are NOT called.
++ *
++ * On this hardware (AORUS RTX 5090 over TB4), the Linux PCI core +
++ * AORUS BIOS leave UncMask bit 22 (Uncorrectable Internal Error) set
++ * at probe. Every Gen3 probe-end fires Cor=0x2000 (Advisory Non-Fatal
++ * with no Uncor capture and no recovery hook). Clearing the mask lets
++ * the same Internal Errors take the standard AER recovery path: status
++ * latched, Header Log filled, pci_error_handlers fired — which then
++ * lets cluster P2 (Lever M-recover) dispatch its slot_reset/resume
++ * state machine when AER fires.
++ *
++ * The choice "default mask = 0" was discovered by comparing AER
++ * register state against the Windows nvlddmkm driver on the same
++ * hardware (Windows DEVPKEY_PciDevice_Uncorrectable_Error_Mask = 0
++ * observed 2026-05-07). The justification stands on its own merits —
++ * standard PCIe AER recovery requires UncStatus to be latched, which
++ * the mask demotion path bypasses — but the cross-OS comparison was
++ * how we found the regression.
++ *
++ * Independence from P2
++ * --------------------
++ * This file deliberately does NOT depend on the M-recover state machine.
++ * Even on hosts that disable Lever M-recover (NVreg_TbEgpuRecoverEnable=0),
++ * clearing the AER mask is the right default: errors should be visible
++ * in dmesg + lspci AER decode rather than silently demoted. Operators
++ * decide separately whether to enable auto-recovery on top.
++ */
++
++#include "nv-tb-egpu-aer.h"
++
++#include <linux/pci.h>
++#include <linux/pci_regs.h>
++#include <linux/module.h>
++#include <linux/kernel.h>
++
++#include "nv-misc.h"
++#include "os-interface.h"
++
++/* Module parameter: gate the AER mask clear at module load.
++ *
++ * Default-on. Disable with NVreg_TbEgpuAerUncMaskClear=0 if it causes
++ * regression on a specific board. Bool semantics; module_param() takes
++ * uint to avoid the bool kernel-version dance.
++ */
++unsigned int NVreg_TbEgpuAerUncMaskClear = 1;
++module_param(NVreg_TbEgpuAerUncMaskClear, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuAerUncMaskClear,
++    "Clear AER UncMask at probe so standard recovery handles Internal "
++    "Errors instead of the mask-demotion path (1=on default, 0=leave "
++    "mask as-is)");
++
++/*
++ * Sanity-bound for the AER extended-capability offset.
++ *
++ * PCIe spec puts extended capabilities at offsets >= 0x100 and < 0x1000.
++ * pci_find_ext_capability() returns a value within that range on success
++ * and 0 if absent; we treat any value outside [0x100, 0x1000) as broken
++ * hardware reporting and skip the write to avoid corrupting unrelated
++ * config-space.
++ */
++#define TB_EGPU_AER_OFFSET_MIN  0x100
++#define TB_EGPU_AER_OFFSET_MAX  0x1000
++
++int tb_egpu_aer_clear_uncor_mask(struct pci_dev *pdev)
++{
++    int aer_pos;
++    u32 cur_mask = 0;
++    int rc;
++
++    if (!NVreg_TbEgpuAerUncMaskClear)
++        return 0;
++
++    if (!pdev)
++        return -EINVAL;
++
++    aer_pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_ERR);
++    if (!aer_pos)
++        return 0;  /* device has no AER ext-cap; nothing to do */
++
++    if (aer_pos < TB_EGPU_AER_OFFSET_MIN || aer_pos >= TB_EGPU_AER_OFFSET_MAX)
++    {
++        dev_warn(&pdev->dev,
++            "tb_egpu: AER ext-cap at suspicious offset 0x%x; skipping mask clear\n",
++            aer_pos);
++        return -ERANGE;
++    }
++
++    rc = pci_read_config_dword(pdev, aer_pos + PCI_ERR_UNCOR_MASK, &cur_mask);
++    if (rc)
++    {
++        dev_warn(&pdev->dev,
++            "tb_egpu: AER UncMask read failed (rc=%d); skipping\n", rc);
++        return rc;
++    }
++
++    if (cur_mask == 0)
++    {
++        dev_dbg(&pdev->dev,
++            "tb_egpu: AER UncMask already 0x00000000; no change\n");
++        return 0;
++    }
++
++    rc = pci_write_config_dword(pdev, aer_pos + PCI_ERR_UNCOR_MASK, 0);
++    if (rc)
++    {
++        dev_warn(&pdev->dev,
++            "tb_egpu: AER UncMask write failed (rc=%d); mask left at 0x%08x\n",
++            rc, cur_mask);
++        return rc;
++    }
++
++    dev_info(&pdev->dev,
++        "tb_egpu: AER UncMask 0x%08x -> 0x00000000 "
++        "(Internal Errors now route through standard AER recovery)\n",
++        cur_mask);
++
++    return 0;
++}
+diff --git a/kernel-open/nvidia/nv-tb-egpu-aer.h b/kernel-open/nvidia/nv-tb-egpu-aer.h
+new file mode 100644
+index 0000000..3c401e2
+--- /dev/null
++++ b/kernel-open/nvidia/nv-tb-egpu-aer.h
+@@ -0,0 +1,46 @@
++/*
++ * SPDX-FileCopyrightText: Copyright (c) 2026 nvidia-driver-injector project
++ * SPDX-License-Identifier: MIT
++ *
++ * Thunderbolt-attached eGPU: AER configuration helpers.
++ *
++ * Patch cluster P5 — clears the Uncorrectable Error Mask on the AORUS
++ * RTX 5090 (and similar TB-attached eGPUs) at probe time so that
++ * Uncorrectable Internal Errors fire through the standard AER recovery
++ * flow (pcie_err_handlers) instead of being silently demoted to
++ * Advisory Non-Fatal by the PCIe spec's mask-driven demotion path.
++ *
++ * See docs/lever-catalog.md for the empirical evidence and the
++ * mechanism (PCIe r6 §6.2.3.2 demotion) backing this change.
++ */
++
++#ifndef _NV_TB_EGPU_AER_H_
++#define _NV_TB_EGPU_AER_H_
++
++struct pci_dev;
++
++/**
++ * tb_egpu_aer_clear_uncor_mask - Clear AER Uncorrectable Error Mask.
++ * @pdev: PCI device being probed.
++ *
++ * Reads the device's AER Uncorrectable Error Mask register. If non-zero,
++ * writes 0 — letting Uncorrectable Internal Errors fire as proper
++ * Uncorrectable Non-Fatal events that pcie_err_handlers can react to,
++ * instead of the silent demotion-to-Advisory-Non-Fatal path that the
++ * Linux PCI core + platform firmware leave configured by default.
++ *
++ * No-op when:
++ *  - The module parameter NVreg_TbEgpuAerUncMaskClear is 0.
++ *  - The device does not expose the AER extended capability.
++ *  - The current mask is already zero.
++ *
++ * Safe to call from probe context. Does not require any locks held;
++ * the AER mask is a per-device config-space register and probe is the
++ * only path that touches it.
++ *
++ * Return: 0 on success or no-op; negative errno if the config-space
++ * read or write returns an error (rare; aer_pos is bound-checked).
++ */
++int tb_egpu_aer_clear_uncor_mask(struct pci_dev *pdev);
++
++#endif /* _NV_TB_EGPU_AER_H_ */
+diff --git a/kernel-open/nvidia/nvidia-sources.Kbuild b/kernel-open/nvidia/nvidia-sources.Kbuild
+index f6bc5bd..b37248a 100644
+--- a/kernel-open/nvidia/nvidia-sources.Kbuild
++++ b/kernel-open/nvidia/nvidia-sources.Kbuild
+@@ -11,6 +11,7 @@ NVIDIA_SOURCES += nvidia/nv-platform-pm.c
+ NVIDIA_SOURCES += nvidia/nv-ipc-soc.c
+ NVIDIA_SOURCES += nvidia/nv.c
+ NVIDIA_SOURCES += nvidia/nv-pci.c
++NVIDIA_SOURCES += nvidia/nv-tb-egpu-aer.c
+ NVIDIA_SOURCES += nvidia/nv-dmabuf.c
+ NVIDIA_SOURCES += nvidia/nv-nano-timer.c
+ NVIDIA_SOURCES += nvidia/nv-acpi.c
+-- 
+2.54.0
+
