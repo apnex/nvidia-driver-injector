@@ -1,0 +1,673 @@
+From: nvidia-driver-injector <noreply@example.invalid>
+Date: 2026-05-12
+Subject: [PATCH 0004/0007] tb-egpu: Q-watchdog Mode B detector (cluster P3)
+
+Consolidates legacy patches 0014 (kthread), 0015 (basic sysfs counters),
+and the S3 portion of 0023 (persistent detection state + sysfs) into a
+single coherent Q-watchdog cluster.
+
+Per-device kthread that periodically reads NV_PMC_BOOT_0 via direct
+volatile MMIO. On 0xFFFFFFFF (dead-bus signature), declares the GPU
+disconnected via os_pci_set_disconnected — same kernel propagation as
+Q-active uses from the ioctl path, but driven by an active heartbeat
+that fires regardless of which subsystem stalled. Closes the DMA-path
+Mode B detection gap that Q-active alone misses; see docs/lever-catalog.md
+(Lever Q) for the full taxonomy.
+
+Inventory items applied:
+
+- struct/function/sysfs/kthread/module-param renames per inventory
+  Section P3:
+    tb_egpu_qwatchdog_*           -> tb_egpu_qwd_*
+    struct tb_egpu_qwatchdog      -> struct tb_egpu_qwd
+    struct tb_egpu_qwatchdog_aer_snapshot
+                                  -> struct tb_egpu_qwd_aer_snapshot
+    kthread "aorus-qwd-<bdf>"     -> "tb-egpu-qwd-<bdf>"
+    NVreg_TbEgpuWatchdog{Enable,IntervalMs}
+                                  -> NVreg_TbEgpuQwd{Enable,IntervalMs}
+    log prefix "AORUS Lever Q-watchdog: ..."
+                                  -> "tb_egpu: qwd ..."
+
+- File moves:
+    kernel-open/nvidia/nv-qwatchdog.{c,h}
+        -> kernel-open/nvidia/nv-tb-egpu-qwd.{c,h}
+
+- Sysfs registration: 5 separate device_create_file / device_remove_file
+  pairs collapsed to a single static const struct attribute_group plus
+  sysfs_create_group / sysfs_remove_group calls.
+
+- Volatile MMIO read uses READ_ONCE on the volatile pointer rather than
+  a raw deref; the intentional bypass of osDevReadReg032 (the Q-active
+  wrapper) is documented inline ("Q-watchdog firings are cleanly
+  attributable in dmesg vs Q-active firings").
+
+- TB_EGPU_QWD_DEAD_BUS_VALUE is documented as a kernel-open mirror of
+  the RM-side TB_EGPU_DEAD_BUS_U32 introduced by cluster P1. kernel-open
+  does not share the RM header search path; the one-line duplication is
+  accepted (the value is a hardware PCIe signature, not a tunable).
+
+Cross-cluster split (S3 telemetry):
+
+- The Q-watchdog cluster (this patch, P3) owns the persistent detection
+  state struct (last_detection_jiffies, last_pmc_boot_0, last_aer),
+  the three S3 sysfs files, and populates the first two fields at
+  detect time.
+
+- The AER-capture helper (tb_egpu_dump_aer_trigger_event) and its
+  invocation from the Q-watchdog detect path live in cluster P2
+  (nv-lever-m-recover.{c,h}). P2 will patch the detect-path inside
+  tb_egpu_qwd_thread to add the one-line call:
+
+      tb_egpu_dump_aer_trigger_event(nvl->pci_dev,
+                                     "qwd-detect",
+                                     &qwd->last_aer);
+
+  Until P2 lands, last_aer.valid stays 0 and the
+  tb_egpu_qwd_last_aer_summary sysfs reader politely reports
+  "(no detection event yet)". The rest of Q-watchdog functions
+  standalone on top of P1 + P5.
+
+Dependencies:
+- P1 (cluster 0001) — naming convention + crash-safety header
+- P5 (cluster 0002) — applies cleanly before this patch, but no symbol
+  dependency
+
+Files touched:
+  kernel-open/common/inc/nv-linux.h        +7  (qwd member)
+  kernel-open/nvidia/nv-pci.c              +22 (init/stop call sites)
+  kernel-open/nvidia/nv-tb-egpu-qwd.h       new (struct + decls)
+  kernel-open/nvidia/nv-tb-egpu-qwd.c       new (kthread + sysfs)
+  kernel-open/nvidia/nvidia-sources.Kbuild  +1  (source entry)
+
+Note: README.md line 236 still references the old sysfs prefix
+`tb_egpu_qwatchdog` and line 238 references the old kthread name
+`aorus-qwd-0400`. README updates are scoped to Phase 4 of the
+P1-P6 refactor per docs/patch-refactor-status.md.
+
+---
+ kernel-open/common/inc/nv-linux.h        |   7 +
+ kernel-open/nvidia/nv-pci.c              |  22 ++
+ kernel-open/nvidia/nv-tb-egpu-qwd.c      | 401 +++++++++++++++++++++++
+ kernel-open/nvidia/nv-tb-egpu-qwd.h      |  84 +++++
+ kernel-open/nvidia/nvidia-sources.Kbuild |   1 +
+ 5 files changed, 515 insertions(+)
+ create mode 100644 kernel-open/nvidia/nv-tb-egpu-qwd.c
+ create mode 100644 kernel-open/nvidia/nv-tb-egpu-qwd.h
+
+diff --git a/kernel-open/common/inc/nv-linux.h b/kernel-open/common/inc/nv-linux.h
+index 5454909..f99eaf7 100644
+--- a/kernel-open/common/inc/nv-linux.h
++++ b/kernel-open/common/inc/nv-linux.h
+@@ -1436,6 +1436,13 @@ typedef struct nv_linux_state_s {
+ 
+     /* Per-device GPU init on probe setting, initialized from global NVreg_GpuInitOnProbe */
+     NvBool init_on_probe;
++
++    /*
++     * tb_egpu Q-watchdog per-device state (cluster P3). Forward-declared
++     * opaque pointer to avoid pulling nv-tb-egpu-qwd.h into common
++     * headers. See kernel-open/nvidia/nv-tb-egpu-qwd.{c,h}.
++     */
++    struct tb_egpu_qwd *qwd;
+ } nv_linux_state_t;
+ 
+ extern nv_linux_state_t *nv_linux_devices;
+diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
+index cc4a95f..f2616b8 100644
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -28,6 +28,7 @@
+ #include "nv-hypervisor.h"
+ #include "nv-reg.h"
+ #include "nv-tb-egpu-aer.h"
++#include "nv-tb-egpu-qwd.h"  /* tb_egpu Q-watchdog (cluster P3) */
+ 
+ #if defined(NV_VGPU_KVM_BUILD)
+ #include "nv-vgpu-vfio-interface.h"
+@@ -2206,6 +2207,17 @@ nv_pci_probe
+      */
+     rm_enable_dynamic_power_management(sp, nv);
+ 
++    /*
++     * tb_egpu Q-watchdog (cluster P3): spawn the heartbeat kthread.
++     * On this hardware NVreg_DynamicPowerManagement=0 (forced via
++     * etc/modprobe.d), and udev keeps power/control=on +
++     * d3cold_allowed=0, so the device stays in D0 and the kthread can
++     * safely read MMIO indefinitely. Failure here is non-fatal — the
++     * driver continues without watchdog, falling back to the Q-active
++     * wrapper alone.
++     */
++    (void)tb_egpu_qwd_init(nvl);
++
+     nv_kmem_cache_free_stack(sp);
+ 
+     return 0;
+@@ -2278,6 +2290,16 @@ static void nv_pci_remove_helper(struct pci_dev *pci_dev, bool block_if_gpu_in_u
+ 
+     nv = NV_STATE_PTR(nvl);
+ 
++    /*
++     * tb_egpu Q-watchdog (cluster P3): stop the heartbeat kthread
++     * before any state teardown. The kthread reads nv->regs->map and
++     * calls os_pci_set_disconnected(nv->handle); both must remain
++     * valid until the kthread has exited. kthread_stop blocks until
++     * the thread observes kthread_should_stop, bounded by
++     * NVreg_TbEgpuQwdIntervalMs (clamped max 60s).
++     */
++    tb_egpu_qwd_stop(nvl);
++
+ #if NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_disable_feature
+ #if defined(CONFIG_IOMMU_SVA) && \
+     (defined(NV_IOASID_GET_PRESENT) || defined(NV_MM_PASID_DROP_PRESENT))
+diff --git a/kernel-open/nvidia/nv-tb-egpu-qwd.c b/kernel-open/nvidia/nv-tb-egpu-qwd.c
+new file mode 100644
+index 0000000..5f18750
+--- /dev/null
++++ b/kernel-open/nvidia/nv-tb-egpu-qwd.c
+@@ -0,0 +1,401 @@
++/*
++ * SPDX-FileCopyrightText: nvidia-driver-injector contributors
++ * SPDX-License-Identifier: MIT
++ *
++ * nv-tb-egpu-qwd.c — Thunderbolt-eGPU Q-watchdog (cluster P3).
++ *
++ * Per-device kthread that periodically reads NV_PMC_BOOT_0 (offset 0 of
++ * BAR0) via direct volatile MMIO. On 0xFFFFFFFF, declares the GPU
++ * disconnected via os_pci_set_disconnected — same kernel-side
++ * propagation as Q-active, but driven by an active heartbeat rather
++ * than waiting for an ioctl-path MMIO read.
++ *
++ * Why an active probe: the 2026-05-05 Mode B silent freeze
++ * (loop-2026-05-05-165029) wedged in the DMA-upload path (model load
++ * via UVM), where no MMIO reads fire from userspace context. Q-active
++ * stayed silent. With Q-watchdog, the bus drop is detected within
++ * ~NVreg_TbEgpuQwdIntervalMs of failure regardless of which subsystem
++ * stalled.
++ *
++ * Scope (v1):
++ *   - Active heartbeat at fixed interval (default 200 ms)
++ *   - On dead-bus detection: log marker, increment counter, mark
++ *     disconnected via os_pci_set_disconnected — Q-passive then
++ *     short-circuits all subsequent osDevReadReg* calls
++ *   - Per-device counters (cycles, detections) for A/B characterisation
++ *   - Persistent S3 detection state (jiffies, pmc_boot_0, AER snapshot)
++ *     exposed via sysfs for cross-boot post-mortems
++ *   - Module-param kill switch (NVreg_TbEgpuQwdEnable=0)
++ *
++ * Out of scope for v1 (future enhancements):
++ *   - Auto-FLR on detection (handled by cluster P2 recovery state machine)
++ *   - kobject_uevent emission (couples with the watchdog daemon)
++ *   - DPM-aware backoff — not needed: this driver runs with
++ *     NVreg_DynamicPowerManagement=0 forced via etc/modprobe.d, plus
++ *     udev keeps power/control=on and d3cold_allowed=0, so the device
++ *     stays in D0 and active MMIO is always safe.
++ *
++ * Sovereignty / layer (per docs/architecture-and-modularity.md):
++ *   L1 (NVIDIA fork) — justified because the kthread needs:
++ *     - access to nv_state_t internals (regs->map)
++ *     - lifecycle binding to nvidia.ko probe/remove
++ *     - call into os_pci_set_disconnected (project-added kernel-open API)
++ *
++ * Heisenbug acknowledgement (per memory feedback_observability_perturbs_bug):
++ *   A 5 Hz active MMIO read is more perturbing than passive bpftrace.
++ *   The runtime kill-switch (NVreg_TbEgpuQwdEnable) and per-device
++ *   counters exist precisely so we can A/B characterise whether the
++ *   watchdog itself materially changes the bug rate. The 2026-05-05
++ *   freeze (which fired without heavy observability) suggests the bug
++ *   is not purely Heisenbug-driven; we expect Q-watchdog to provide
++ *   real signal rather than perturb the bug away.
++ *
++ * Cross-cluster dependency: the S3 AER snapshot (last_aer) is populated
++ * by tb_egpu_dump_aer_trigger_event() in nv-lever-m-recover.c, which is
++ * part of cluster P2. P2 also patches the detect path below to add the
++ * one-line call. Until P2 is applied, last_aer.valid stays 0 and the
++ * sysfs reader emits a "(no detection event yet)" placeholder. The rest
++ * of Q-watchdog (jiffies, pmc_boot_0, counters, kthread) functions
++ * standalone on top of P1.
++ */
++
++#include "os-interface.h"
++#include "nv-linux.h"
++#include "nv-tb-egpu-qwd.h"
++
++#include <linux/kthread.h>
++#include <linux/delay.h>
++#include <linux/slab.h>
++#include <linux/err.h>
++#include <linux/moduleparam.h>
++#include <linux/jiffies.h>
++#include <linux/device.h>
++#include <linux/sysfs.h>
++
++/* Module parameters */
++
++static unsigned int NVreg_TbEgpuQwdEnable = 1;
++module_param(NVreg_TbEgpuQwdEnable, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuQwdEnable,
++    "tb_egpu: enable Q-watchdog kthread heartbeat MMIO probe "
++    "(1 = on (default), 0 = off). Runtime-toggleable; takes effect "
++    "next probe cycle.");
++
++static unsigned int NVreg_TbEgpuQwdIntervalMs = 200;
++module_param(NVreg_TbEgpuQwdIntervalMs, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuQwdIntervalMs,
++    "tb_egpu: Q-watchdog probe period in milliseconds "
++    "(default 200, clamped to [10, 60000]).");
++
++#define TB_EGPU_QWD_MIN_INTERVAL_MS     10U
++#define TB_EGPU_QWD_MAX_INTERVAL_MS     60000U
++
++/*
++ * PMC_BOOT_0 lives at BAR0 offset 0 across all NVIDIA architectures.
++ * Hardcoded here to keep this file independent of the RM-side
++ * NV_PMC_BOOT_0 constant from src/common/inc/swref/published/nv_ref.h.
++ */
++#define TB_EGPU_QWD_PMC_BOOT_0_OFFSET   0u
++
++/*
++ * Dead-bus signature: PCIe completes config/MMIO reads for a fallen-off
++ * device with all-1s after the hardware completion timeout. Mirrors the
++ * RM-side TB_EGPU_DEAD_BUS_U32 from nv-tb-egpu.h; redefined here because
++ * kernel-open does not include the RM tree's header search path.
++ */
++#define TB_EGPU_QWD_DEAD_BUS_VALUE      0xFFFFFFFFu
++
++static int tb_egpu_qwd_thread(void *data)
++{
++    nv_linux_state_t        *nvl = (nv_linux_state_t *)data;
++    nv_state_t              *nv  = NV_STATE_PTR(nvl);
++    struct tb_egpu_qwd      *qwd = nvl->qwd;
++    volatile NvU32          *regs32;
++    NvU32                    boot_0;
++    unsigned int             interval_ms;
++    int                      detected_logged = 0;
++
++    NV_DEV_PRINTF(NV_DBG_INFO, nv,
++        "tb_egpu: qwd kthread started (interval=%ums, enable=%u)\n",
++        NVreg_TbEgpuQwdIntervalMs, NVreg_TbEgpuQwdEnable);
++
++    while (!kthread_should_stop())
++    {
++        /* Re-read interval each cycle so runtime tuning takes effect. */
++        interval_ms = NVreg_TbEgpuQwdIntervalMs;
++        if (interval_ms < TB_EGPU_QWD_MIN_INTERVAL_MS)
++            interval_ms = TB_EGPU_QWD_MIN_INTERVAL_MS;
++        if (interval_ms > TB_EGPU_QWD_MAX_INTERVAL_MS)
++            interval_ms = TB_EGPU_QWD_MAX_INTERVAL_MS;
++
++        msleep_interruptible(interval_ms);
++
++        if (kthread_should_stop())
++            break;
++
++        /* Runtime kill-switch. */
++        if (!NVreg_TbEgpuQwdEnable)
++            continue;
++
++        /*
++         * Defensive: skip if regs torn down (early probe / late remove
++         * race window). kthread_stop in tb_egpu_qwd_stop should prevent
++         * this, but belt and suspenders.
++         */
++        if (!nv || !nv->regs || !nv->regs->map)
++            continue;
++
++        /*
++         * Skip if already declared disconnected — Q-passive will
++         * short-circuit subsequent userspace reads, no need to log
++         * additional Q-watchdog detections during the same episode.
++         */
++        if (os_pci_is_disconnected(nv->handle))
++            continue;
++
++        /*
++         * Active heartbeat: read PMC_BOOT_0 directly via volatile MMIO.
++         * Bypasses osDevReadReg032 (the Q-active wrapper) deliberately
++         * so Q-watchdog firings are cleanly attributable in dmesg vs
++         * Q-active firings. PMC_BOOT_0 returns the chip ID on a healthy
++         * GPU and 0xFFFFFFFF on a dead bus — a single read suffices for
++         * the determination. READ_ONCE guarantees the compiler emits a
++         * single 32-bit load without tearing or reordering.
++         */
++        regs32 = (volatile NvU32 *)nv->regs->map;
++        boot_0 = READ_ONCE(regs32[TB_EGPU_QWD_PMC_BOOT_0_OFFSET]);
++        atomic_inc(&qwd->cycles);
++
++        if (boot_0 == TB_EGPU_QWD_DEAD_BUS_VALUE)
++        {
++            atomic_inc(&qwd->detections);
++
++            if (!detected_logged)
++            {
++                detected_logged = 1;
++                NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++                    "tb_egpu: qwd DETECTED dead bus "
++                    "(PMC_BOOT_0=0x%08x after %d cycles).\n"
++                    "  action: os_pci_set_disconnected called; "
++                    "subsequent ioctl-path MMIO reads will short-circuit "
++                    "via Q-passive.\n",
++                    boot_0, atomic_read(&qwd->cycles));
++
++                /*
++                 * S3 persistent detection state — populate inside the
++                 * latch so it captures the first detection of an
++                 * episode. The AER snapshot (qwd->last_aer) is left
++                 * untouched here; cluster P2 patches in the call to
++                 * tb_egpu_dump_aer_trigger_event() at this site to
++                 * populate it.
++                 */
++                qwd->last_detection_jiffies = jiffies;
++                qwd->last_pmc_boot_0        = boot_0;
++            }
++
++            os_pci_set_disconnected(nv->handle);
++            /*
++             * Keep looping: counters keep ticking; if the disconnect
++             * ever clears we'll re-fire and re-log.
++             */
++        }
++        else
++        {
++            /* Healthy reading; reset latch so a future episode logs again. */
++            detected_logged = 0;
++        }
++    }
++
++    NV_DEV_PRINTF(NV_DBG_INFO, nv,
++        "tb_egpu: qwd kthread stopped "
++        "(cycles=%d detections=%d)\n",
++        atomic_read(&qwd->cycles), atomic_read(&qwd->detections));
++
++    return 0;
++}
++
++/* sysfs surface — per-attr layout, registered via attribute_group. */
++
++static ssize_t tb_egpu_qwd_cycles_show(struct device *dev,
++                                       struct device_attribute *attr,
++                                       char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->qwd)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%d\n", atomic_read(&nvl->qwd->cycles));
++}
++
++static ssize_t tb_egpu_qwd_detections_show(struct device *dev,
++                                           struct device_attribute *attr,
++                                           char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->qwd)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%d\n", atomic_read(&nvl->qwd->detections));
++}
++
++static ssize_t tb_egpu_qwd_last_detection_jiffies_show(
++    struct device *dev, struct device_attribute *attr, char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->qwd)
++        return scnprintf(buf, PAGE_SIZE, "0\n");
++    return scnprintf(buf, PAGE_SIZE, "%lu\n", nvl->qwd->last_detection_jiffies);
++}
++
++static ssize_t tb_egpu_qwd_last_pmc_boot_0_show(
++    struct device *dev, struct device_attribute *attr, char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    if (!nvl || !nvl->qwd)
++        return scnprintf(buf, PAGE_SIZE, "0x00000000\n");
++    return scnprintf(buf, PAGE_SIZE, "0x%08x\n", nvl->qwd->last_pmc_boot_0);
++}
++
++static ssize_t tb_egpu_qwd_last_aer_summary_show(
++    struct device *dev, struct device_attribute *attr, char *buf)
++{
++    struct pci_dev *pdev = to_pci_dev(dev);
++    nv_linux_state_t *nvl = pci_get_drvdata(pdev);
++    struct tb_egpu_qwd_aer_snapshot *s;
++
++    if (!nvl || !nvl->qwd)
++        return scnprintf(buf, PAGE_SIZE, "(no qwd state)\n");
++    s = &nvl->qwd->last_aer;
++    if (!s->valid)
++        return scnprintf(buf, PAGE_SIZE,
++            "(no detection event yet — qwd has run %d cycles)\n",
++            atomic_read(&nvl->qwd->cycles));
++    return scnprintf(buf, PAGE_SIZE,
++        "GPU_AER_UESta=0x%08x  CESta=0x%08x\n"
++        "Br_AER_UESta=0x%08x   CESta=0x%08x\n"
++        "Root_AER_UESta=0x%08x CESta=0x%08x\n"
++        "Root_RootSta=0x%08x   DPC_Status=0x%04x\n"
++        "captured_at_jiffies=%lu pmc_boot_0=0x%08x\n",
++        s->gpu_aer_uesta, s->gpu_aer_cesta,
++        s->br_aer_uesta, s->br_aer_cesta,
++        s->root_aer_uesta, s->root_aer_cesta,
++        s->root_rootsta, s->dpc_status,
++        nvl->qwd->last_detection_jiffies, nvl->qwd->last_pmc_boot_0);
++}
++
++static DEVICE_ATTR(tb_egpu_qwd_cycles, 0444,
++                   tb_egpu_qwd_cycles_show, NULL);
++static DEVICE_ATTR(tb_egpu_qwd_detections, 0444,
++                   tb_egpu_qwd_detections_show, NULL);
++static DEVICE_ATTR(tb_egpu_qwd_last_detection_jiffies, 0444,
++                   tb_egpu_qwd_last_detection_jiffies_show, NULL);
++static DEVICE_ATTR(tb_egpu_qwd_last_pmc_boot_0, 0444,
++                   tb_egpu_qwd_last_pmc_boot_0_show, NULL);
++static DEVICE_ATTR(tb_egpu_qwd_last_aer_summary, 0444,
++                   tb_egpu_qwd_last_aer_summary_show, NULL);
++
++static struct attribute *tb_egpu_qwd_attrs[] = {
++    &dev_attr_tb_egpu_qwd_cycles.attr,
++    &dev_attr_tb_egpu_qwd_detections.attr,
++    &dev_attr_tb_egpu_qwd_last_detection_jiffies.attr,
++    &dev_attr_tb_egpu_qwd_last_pmc_boot_0.attr,
++    &dev_attr_tb_egpu_qwd_last_aer_summary.attr,
++    NULL,
++};
++
++static const struct attribute_group tb_egpu_qwd_attr_group = {
++    .attrs = tb_egpu_qwd_attrs,
++};
++
++int tb_egpu_qwd_init(nv_linux_state_t *nvl)
++{
++    struct tb_egpu_qwd     *qwd;
++    nv_state_t             *nv = NV_STATE_PTR(nvl);
++
++    if (!NVreg_TbEgpuQwdEnable)
++    {
++        NV_DEV_PRINTF(NV_DBG_INFO, nv,
++            "tb_egpu: qwd disabled at module load "
++            "(NVreg_TbEgpuQwdEnable=0); kthread not spawned\n");
++        nvl->qwd = NULL;
++        return 0;
++    }
++
++    qwd = kzalloc(sizeof(*qwd), GFP_KERNEL);
++    if (!qwd)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "tb_egpu: qwd kzalloc failed; "
++            "continuing without watchdog\n");
++        return -ENOMEM;
++    }
++
++    atomic_set(&qwd->cycles, 0);
++    atomic_set(&qwd->detections, 0);
++
++    qwd->thread = kthread_run(tb_egpu_qwd_thread, nvl,
++                              "tb-egpu-qwd-%02x%02x",
++                              nv->pci_info.bus, nv->pci_info.slot);
++    if (IS_ERR(qwd->thread))
++    {
++        int err = PTR_ERR(qwd->thread);
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "tb_egpu: qwd kthread_run failed: %d; "
++            "continuing without watchdog\n", err);
++        kfree(qwd);
++        nvl->qwd = NULL;
++        return err;
++    }
++
++    nvl->qwd = qwd;
++
++    /*
++     * Publish sysfs surface. Failure is non-fatal — kthread still runs,
++     * just without userspace-visible counters.
++     */
++    if (nvl->pci_dev)
++    {
++        int rc = sysfs_create_group(&nvl->pci_dev->dev.kobj,
++                                    &tb_egpu_qwd_attr_group);
++        if (rc != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "tb_egpu: qwd sysfs_create_group failed: %d\n", rc);
++    }
++
++    return 0;
++}
++
++void tb_egpu_qwd_stop(nv_linux_state_t *nvl)
++{
++    struct tb_egpu_qwd *qwd;
++
++    if (!nvl)
++        return;
++
++    /* Remove sysfs surface before kthread teardown. */
++    if (nvl->pci_dev)
++    {
++        sysfs_remove_group(&nvl->pci_dev->dev.kobj,
++                           &tb_egpu_qwd_attr_group);
++    }
++
++    qwd = nvl->qwd;
++    if (!qwd)
++        return;
++
++    if (qwd->thread)
++    {
++        /*
++         * kthread_stop blocks until the thread observes
++         * kthread_should_stop and returns from its current sleep —
++         * bounded by interval_ms (max 60s).
++         */
++        kthread_stop(qwd->thread);
++        qwd->thread = NULL;
++    }
++
++    kfree(qwd);
++    nvl->qwd = NULL;
++}
+diff --git a/kernel-open/nvidia/nv-tb-egpu-qwd.h b/kernel-open/nvidia/nv-tb-egpu-qwd.h
+new file mode 100644
+index 0000000..cec4910
+--- /dev/null
++++ b/kernel-open/nvidia/nv-tb-egpu-qwd.h
+@@ -0,0 +1,84 @@
++/*
++ * SPDX-FileCopyrightText: nvidia-driver-injector contributors
++ * SPDX-License-Identifier: MIT
++ *
++ * nv-tb-egpu-qwd.h — Thunderbolt-eGPU Q-watchdog (cluster P3).
++ *
++ * Per-device kthread that probes NV_PMC_BOOT_0 via direct volatile MMIO
++ * on a fixed interval. On a dead-bus return (0xFFFFFFFF), declares the
++ * GPU disconnected through os_pci_set_disconnected — the same kernel
++ * propagation Q-active uses from the ioctl path, but driven by an
++ * active heartbeat that fires regardless of which subsystem caused the
++ * wedge. Closes the DMA-path Mode B detection gap that Q-active alone
++ * misses; see docs/lever-catalog.md (Lever Q) for the full taxonomy.
++ *
++ * Public surface (per device, via PCI sysfs):
++ *
++ *   tb_egpu_qwd_cycles                  cumulative kthread iterations
++ *   tb_egpu_qwd_detections              dead-bus episodes detected
++ *   tb_egpu_qwd_last_detection_jiffies  jiffies at first detect of last episode
++ *   tb_egpu_qwd_last_pmc_boot_0         PMC_BOOT_0 value at last detect
++ *   tb_egpu_qwd_last_aer_summary        compact AER + DPC snapshot at last detect
++ *
++ * Module parameters (runtime-toggleable, /sys/module/nvidia/parameters):
++ *
++ *   NVreg_TbEgpuQwdEnable      1 = kthread runs, 0 = sleeps idle
++ *   NVreg_TbEgpuQwdIntervalMs  probe period (clamped to [10, 60000])
++ *
++ * See nv-tb-egpu-qwd.c for design rationale, lifecycle notes, and the
++ * Heisenbug-acknowledgement reasoning for an active observer in the
++ * presence of an observability-sensitive bug.
++ */
++
++#ifndef _NV_TB_EGPU_QWD_H_
++#define _NV_TB_EGPU_QWD_H_
++
++#include <linux/atomic.h>
++#include <linux/types.h>
++
++struct task_struct;
++struct nv_linux_state_s;
++typedef struct nv_linux_state_s nv_linux_state_t;
++
++/*
++ * Compact AER + DPC snapshot recorded at the moment of the first
++ * dead-bus detection in an episode. Populated by the AER-capture helper
++ * (cluster P2 — tb_egpu_dump_aer_trigger_event), exposed read-only via
++ * the tb_egpu_qwd_last_aer_summary sysfs attribute. Until P2 is applied,
++ * `valid` stays 0 and the sysfs reader emits a "(no detection yet)"
++ * placeholder; the rest of Q-watchdog still functions.
++ *
++ * Note: writes from the helper are not atomic; a concurrent userspace
++ * sysfs read can in principle observe a torn struct. Acceptable for
++ * diagnostic-only telemetry — userspace consumers should re-read on
++ * unexpected values.
++ */
++struct tb_egpu_qwd_aer_snapshot
++{
++    u32 gpu_aer_uesta;
++    u32 gpu_aer_cesta;
++    u32 br_aer_uesta;
++    u32 br_aer_cesta;
++    u32 root_aer_uesta;
++    u32 root_aer_cesta;
++    u32 root_rootsta;
++    u16 dpc_status;
++    u8  valid;  /* 0 = never populated; 1 = populated at least once */
++};
++
++struct tb_egpu_qwd
++{
++    struct task_struct *thread;
++    atomic_t            cycles;
++    atomic_t            detections;
++
++    /* Persistent S3 detection state — populated on detect events. */
++    unsigned long                       last_detection_jiffies;
++    u32                                 last_pmc_boot_0;
++    struct tb_egpu_qwd_aer_snapshot     last_aer;
++};
++
++int  tb_egpu_qwd_init(nv_linux_state_t *nvl);
++void tb_egpu_qwd_stop(nv_linux_state_t *nvl);
++
++#endif /* _NV_TB_EGPU_QWD_H_ */
+diff --git a/kernel-open/nvidia/nvidia-sources.Kbuild b/kernel-open/nvidia/nvidia-sources.Kbuild
+index b37248a..68dba37 100644
+--- a/kernel-open/nvidia/nvidia-sources.Kbuild
++++ b/kernel-open/nvidia/nvidia-sources.Kbuild
+@@ -12,6 +12,7 @@ NVIDIA_SOURCES += nvidia/nv-ipc-soc.c
+ NVIDIA_SOURCES += nvidia/nv.c
+ NVIDIA_SOURCES += nvidia/nv-pci.c
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-aer.c
++NVIDIA_SOURCES += nvidia/nv-tb-egpu-qwd.c
+ NVIDIA_SOURCES += nvidia/nv-dmabuf.c
+ NVIDIA_SOURCES += nvidia/nv-nano-timer.c
+ NVIDIA_SOURCES += nvidia/nv-acpi.c
+-- 
+2.54.0
+
