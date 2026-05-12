@@ -1,0 +1,219 @@
+From: nvidia-driver-injector <noreply@example.invalid>
+Date: 2026-05-12
+Subject: [PATCH 0007/0007] tb-egpu: version metadata + Kconfig wiring (cluster P7)
+
+The final cluster of the P1-P6 refactor. Consolidates legacy 0005
+(version-string mark) and 0025 (Kbuild reads version.mk) into one
+metadata patch, and lands the Kconfig wiring per inventory Section 4
+that was deferred out of P6.
+
+Three things:
+
+(1) NVIDIA_VERSION bump to 595.71.05-aorus.13.
+
+    Continues the production version sequence (aorus.12 was the last
+    legacy production build). The internal naming convention is
+    tb_egpu_*, but the external user-visible version string keeps the
+    aorus.N family so it slots into existing operational tooling
+    (modinfo, container image tags) without disruption.
+
+(2) Kbuild reads NVIDIA_VERSION from version.mk (legacy 0025 mechanism).
+
+    Eliminates Kbuild/version.mk drift. Prior to legacy 0025, the
+    -DNV_VERSION_STRING literal was hardcoded in kernel-open/Kbuild
+    AND set in version.mk; subsequent patches bumped only version.mk
+    and the strings drifted (Kbuild left at aorus.5 while version.mk
+    reached aorus.10). Fix: have Kbuild include ../version.mk and
+    use $(NVIDIA_VERSION) in the macro. Single source of truth;
+    future bumps only need version.mk.
+
+    kbuild's .cmd hashing detects the expanded -D value changing and
+    rebuilds nv.o accordingly, so a bare `make modules` after a
+    NVIDIA_VERSION bump produces the correct modinfo without
+    `make clean`.
+
+    Candidate for upstream as a standalone cleanup PR if NVIDIA is
+    willing.
+
+(3) Kconfig wiring (per inventory Section 4).
+
+    Two toggles defined in kernel-open/Kbuild as Makefile variables
+    (NVIDIA's kernel-open uses Makefile conditionals, not in-tree
+    Kconfig integration):
+
+      CONFIG_NV_TB_EGPU       ?= y   (master gate)
+      CONFIG_NV_TB_EGPU_DIAG  ?= n   (diagnostic telemetry gate)
+
+    CONFIG_NV_TB_EGPU is reserved/documentation-only for now. Full
+    opt-out at this gate would require wrapping the eGPU additions
+    across P1-P5 in #ifdef CONFIG_NV_TB_EGPU — multiple hundreds of
+    additional gating wraps across nv-pci.c, nv.c, the err_handlers
+    struct, the include lines, etc. Out of scope for the refactor;
+    flagged as a future tightening. The build is effectively
+    "always y" today, with the symbol defined for future use.
+
+    CONFIG_NV_TB_EGPU_DIAG is the real toggle. Default n. When n:
+      - kernel-open/nvidia/nv-tb-egpu-diag.c is excluded from
+        NVIDIA_SOURCES (ifeq in nvidia-sources.Kbuild)
+      - nv-tb-egpu-diag.h provides an inline no-op stub
+        (static inline void tb_egpu_diag_dump(...) { (void)nvl;
+        (void)site; }) so the 6 lifecycle call sites in nv.c +
+        nv-pci.c compile to nothing
+      - production binary loses ~10% per inventory Section 4
+
+    When y: real diag function compiled in, call sites emit real
+    [DIAG] / [DIAG-AER] / [DIAG-AER2] lines per cluster P6.
+
+    Override at build time:
+      make CONFIG_NV_TB_EGPU_DIAG=y modules
+
+What's deliberately NOT in this patch:
+
+- No CONFIG_NV_TB_EGPU=n implementation (see above; out of scope).
+- No DIAG-only sysfs gating for the qwd `last_aer_summary` /
+  `last_pmc_boot_0` / `last_detection_jiffies` files that the
+  inventory's Section 4 table marks DIAG-only. The current P3
+  surface exposes all five qwd sysfs files unconditionally; moving
+  three of them under CONFIG_NV_TB_EGPU_DIAG=n stub would require
+  reaching back into P3 to wrap their sysfs_create_group attrs
+  array conditionally. That's a real win (less attack surface on
+  production), but a follow-up patch, not P7. Flagged here.
+- No Kconfig file under kernel-open/. NVIDIA's kernel-open doesn't
+  participate in the kernel's Kconfig system (it's an out-of-tree
+  module that uses make variables, not menuconfig). The inventory
+  Section 4 noted this and proposed the Makefile fallback we're
+  using.
+
+Files touched:
+  version.mk                                +1/-1  (NVIDIA_VERSION bump)
+  kernel-open/Kbuild                        +39/-1 (version.mk include +
+                                                    Kconfig toggles)
+  kernel-open/nvidia/nv-tb-egpu-diag.h      +17    (inline no-op stub
+                                                    for DIAG=n)
+  kernel-open/nvidia/nvidia-sources.Kbuild  +5     (conditional diag.c
+                                                    source line)
+
+Validation: git apply --check vs vanilla 595.71.05 with all 6 prior
+patches stacked OK; container build (refactor-rc1) OK with
+CONFIG_NV_TB_EGPU_DIAG default n; container build also OK with
+explicit CONFIG_NV_TB_EGPU_DIAG=y override.
+
+This completes Phase 2 of the P1-P6 refactor. Phase 3 (stack
+validation via uninstall/reinstall cycle on production hardware)
+is the next session.
+
+---
+ kernel-open/Kbuild                       | 39 +++++++++++++++++++++++-
+ kernel-open/nvidia/nv-tb-egpu-diag.h     | 17 +++++++++++
+ kernel-open/nvidia/nvidia-sources.Kbuild |  5 +++
+ version.mk                               |  2 +-
+ 4 files changed, 61 insertions(+), 2 deletions(-)
+
+diff --git a/kernel-open/Kbuild b/kernel-open/Kbuild
+index 089c77d..b8b1bf6 100644
+--- a/kernel-open/Kbuild
++++ b/kernel-open/Kbuild
+@@ -79,7 +79,44 @@ ccflags-y += -I$(src)/common/inc
+ ccflags-y += -I$(src)
+ ccflags-y += -Wall $(DEFINES) $(INCLUDES) -Wno-cast-qual -Wno-format-extra-args
+ ccflags-y += -D__KERNEL__ -DMODULE -DNVRM
+-ccflags-y += -DNV_VERSION_STRING=\"595.71.05\"
++
++# tb-egpu (cluster P7): read NVIDIA_VERSION from the repo-root version.mk
++# so a bump there propagates to MODULE_VERSION() automatically and the
++# Kbuild value can never drift from the version.mk value. Single source
++# of truth. kbuild's .cmd hashing detects the expanded -D value changing
++# and rebuilds nv.o accordingly, so `make modules` after a version.mk
++# bump produces the correct modinfo without `make clean`.
++#
++# Candidate for upstream as a standalone cleanup if NVIDIA is willing.
++include $(src)/../version.mk
++ccflags-y += -DNV_VERSION_STRING=\"$(NVIDIA_VERSION)\"
++
++# tb-egpu (cluster P7): Kconfig-style toggles.
++#
++# CONFIG_NV_TB_EGPU      master gate. Default y. Currently reserved as
++#                        a documentation-only symbol — gating P1-P5 out
++#                        would require wrapping all eGPU additions
++#                        across 6 clusters in #ifdef, out of scope for
++#                        the refactor. Build is "always y" today.
++# CONFIG_NV_TB_EGPU_DIAG diagnostic telemetry gate. Default n. When y,
++#                        the always-on diag content from cluster P6
++#                        compiles in (nv-tb-egpu-diag.c is included in
++#                        NVIDIA_SOURCES, and the call sites in nv.c +
++#                        nv-pci.c emit real DIAG dumps). When n, the
++#                        diag.c TU is excluded and the header provides
++#                        an inline no-op stub so call sites compile to
++#                        nothing — ~10% binary size reduction on the
++#                        production build per inventory Section 4.
++#
++# Override at build time:    make CONFIG_NV_TB_EGPU_DIAG=y modules
++CONFIG_NV_TB_EGPU       ?= y
++CONFIG_NV_TB_EGPU_DIAG  ?= n
++ifeq ($(CONFIG_NV_TB_EGPU),y)
++ccflags-y += -DCONFIG_NV_TB_EGPU
++endif
++ifeq ($(CONFIG_NV_TB_EGPU_DIAG),y)
++ccflags-y += -DCONFIG_NV_TB_EGPU_DIAG
++endif
+ 
+ # Include and link Tegra out-of-tree modules.
+ ifneq ($(wildcard /usr/src/nvidia/nvidia-public),)
+diff --git a/kernel-open/nvidia/nv-tb-egpu-diag.h b/kernel-open/nvidia/nv-tb-egpu-diag.h
+index b47a611..6f2fc35 100644
+--- a/kernel-open/nvidia/nv-tb-egpu-diag.h
++++ b/kernel-open/nvidia/nv-tb-egpu-diag.h
+@@ -47,6 +47,23 @@
+ struct nv_linux_state_s;
+ typedef struct nv_linux_state_s nv_linux_state_t;
+ 
++/*
++ * Conditional gate (cluster P7). When CONFIG_NV_TB_EGPU_DIAG is defined
++ * by kernel-open/Kbuild, tb_egpu_diag_dump is the real function from
++ * nv-tb-egpu-diag.c. When not defined, this header provides an inline
++ * no-op stub so the 6 lifecycle call sites in nv.c / nv-pci.c compile
++ * to nothing — ~10% binary size win on production builds per inventory
++ * Section 4. Argument names are kept so the inline body can `(void)` them
++ * and avoid unused-variable warnings at the caller.
++ */
++#ifdef CONFIG_NV_TB_EGPU_DIAG
+ void tb_egpu_diag_dump(nv_linux_state_t *nvl, const char *site);
++#else
++static inline void tb_egpu_diag_dump(nv_linux_state_t *nvl, const char *site)
++{
++    (void)nvl;
++    (void)site;
++}
++#endif
+ 
+ #endif /* _NV_TB_EGPU_DIAG_H_ */
+diff --git a/kernel-open/nvidia/nvidia-sources.Kbuild b/kernel-open/nvidia/nvidia-sources.Kbuild
+index 03d4c1e..a449752 100644
+--- a/kernel-open/nvidia/nvidia-sources.Kbuild
++++ b/kernel-open/nvidia/nvidia-sources.Kbuild
+@@ -14,7 +14,12 @@ NVIDIA_SOURCES += nvidia/nv-pci.c
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-aer.c
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-qwd.c
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-recover.c
++# tb-egpu (cluster P7): diag TU is gated by CONFIG_NV_TB_EGPU_DIAG
++# (default n in kernel-open/Kbuild). When n, the header provides an
++# inline no-op stub so call sites compile to nothing.
++ifeq ($(CONFIG_NV_TB_EGPU_DIAG),y)
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-diag.c
++endif
+ NVIDIA_SOURCES += nvidia/nv-dmabuf.c
+ NVIDIA_SOURCES += nvidia/nv-nano-timer.c
+ NVIDIA_SOURCES += nvidia/nv-acpi.c
+diff --git a/version.mk b/version.mk
+index ea15e65..698cab0 100644
+--- a/version.mk
++++ b/version.mk
+@@ -1,4 +1,4 @@
+-NVIDIA_VERSION = 595.71.05
++NVIDIA_VERSION = 595.71.05-aorus.13
+ NVIDIA_NVID_VERSION = 595.71.05
+ NVIDIA_NVID_EXTRA = 
+ 
+-- 
+2.54.0
+
