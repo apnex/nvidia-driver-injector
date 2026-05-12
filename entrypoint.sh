@@ -239,7 +239,7 @@ log "build ✓"
 # Step 4: Load modules into host kernel
 # ============================================================================
 # Load via `modprobe --ignore-install` so /etc/modprobe.d/ options
-# (NVreg_TbEgpuLeverMRecoverEnable=1, NVreg_DeviceFile*, etc.) apply.
+# (NVreg_TbEgpuRecoverEnable=1, NVreg_DeviceFile*, etc.) apply.
 # `--ignore-install` bypasses the `install ... /bin/false` guards that
 # the host's nvidia-driver-injector.conf installs to block accidental
 # auto-load — a clean separation: host posture is "nothing auto-loads",
@@ -261,6 +261,41 @@ KO_MODESET="/src/nvidia-open-gpu-kernel-modules/kernel-open/nvidia-modeset.ko"
 KO_DRM="/src/nvidia-open-gpu-kernel-modules/kernel-open/nvidia-drm.ko"
 
 [[ -f "$KO_NVIDIA" ]] || fail "expected ${KO_NVIDIA} not found after build"
+
+# ----------------------------------------------------------------------------
+# Firmware path symlink.
+#
+# The kernel's request_firmware() looks for GSP firmware at
+#   /lib/firmware/nvidia/<NV_VERSION_STRING>/gsp_ga10x.bin
+# where <NV_VERSION_STRING> is whatever -DNV_VERSION_STRING the module was
+# built with (e.g. "595.71.05-aorus.13"). Upstream ships the firmware at the
+# unmodified "595.71.05" path, so any project version bump needs a symlink:
+#   /lib/firmware/nvidia/<our-version> → 595.71.05
+#
+# Extract the version from the just-built .ko (single source of truth — no
+# hardcoded value in this script) and ensure the symlink exists. Idempotent;
+# safe to re-run.
+fw_version=$(modinfo "$KO_NVIDIA" 2>/dev/null | awk '/^version:/ {print $2; exit}')
+if [[ -n "$fw_version" ]]; then
+    fw_base="/lib/firmware/nvidia"
+    fw_target="$fw_base/595.71.05"
+    fw_link="$fw_base/$fw_version"
+    if [[ "$fw_version" == "595.71.05" ]]; then
+        : # vanilla version — no symlink needed
+    elif [[ ! -d "$fw_target" ]]; then
+        warn "firmware base ${fw_target} missing — GSP load will fail. Install upstream firmware first."
+    elif [[ -L "$fw_link" || -d "$fw_link" ]]; then
+        log "firmware symlink ✓ — ${fw_link} present"
+    else
+        if ln -sfn "595.71.05" "$fw_link" 2>/dev/null; then
+            log "firmware symlink ✓ — created ${fw_link} → 595.71.05"
+        else
+            warn "could not create ${fw_link} (is /lib/firmware bind-mounted rw?)
+       GSP load will fail with -ENOENT until this symlink exists."
+        fi
+    fi
+fi
+# ----------------------------------------------------------------------------
 
 # Detect whether the host's modprobe.d is bind-mounted (architecture
 # expects /etc/modprobe.d to be mounted from host, ro).
@@ -311,13 +346,13 @@ loaded_version="$(cat /sys/module/nvidia/version 2>/dev/null || echo unknown)"
 log "load ✓ — nvidia version: ${loaded_version}"
 
 # Confirm the production-posture knob actually took effect.
-recover_enable_path="/sys/module/nvidia/parameters/NVreg_TbEgpuLeverMRecoverEnable"
+recover_enable_path="/sys/module/nvidia/parameters/NVreg_TbEgpuRecoverEnable"
 if [[ -r "$recover_enable_path" ]]; then
     re_val="$(cat "$recover_enable_path")"
     if [[ "$re_val" == "1" ]]; then
-        log "Lever M-recover ✓ — NVreg_TbEgpuLeverMRecoverEnable=1"
+        log "tb_egpu recover ✓ — NVreg_TbEgpuRecoverEnable=1"
     else
-        warn "NVreg_TbEgpuLeverMRecoverEnable=${re_val} (expected 1).
+        warn "NVreg_TbEgpuRecoverEnable=${re_val} (expected 1).
        Production posture not applied; the recovery state machine is OFF.
        Check that /etc/modprobe.d/nvidia-driver-injector.conf is bind-mounted
        and that apply.sh has been run on the host."
