@@ -66,7 +66,7 @@ they are NOT meant to coexist on the same host.
 │       pcie_port_pm=off                                          │
 │   - kernel-devel matching running kernel                        │
 │   - /etc/modprobe.d/nvidia-driver-injector.conf:                │
-│       options nvidia NVreg_TbEgpuLeverMRecoverEnable=1          │
+│       options nvidia NVreg_TbEgpuRecoverEnable=1                │
 │       options nvidia NVreg_DeviceFileMode=0660                  │
 │       blacklist nouveau                                         │
 │       install nvidia-drm /bin/false   ← GNOME-freeze guard      │
@@ -241,7 +241,7 @@ Surfaced 2026-05-10 after a reboot incident
 
 | # | Gap | Effect | Status |
 |---|---|---|---|
-| 1 | Container uses `insmod nvidia.ko` directly, bypassing `/etc/modprobe.d/` | Production NVreg options not applied (e.g. `RecoverEnable=0` instead of `1`) — Lever M-recover doesn't fire on AER | **CLOSED** — entrypoint switched to `modprobe --ignore-install nvidia` with `/etc/modprobe.d` bind-mounted from host. Falls back to insmod if mount missing. Verifies `NVreg_TbEgpuLeverMRecoverEnable=1` post-load and warns if not. |
+| 1 | Container uses `insmod nvidia.ko` directly, bypassing `/etc/modprobe.d/` | Production NVreg options not applied (e.g. `RecoverEnable=0` instead of `1`) — recovery state machine doesn't fire on AER | **CLOSED** — entrypoint switched to `modprobe --ignore-install nvidia` with `/etc/modprobe.d` bind-mounted from host. Falls back to insmod if mount missing. Verifies `NVreg_TbEgpuRecoverEnable=1` post-load and warns if not. |
 | 2 | No host-side install script | Operator has to manually do Layer 1 setup | **CLOSED** — `scripts/apply.sh` + `scripts/remove.sh` shipped. |
 | 3 | No bridge-link-cap.service shipped with this repo | Must rely on a separate apply.sh from aorus-5090-egpu, OR live link comes up at whatever speed it happens to | **CLOSED** — cleanroom `nvidia-driver-injector-bridge-link-cap` binary + systemd unit shipped under `scripts/host-files/`, installed via Layer 1. |
 | 4 | No `chown` / `chmod` of `/dev/nvidia*` post-load | Permissions are 0666 root:root (works but wide open) | **CLOSED** — entrypoint chgrps to `gpu` and chmods 0660 if the group exists on host. |
