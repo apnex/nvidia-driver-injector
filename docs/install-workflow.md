@@ -112,8 +112,9 @@ Does:
 | 3 | Create `ollama` UNIX group if absent | Used as the `/dev/nvidia*` access group |
 | 4 | Install `/etc/modprobe.d/nvidia-driver-injector.conf` | Production NVreg options inc. `LeverMRecoverEnable=1`, `DeviceFileMode=0660` |
 | 5 | Install `nvidia-driver-injector-bridge-link-cap` binary + `.service` | Systemd unit `Before=docker.service`; enabled |
-| 6 | Install `/etc/udev/rules.d/79-nvidia-driver-injector.rules` | `/dev/nvidia*` group permissions |
+| 6 | Install udev rules | `79-nvidia-driver-injector.rules` (`/dev/nvidia*` group perms) + `80-nvidia-driver-injector-disable-audio.rules` (unbind eGPU HDMI audio function — compute-only posture) |
 | 7 | Disable Vulkan / EGL / OpenCL ICDs | Compute-only posture (rename → `*.nvidia-driver-injector-disabled`) |
+| 8 | Summary | Reports what changed; flags reboot-needed if cmdline was modified |
 | 9 | Apply bridge-link-cap immediately if eGPU enumerated | So `docker compose up` can run without rebooting if cmdline already had everything |
 
 Useful flags:
@@ -191,6 +192,21 @@ cat /sys/module/nvidia/parameters/NVreg_TbEgpuLeverMRecoverEnable
 
 ps -ef | grep -E '\[aorus-qwd-' | grep -v grep
 # → "[aorus-qwd-0400]" — Q-watchdog kthread running
+
+nvidia-smi --query-gpu=persistence_mode,power.draw,temperature.gpu --format=csv
+# → "Enabled, ~22 W, ~33 °C" — engaged. (NOT "Disabled, ~63 W, ~40 °C" — lazy)
+# Set by the injector container's entrypoint (`nvidia-smi -pm 1` after bind).
+
+readlink /sys/bus/pci/devices/0000:04:00.1/driver
+# → empty / no output — HDMI audio function unbound (compute-only posture).
+cat /sys/bus/pci/devices/0000:04:00.1/driver_override
+# → "nvidia-driver-injector-disabled" (set by 80-...rules at PCI enumeration)
+```
+
+For the comprehensive 40-check verification, run:
+
+```bash
+sudo ./scripts/status.sh
 ```
 
 ### Step 7 — Bring up your workload (Layer 3, optional)

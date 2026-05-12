@@ -52,7 +52,9 @@ A correctly-deployed system has:
   builds patched `nvidia.ko` against host kernel-devel,
   loads it via `modprobe` so production modprobe.d options apply,
   fixes `/dev/nvidia*` permissions,
-  optionally runs `nvidia-persistenced`.
+  runs `nvidia-smi -pm 1` to trigger full GPU bringup
+  (GSP firmware load, PMU init, AORUS waterblock thermal subsystem)
+  and enable the driver's persistence-mode flag.
 - **Layer 3 — Workload container**
   (vLLM, OpenCode runtime, etc.):
   pure userspace, depends on `/dev/nvidia*` working.
@@ -82,13 +84,14 @@ and the gap-status table tracking the current implementation against the target.
 | `/etc/modprobe.d/nvidia-driver-injector.conf` (blacklists + NVreg options including LeverMRecoverEnable=1) | 1 | `scripts/apply.sh` |
 | Lever H17 LnkCtl2 cap (`nvidia-driver-injector-bridge-link-cap.service`, ordered `Before=docker.service`) | 1 | `scripts/apply.sh` |
 | `/etc/udev/rules.d/79-nvidia-driver-injector.rules` (`/dev/nvidia*` group) | 1 | `scripts/apply.sh` |
+| `/etc/udev/rules.d/80-nvidia-driver-injector-disable-audio.rules` (unbind HDMI audio function) | 1 | `scripts/apply.sh` |
 | Vulkan/EGL/OpenCL ICD disable | 1 | `scripts/apply.sh` |
 | `kernel-devel` for `$(uname -r)` | 1 | `scripts/apply.sh` (dnf or apt) |
 | **Kernel module build + load** (`modprobe --ignore-install nvidia` against the patched .ko) | **2** | **this container's entrypoint** ✓ |
 | **`nvidia-modprobe -u -c 0`** (UVM device files) | **2** | **this container's entrypoint** ✓ |
 | `/dev/nvidia*` chown/chmod (belt-and-suspenders to udev rule) | 2 | this container's entrypoint ✓ |
 | `NVreg_TbEgpuLeverMRecoverEnable=1` post-load verification | 2 | this container's entrypoint ✓ |
-| `nvidia-persistenced` (warmup-latency optimisation, optional) | 2 | TODO (Gap #5; close-path bug class already mitigated, low priority) |
+| **`nvidia-smi -pm 1`** (persistence + GPU thermal engagement) | **2** | **this container's entrypoint** ✓ |
 | Workload `depends_on` healthcheck | 3 | TODO (Gap #6; documented in workload-side compose) |
 
 ## Prerequisites
