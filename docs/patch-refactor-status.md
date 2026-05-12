@@ -64,14 +64,16 @@ Naming reasoning rule: symbols describe **what they do**, not **how we found we 
 ```
 patches/0001-tb-egpu-gpu-lost-crash-safety.patch       (P1 — apply 1st)
 patches/0002-tb-egpu-aer-uncmask-clear.patch           (P5 — apply 2nd; standalone)
-patches/0003-tb-egpu-pcie-error-handlers-recover.patch (P2 — apply 3rd; needs P1)
-patches/0004-tb-egpu-qwatchdog.patch                   (P3 — apply 4th; needs P2)
+patches/0003-tb-egpu-qwatchdog.patch                   (P3 — apply 3rd; needs P1 only)
+patches/0004-tb-egpu-pcie-error-handlers-recover.patch (P2 — apply 4th; needs P1 + P3)
 patches/0005-tb-egpu-close-path-safety.patch           (P4 — apply 5th; needs P2)
 patches/0006-tb-egpu-diag-telemetry.patch              (P6 — apply 6th; Kconfig-gated)
 patches/0007-tb-egpu-version-mark-and-kbuild.patch     (build metadata)
 ```
 
 **File-number = apply order** (kernel patch convention). **Px label = cluster identity**. **Write order ≠ either**: we write smallest-first for confidence (P5 → P1 → P3 → P2 → P4 → P6).
+
+**P2/P3 file numbers swapped 2026-05-12**: the original inventory assumed P3 depended on P2 (qwd would call into P2's recovery state machine). Option-1 cross-cluster split during P3 write inverted that — P3 now stands alone on P1, and P2 patches into P3's qwd code to wire the AER-capture call. File 0003 = P3, file 0004 = P2 reflects the correct apply-time dependency direction.
 
 ### What's deliberately NOT renamed
 
@@ -116,8 +118,8 @@ patches/0007-tb-egpu-version-mark-and-kbuild.patch     (build metadata)
 
 | | |
 |---|---|
-| Commit | `a19c1ac` |
-| Patch file | `patches/0004-tb-egpu-qwatchdog.patch` (673 lines incl. header) |
+| Commit | `a19c1ac` (renamed to file 0003 in commit follow-up) |
+| Patch file | `patches/0003-tb-egpu-qwatchdog.patch` (673 lines incl. header) |
 | Legacy source | 0014, 0015, S3 portion of 0023 |
 | Net code | +515 lines (new files +485, edits +30) |
 | New files | `kernel-open/nvidia/nv-tb-egpu-qwd.{c,h}` |
@@ -133,7 +135,7 @@ patches/0007-tb-egpu-version-mark-and-kbuild.patch     (build metadata)
 
 | | |
 |---|---|
-| Estimated patch file | `patches/0003-tb-egpu-pcie-error-handlers-recover.patch` |
+| Estimated patch file | `patches/0004-tb-egpu-pcie-error-handlers-recover.patch` |
 | Legacy source | 0007, 0016, 0017, 0024, 0026, 0027, 0028, **+ S1+S2 portions of 0023** (AER capture helper + DIAG-AER2) |
 | Estimated final size | ~1,400 lines (largest of all six) |
 | Dependencies | P1 (crash-safety guards; recovery state machine needs them); P3 (must add one-line call into `tb_egpu_qwd_thread` to populate `last_aer`) |
