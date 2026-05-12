@@ -1,6 +1,6 @@
 From: nvidia-driver-injector <noreply@example.invalid>
 Date: 2026-05-12
-Subject: [PATCH 0004/0007] tb-egpu: Q-watchdog Mode B detector (cluster P3)
+Subject: [PATCH 0003/0007] tb-egpu: Q-watchdog Mode B detector (cluster P3)
 
 Consolidates legacy patches 0014 (kthread), 0015 (basic sysfs counters),
 and the S3 portion of 0023 (persistent detection state + sysfs) into a
