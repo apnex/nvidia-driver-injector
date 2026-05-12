@@ -51,7 +51,7 @@ services:
       # docs/architecture.md). Layer 1 apply.sh installs the
       # config file this picks up.
       - /etc/modprobe.d:/etc/modprobe.d:ro
-      # Host /etc/group so the container can resolve the ollama gid
+      # Host /etc/group so the container can resolve the gpu gid
       # for chgrp on /dev/nvidia* (Gap #4).
       - /etc/group:/etc/group:ro
     restart: unless-stopped

@@ -264,10 +264,10 @@ if mod_loaded nvidia; then
     for dev in /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
         if [[ -e "$dev" ]]; then
             stat=$(stat -c "%a %U:%G" "$dev")
-            if [[ "$stat" == "660 root:ollama" ]]; then
+            if [[ "$stat" == "660 root:gpu" ]]; then
                 ok "$dev: $stat"
             else
-                warn "$dev: $stat (expected 660 root:ollama)"
+                warn "$dev: $stat (expected 660 root:gpu)"
             fi
         else
             warn "$dev: missing"

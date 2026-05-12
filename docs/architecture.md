@@ -51,7 +51,7 @@ they are NOT meant to coexist on the same host.
 │ Layer 2: Driver injector container       ← this repo            │
 │   - Builds patched nvidia.ko vs host kernel-devel               │
 │   - Loads via `modprobe` so /etc/modprobe.d wins                │
-│   - Sets /dev/nvidia* permissions (chown ollama, chmod 660)     │
+│   - Sets /dev/nvidia* permissions (chown gpu, chmod 660)     │
 │   - `nvidia-smi -pm 1` → GSP load + PMU init + thermal engage   │
 │   - Idempotent on already-loaded; explicit `uninstall` subcmd   │
 │   - sleep infinity                                              │
@@ -179,7 +179,7 @@ sudo ./scripts/remove.sh
   #   - legacy: cleans up any pre-fold gpu-engage host artifacts
   # Does NOT revert kernel cmdline by default
   # (use --revert-cmdline if desired; reboot needed after).
-  # Leaves the ollama UNIX group + kernel-devel package alone
+  # Leaves the gpu UNIX group + kernel-devel package alone
   # (may be in use by other things on the host).
 ```
 
@@ -208,7 +208,7 @@ boot
  │   │   │     reads /etc/modprobe.d/ →
  │   │   │     RecoverEnable=1, DeviceFileMode=0660, …
  │   │   ├─ nvidia-modprobe -u -c 0 (uvm device nodes)
- │   │   ├─ chown /dev/nvidia* root:ollama && chmod 0660
+ │   │   ├─ chown /dev/nvidia* root:gpu && chmod 0660
  │   │   ├─ nvidia-smi -pm 1  →  GSP load, PMU init, thermal engage
  │   │   └─ sleep infinity
  │   └─ workload container (restart: unless-stopped)
@@ -244,11 +244,11 @@ Surfaced 2026-05-10 after a reboot incident
 | 1 | Container uses `insmod nvidia.ko` directly, bypassing `/etc/modprobe.d/` | Production NVreg options not applied (e.g. `RecoverEnable=0` instead of `1`) — Lever M-recover doesn't fire on AER | **CLOSED** — entrypoint switched to `modprobe --ignore-install nvidia` with `/etc/modprobe.d` bind-mounted from host. Falls back to insmod if mount missing. Verifies `NVreg_TbEgpuLeverMRecoverEnable=1` post-load and warns if not. |
 | 2 | No host-side install script | Operator has to manually do Layer 1 setup | **CLOSED** — `scripts/apply.sh` + `scripts/remove.sh` shipped. |
 | 3 | No bridge-link-cap.service shipped with this repo | Must rely on a separate apply.sh from aorus-5090-egpu, OR live link comes up at whatever speed it happens to | **CLOSED** — cleanroom `nvidia-driver-injector-bridge-link-cap` binary + systemd unit shipped under `scripts/host-files/`, installed via Layer 1. |
-| 4 | No `chown` / `chmod` of `/dev/nvidia*` post-load | Permissions are 0666 root:root (works but wide open) | **CLOSED** — entrypoint chgrps to `ollama` and chmods 0660 if the group exists on host. |
+| 4 | No `chown` / `chmod` of `/dev/nvidia*` post-load | Permissions are 0666 root:root (works but wide open) | **CLOSED** — entrypoint chgrps to `gpu` and chmods 0660 if the group exists on host. |
 | 5 | No GPU engagement inside container — lazy state wastes 41 W idle | Cooler at floor RPM, GSP not loaded, idle power ~63 W vs ~22 W proper P8 (measured 2026-05-12 on this stack) | **CLOSED 2026-05-12** — Dockerfile extracts `nvidia-smi` + `libnvidia-ml.so` from NVIDIA's 595.71.05 tarball (+4 MB image); entrypoint runs `nvidia-smi -pm 1` after bind. Daemon-less successor to `nvidia-persistenced`. |
 | 6 | HDMI audio function binds to `snd_hda_intel`, sits in D0 with no purpose | Continuous power draw + potential ASPM/PM perturbation on the eGPU PCI tree | **CLOSED 2026-05-12** — new udev rule `80-nvidia-driver-injector-disable-audio.rules` sets `driver_override="nvidia-driver-injector-disabled"` on the audio function (`10de:22e8`) and unbinds it. |
 | 7 | No `depends_on` healthcheck linking workload → injector | Workload can crash-loop while injector still warming up | OPEN — to be documented in workload-side compose examples |
-| 8 | `/dev/nvidia-uvm*` perm drift to 666 root:root | Wider-than-intended access (still constrained by ICD disable + ollama group on `/dev/nvidia0`) | OPEN — `nvidia-modprobe -u -c 0` mknod creates with default perms; udev rule fires too late. Worked-around by container's chmod/chgrp at startup. |
+| 8 | `/dev/nvidia-uvm*` perm drift to 666 root:root | Wider-than-intended access (still constrained by ICD disable + gpu group on `/dev/nvidia0`) | OPEN — `nvidia-modprobe -u -c 0` mknod creates with default perms; udev rule fires too late. Worked-around by container's chmod/chgrp at startup. |
 
 Gaps 1-6 closed; Gap 7 is the remaining workload-side polish;
 Gap 8 is a perm-drift edge case worth chasing in a future session.
