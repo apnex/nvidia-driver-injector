@@ -1,0 +1,611 @@
+From: nvidia-driver-injector <noreply@example.invalid>
+Date: 2026-05-12
+Subject: [PATCH 0006/0007] tb-egpu: DIAG telemetry surface (cluster P6)
+
+Consolidates legacy 0018 (diag dump core), 0020 (LnkSta/AER extension),
+0021 (Header Log + ASPM + LBMS extension), and the S2/DIAG-AER2 portion
+of 0023 (root port AER + DPC) into one rich per-site state dump.
+
+Legacy 0009 (Lever P-probe — 18 investigation-period markers in
+uvm.c) is dropped entirely per the inventory recommendation; none of
+the markers survived their original investigation.
+
+Inventory items applied (per docs/patch-refactor-inventory.md "### P6"):
+
+- Renames:
+    tb_egpu_lever_m_diag_dump          -> tb_egpu_diag_dump
+    (drop file-level "AORUS Lever M-recover [DIAG]" log prefix in
+     favour of compact "tb_egpu [DIAG]")
+
+  Functions ALREADY shipped under tb_egpu_* prefix in P2/P4 are kept
+  as-is — the inventory's aspirational `tb_egpu_diag_dump_pdev` rename
+  would have duplicated P4's `tb_egpu_close_diag_pdev`. Where the
+  inventory's rename map and the as-shipped names diverge, the
+  as-shipped name wins (no rename-shuffling for shuffle's sake).
+
+- Three log line classes:
+    [DIAG]      primary site dump — PMC_BOOT_0 + WPR2 + LnkSta + LnkCtl
+                + AER status, always emitted.
+    [DIAG-AER]  follow-up emitted ONLY when GPU AER status is non-zero
+                — Header Log, UncMask, CapCtl, FirstErrPtr.
+    [DIAG-AER2] root port AER + DPC + bridge masks (S2 expansion) —
+                always emitted; cheap (one line).
+
+- Six call sites:
+    probe-end          end of nv_pci_probe                    (nv-pci.c)
+    startdev-entry     entry of nv_start_device               (nv.c)
+    pre-rmInit         immediately before rm_init_adapter     (nv.c)
+    post-rmInit-FAIL   after rm_init_adapter failure          (nv.c)
+    post-rmInit-OK     after rm_init_adapter success          (nv.c)
+    mmio-enabled       inside nv_pci_mmio_enabled (re-introduced
+                       from P2 — P2 had to drop this pending P6)
+
+  Both close-path call sites (RM-side + UVM-side) are NOT P6 — they
+  belong to P4 (close-path observability), which is always-on by design
+  because close-path bug mitigation is observational.
+
+- Module-internal helper re-use. Cluster P2 introduced four register-
+  read helpers as file-static functions (tb_egpu_recover_read_wpr2,
+  _walk_to_root_port, _read_dpc_state, _read_aer_full). P6 reuses all
+  four. To enable cross-TU use without code duplication, P6 lifts the
+  `static` qualifiers and adds declarations to nv-tb-egpu-recover.h.
+  Symbols stay module-internal (no EXPORT_SYMBOL); only the linkage
+  changes from file-static to translation-unit-external.
+
+- Inter-commit history stripped. Legacy 0018's "After Commit 3 design
+  is finalised, this diagnostic is removed or gated behind a kill
+  switch" comment is gone — P6 IS that gate (Kconfig wiring in P7).
+
+Cross-cluster touches:
+
+- P2's nv-tb-egpu-recover.{c,h}: 4 helper functions lifted from
+  file-static to module-internal linkage; declarations added to header.
+- P2's nv_pci_mmio_enabled: the diag_dump call P2 had to drop pending
+  P6 is re-introduced. P2's commit message explicitly forecast this.
+
+Kconfig deferral:
+
+- Per docs/patch-refactor-status.md "Kconfig wiring — DEFERRED to end
+  of Phase 2 (mechanical once all 6 patches exist)", the
+  CONFIG_NV_TB_EGPU_DIAG gating + sysfs reshuffle (last_aer_summary /
+  last_pmc_boot_0 / last_detection_jiffies move to DIAG-only) land in
+  P7 (build metadata + Kconfig wiring). P6 ships diag content unconditionally;
+  P7 adds the gates and the default-OFF behaviour.
+- Until P7, every probe / start-device cycle emits ~6 [DIAG] lines.
+  Per memory feedback_observability_perturbs_bug, A/B verify on the
+  live host before assuming behaviour transfers between refactor-rc1
+  and pre-refactor production (where similar instrumentation has been
+  live since 2026-05-06).
+
+Files touched:
+  kernel-open/nvidia/nv-tb-egpu-diag.c     new  (223 lines)
+  kernel-open/nvidia/nv-tb-egpu-diag.h     new  (52 lines)
+  kernel-open/nvidia/nv-tb-egpu-recover.c  -4 static qualifiers
+  kernel-open/nvidia/nv-tb-egpu-recover.h  +37 (4 helper decls)
+  kernel-open/nvidia/nv-pci.c              +17 (mmio_enabled wire-in
+                                                + probe-end site +
+                                                include)
+  kernel-open/nvidia/nv.c                  +32 (4 lifecycle sites +
+                                                include)
+  kernel-open/nvidia/nvidia-sources.Kbuild +1  (source entry)
+
+Validation: git apply --check vs vanilla 595.71.05 with P1+P5+P3+P2+P4
+stacked OK; container build (refactor-rc1) OK.
+
+---
+ kernel-open/nvidia/nv-pci.c              |  17 +-
+ kernel-open/nvidia/nv-tb-egpu-diag.c     | 223 +++++++++++++++++++++++
+ kernel-open/nvidia/nv-tb-egpu-diag.h     |  52 ++++++
+ kernel-open/nvidia/nv-tb-egpu-recover.c  |   8 +-
+ kernel-open/nvidia/nv-tb-egpu-recover.h  |  37 ++++
+ kernel-open/nvidia/nv.c                  |  32 ++++
+ kernel-open/nvidia/nvidia-sources.Kbuild |   1 +
+ 7 files changed, 364 insertions(+), 6 deletions(-)
+ create mode 100644 kernel-open/nvidia/nv-tb-egpu-diag.c
+ create mode 100644 kernel-open/nvidia/nv-tb-egpu-diag.h
+
+diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
+index 1bd7c6a..99452f7 100644
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -30,6 +30,7 @@
+ #include "nv-tb-egpu-aer.h"
+ #include "nv-tb-egpu-qwd.h"      /* tb_egpu Q-watchdog (cluster P3) */
+ #include "nv-tb-egpu-recover.h"  /* tb_egpu recovery state machine (cluster P2) */
++#include "nv-tb-egpu-diag.h"     /* tb_egpu DIAG telemetry (cluster P6) */
+ 
+ #if defined(NV_VGPU_KVM_BUILD)
+ #include "nv-vgpu-vfio-interface.h"
+@@ -2235,6 +2236,14 @@ nv_pci_probe
+      */
+     (void)tb_egpu_qwd_init(nvl);
+ 
++    /*
++     * tb_egpu DIAG telemetry (cluster P6): probe-end site. First of the
++     * 5 lifecycle DIAG points (probe-end, startdev-entry, pre-rmInit,
++     * post-rmInit-FAIL, post-rmInit-OK). Captures hardware state right
++     * after probe completes, before any RM init has touched the device.
++     */
++    tb_egpu_diag_dump(nvl, "probe-end");
++
+     nv_kmem_cache_free_stack(sp);
+ 
+     return 0;
+@@ -2894,14 +2903,18 @@ nv_pci_error_detected(struct pci_dev *pci_dev, pci_channel_state_t state)
+  *   (b) gives us observability if the kernel ever does call it,
+  *   (c) future-proofs against kernel API changes.
+  *
+- * Pure observability — emits an AER snapshot, returns RECOVERED. (P6
+- * will weave in DIAG dump alongside.)
++ * Pure observability — emits a DIAG state dump alongside the AER
++ * snapshot, returns RECOVERED.
+  */
+ static pci_ers_result_t nv_pci_mmio_enabled(struct pci_dev *pci_dev)
+ {
++    nv_linux_state_t *nvl = pci_get_drvdata(pci_dev);
++
+     nv_printf(NV_DBG_ERRORS,
+               "tb_egpu recover: mmio_enabled callback fired on %s\n",
+               pci_name(pci_dev));
++    if (nvl)
++        tb_egpu_diag_dump(nvl, "mmio-enabled");
+     tb_egpu_dump_aer_trigger_event(pci_dev, "mmio-enabled", NULL);
+     return PCI_ERS_RESULT_RECOVERED;
+ }
+diff --git a/kernel-open/nvidia/nv-tb-egpu-diag.c b/kernel-open/nvidia/nv-tb-egpu-diag.c
+new file mode 100644
+index 0000000..233fcd7
+--- /dev/null
++++ b/kernel-open/nvidia/nv-tb-egpu-diag.c
+@@ -0,0 +1,223 @@
++/*
++ * SPDX-FileCopyrightText: nvidia-driver-injector contributors
++ * SPDX-License-Identifier: MIT
++ *
++ * nv-tb-egpu-diag.c — diagnostic telemetry surface (cluster P6).
++ *
++ * Consolidates legacy 0018 (diag dump core), 0020 (LnkSta/AER
++ * extension), 0021 (Header Log + ASPM + LBMS extension), and the
++ * S2/DIAG-AER2 portion of 0023 (root port AER + DPC) into one rich
++ * per-site state dump.
++ *
++ * Output: one [DIAG] line per call site, with an optional [DIAG-AER]
++ * follow-up line when GPU-side AER status is non-zero, and a [DIAG-AER2]
++ * follow-up with root port AER + DPC state. This separation keeps
++ * clean-boot logs uncluttered while preserving the rich detail when
++ * something actually fired.
++ *
++ * All register reads use module-internal helpers from cluster P2
++ * (tb_egpu_recover_read_wpr2, _walk_to_root_port, _read_dpc_state,
++ * _read_aer_full). Cluster P2's `static` qualifiers on those helpers
++ * were lifted to `extern` in P6 to enable this re-use — file-static
++ * functions made the diag cluster duplicate ~70 lines of register
++ * read patterns it didn't need to. See nv-tb-egpu-recover.h for the
++ * full declarations.
++ *
++ * Per memory feedback_observability_perturbs_bug, even passive
++ * observability can perturb the bug surface. The instrumentation is
++ * called at lifecycle boundaries only (~6 sites per boot + once per
++ * persistenced retry), not in any hot path, so the perturbation risk
++ * is bounded. If a reproduction changes when this lands, A/B verify
++ * via NVreg / Kconfig gating (P7).
++ */
++
++#include "nv-tb-egpu-diag.h"
++#include "nv-tb-egpu-recover.h"
++#include "nv-linux.h"
++
++#include <linux/io.h>       /* ioremap, ioread32, iounmap */
++#include <linux/pci.h>
++#include <linux/pci_regs.h>
++#include <linux/types.h>
++
++void tb_egpu_diag_dump(nv_linux_state_t *nvl, const char *site)
++{
++    nv_state_t     *nv;
++    struct pci_dev *pdev;
++    struct pci_dev *parent;
++    struct pci_dev *root_pdev;
++    u64             bar0_phys;
++    u32             pmc_boot_0 = 0xdeadbeefu;
++    u32             wpr2_raw   = 0xdeadbeefu;
++    void __iomem   *map_pmc;
++    bool            pmc_ok = false;
++    int             wpr2_rc;
++
++    /* GPU/bridge PCIe + AER state. */
++    u16 gpu_lnksta = 0xffff, br_lnksta = 0xffff;
++    u16 gpu_lnkctl = 0xffff, br_lnkctl = 0xffff;
++    int gpu_aer_pos = 0, br_aer_pos = 0;
++    u32 gpu_uesta = 0, gpu_uemsk = 0, gpu_uesvrt = 0, gpu_cesta = 0, gpu_cemsk = 0;
++    u32 gpu_hdrlog[4] = {0, 0, 0, 0};
++    u32 gpu_aer_capctl = 0;
++    u32 br_uesta = 0, br_uemsk = 0, br_uesvrt = 0, br_cesta = 0, br_cemsk = 0;
++
++    /* Root port AER + DPC (DIAG-AER2 expansion). */
++    int  root_aer_pos = 0;
++    u32  root_uesta = 0, root_uemsk = 0, root_uesvrt = 0;
++    u32  root_cesta = 0, root_cemsk = 0;
++    u32  root_rootcmd = 0, root_rootsta = 0, root_errsrc = 0;
++    bool dpc_present = false;
++    u16  dpc_status = 0, dpc_ctl = 0;
++
++    if (!nvl)
++    {
++        nv_printf(NV_DBG_ERRORS,
++            "tb_egpu [DIAG]: site=%s nvl=NULL — cannot read\n", site);
++        return;
++    }
++
++    nv   = NV_STATE_PTR(nvl);
++    pdev = nvl->pci_dev;
++    bar0_phys = nv->bars[NV_GPU_BAR_INDEX_REGS].cpu_address;
++
++    if (bar0_phys == 0)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "tb_egpu [DIAG]: site=%s bar0_phys=0 — BAR not yet captured; skipping\n",
++            site);
++        return;
++    }
++
++    /* PMC_BOOT_0 — bus-alive canary. */
++    map_pmc = ioremap(bar0_phys, PAGE_SIZE);
++    if (map_pmc)
++    {
++        pmc_boot_0 = ioread32(map_pmc);
++        iounmap(map_pmc);
++        pmc_ok = true;
++    }
++
++    /* WPR2 via the shared P2 helper. */
++    wpr2_rc = tb_egpu_recover_read_wpr2(bar0_phys, &wpr2_raw);
++
++    /* GPU + bridge AER + LnkSta + LnkCtl. */
++    parent    = pdev ? pci_upstream_bridge(pdev) : NULL;
++    root_pdev = pdev ? tb_egpu_recover_walk_to_root_port(pdev) : NULL;
++
++    if (pdev)
++    {
++        (void)pcie_capability_read_word(pdev, PCI_EXP_LNKSTA, &gpu_lnksta);
++        (void)pcie_capability_read_word(pdev, PCI_EXP_LNKCTL, &gpu_lnkctl);
++        tb_egpu_recover_read_aer_full(pdev, &gpu_aer_pos,
++                                      &gpu_uesta, &gpu_uemsk, &gpu_uesvrt,
++                                      &gpu_cesta, &gpu_cemsk,
++                                      gpu_hdrlog, NULL, NULL, NULL);
++        if (gpu_aer_pos)
++        {
++            (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_CAP,
++                                        &gpu_aer_capctl);
++        }
++    }
++    if (parent)
++    {
++        (void)pcie_capability_read_word(parent, PCI_EXP_LNKSTA, &br_lnksta);
++        (void)pcie_capability_read_word(parent, PCI_EXP_LNKCTL, &br_lnkctl);
++        tb_egpu_recover_read_aer_full(parent, &br_aer_pos,
++                                      &br_uesta, &br_uemsk, &br_uesvrt,
++                                      &br_cesta, &br_cemsk,
++                                      NULL, NULL, NULL, NULL);
++    }
++    if (root_pdev)
++    {
++        tb_egpu_recover_read_aer_full(root_pdev, &root_aer_pos,
++                                      &root_uesta, &root_uemsk, &root_uesvrt,
++                                      &root_cesta, &root_cemsk,
++                                      NULL,
++                                      &root_rootcmd, &root_rootsta, &root_errsrc);
++        tb_egpu_recover_read_dpc_state(root_pdev, &dpc_present,
++                                       &dpc_status, &dpc_ctl);
++    }
++
++    /* Primary [DIAG] line: PMC_BOOT_0 + WPR2 + LnkSta/LnkCtl + AER status. */
++    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++        "tb_egpu [DIAG]: site=%-18s bar0=0x%llx "
++        "PMC_BOOT_0=%s%08x WPR2=%s%08x WPR2_up=%s parent=%s "
++        "GPU_LnkSta=0x%04x(Speed=%u Width=x%u Active=%c LBMS=%c LABS=%c) "
++        "GPU_LnkCtl=0x%04x(ASPM=%u ClkPM=%c) "
++        "Br_LnkSta=0x%04x(Speed=%u Width=x%u Active=%c LBMS=%c LABS=%c) "
++        "Br_LnkCtl=0x%04x(ASPM=%u ClkPM=%c) "
++        "GPU_AER_Unc=0x%08x Cor=0x%08x Br_AER_Unc=0x%08x Cor=0x%08x\n",
++        site,
++        (unsigned long long)bar0_phys,
++        pmc_ok ? "0x" : "MAPFAIL:", pmc_boot_0,
++        (wpr2_rc == 0) ? "0x" : "MAPFAIL:", wpr2_raw,
++        ((wpr2_raw & TB_EGPU_RECOVER_WPR2_VAL_MASK) != 0) ? "YES" : "no",
++        parent ? pci_name(parent) : "NULL",
++        gpu_lnksta,
++        (gpu_lnksta & PCI_EXP_LNKSTA_CLS),
++        (gpu_lnksta & PCI_EXP_LNKSTA_NLW) >> 4,
++        (gpu_lnksta & PCI_EXP_LNKSTA_DLLLA) ? 'Y' : 'N',
++        (gpu_lnksta & PCI_EXP_LNKSTA_LBMS) ? '1' : '0',
++        (gpu_lnksta & PCI_EXP_LNKSTA_LABS) ? '1' : '0',
++        gpu_lnkctl,
++        (gpu_lnkctl & PCI_EXP_LNKCTL_ASPMC),
++        (gpu_lnkctl & PCI_EXP_LNKCTL_CLKREQ_EN) ? '1' : '0',
++        br_lnksta,
++        (br_lnksta & PCI_EXP_LNKSTA_CLS),
++        (br_lnksta & PCI_EXP_LNKSTA_NLW) >> 4,
++        (br_lnksta & PCI_EXP_LNKSTA_DLLLA) ? 'Y' : 'N',
++        (br_lnksta & PCI_EXP_LNKSTA_LBMS) ? '1' : '0',
++        (br_lnksta & PCI_EXP_LNKSTA_LABS) ? '1' : '0',
++        br_lnkctl,
++        (br_lnkctl & PCI_EXP_LNKCTL_ASPMC),
++        (br_lnkctl & PCI_EXP_LNKCTL_CLKREQ_EN) ? '1' : '0',
++        gpu_uesta, gpu_cesta, br_uesta, br_cesta);
++
++    /*
++     * [DIAG-AER] follow-up: GPU-side mask, capability/control, and the
++     * Header Log of the first AER-triggering TLP. Only emitted when GPU
++     * AER status is non-zero — keeps clean-boot logs uncluttered.
++     */
++    if (gpu_aer_pos && (gpu_uesta || gpu_cesta))
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "tb_egpu [DIAG-AER]: site=%-18s "
++            "GPU_AER_UncMsk=0x%08x CapCtl=0x%08x "
++            "HdrLog=%08x_%08x_%08x_%08x "
++            "FirstErrPtr=%u\n",
++            site,
++            gpu_uemsk, gpu_aer_capctl,
++            gpu_hdrlog[0], gpu_hdrlog[1], gpu_hdrlog[2], gpu_hdrlog[3],
++            (gpu_aer_capctl & 0x1f));
++    }
++
++    /*
++     * [DIAG-AER2] follow-up: root port AER + DPC + bridge masks. Always
++     * emitted (cheap; one log line). Distinguishes the GPU/bridge view
++     * from the actual host root port — needed because AORUS hub
++     * topologies place a TB hub upstream port between the bridge and
++     * the true root.
++     */
++    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++        "tb_egpu [DIAG-AER2]: site=%-18s "
++        "Br_UncMsk=0x%08x Br_CorMsk=0x%08x "
++        "Root=%s "
++        "Root_UESta=0x%08x Root_UEMsk=0x%08x Root_CESta=0x%08x Root_CEMsk=0x%08x "
++        "Root_RootSta=0x%08x ErrSrc=0x%08x "
++        "DPC=%s\n",
++        site,
++        br_uemsk, br_cemsk,
++        root_pdev ? pci_name(root_pdev) : "NULL",
++        root_uesta, root_uemsk, root_cesta, root_cemsk,
++        root_rootsta, root_errsrc,
++        dpc_present ? "(see follow-up)" : "absent");
++    if (dpc_present)
++    {
++        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++            "tb_egpu [DIAG-AER2]: site=%-18s DPC Status=0x%04x Ctl=0x%04x\n",
++            site, dpc_status, dpc_ctl);
++    }
++
++    (void)gpu_uesvrt; (void)br_uesvrt; (void)root_uesvrt; (void)root_rootcmd;
++}
+diff --git a/kernel-open/nvidia/nv-tb-egpu-diag.h b/kernel-open/nvidia/nv-tb-egpu-diag.h
+new file mode 100644
+index 0000000..b47a611
+--- /dev/null
++++ b/kernel-open/nvidia/nv-tb-egpu-diag.h
+@@ -0,0 +1,52 @@
++/*
++ * SPDX-FileCopyrightText: nvidia-driver-injector contributors
++ * SPDX-License-Identifier: MIT
++ *
++ * nv-tb-egpu-diag.h — diagnostic telemetry surface (cluster P6).
++ *
++ * Companion to the close-path observability cluster (P4). Where P4
++ * captures state at close-side lifecycle points (always-on, load-bearing
++ * for the close-path-bug mitigation), this cluster captures rich
++ * extended state at OPEN-side lifecycle points:
++ *
++ *   - probe-end          end of nv_pci_probe
++ *   - startdev-entry     entry of nv_start_device
++ *   - pre-rmInit         before rm_init_adapter
++ *   - post-rmInit-FAIL   after rm_init_adapter failure
++ *   - post-rmInit-OK     after rm_init_adapter success
++ *
++ * Plus one wired call site in P2's err_handler:
++ *
++ *   - mmio-enabled       inside nv_pci_mmio_enabled
++ *
++ * Captured state per site (one dmesg line, plus an AER-detail line when
++ * AER status is non-zero):
++ *
++ *   PMC_BOOT_0 (BAR0+0) and WPR2 (BAR0+0x88a828) via temporary ioremap;
++ *   PCIe LnkSta + LnkCtl on GPU and parent bridge;
++ *   AER UncStatus / CorStatus on GPU and parent bridge;
++ *   Header Log + UncMask + ASPM + LBMS/LABS bits when AER fired;
++ *   Root port AER + DPC state (the DIAG-AER2 expansion).
++ *
++ * All capture is passive — PCI config-space reads + temporary ioremap.
++ * No DMA, no register writes. Per memory feedback_observability_perturbs_bug,
++ * even passive observability can perturb the bug surface; A/B verify if
++ * your reproduction changes when this lands.
++ *
++ * Default visibility: this cluster currently ships always-on (every
++ * lifecycle point dumps). Kconfig gating (CONFIG_NV_TB_EGPU_DIAG=n by
++ * default) lands in cluster P7 alongside the build-metadata work, per
++ * docs/patch-refactor-status.md.
++ *
++ * See nv-tb-egpu-diag.c for implementation notes.
++ */
++
++#ifndef _NV_TB_EGPU_DIAG_H_
++#define _NV_TB_EGPU_DIAG_H_
++
++struct nv_linux_state_s;
++typedef struct nv_linux_state_s nv_linux_state_t;
++
++void tb_egpu_diag_dump(nv_linux_state_t *nvl, const char *site);
++
++#endif /* _NV_TB_EGPU_DIAG_H_ */
+diff --git a/kernel-open/nvidia/nv-tb-egpu-recover.c b/kernel-open/nvidia/nv-tb-egpu-recover.c
+index f0a1984..eff789f 100644
+--- a/kernel-open/nvidia/nv-tb-egpu-recover.c
++++ b/kernel-open/nvidia/nv-tb-egpu-recover.c
+@@ -191,7 +191,7 @@ void tb_egpu_recover_emit_uevent(struct pci_dev *pdev, const char *state)
+  * -errno on ioremap failure. The mapping is page-bounded and released
+  * before return — no persistent state.
+  */
+-static int tb_egpu_recover_read_wpr2(u64 bar0_phys, u32 *raw_out)
++int tb_egpu_recover_read_wpr2(u64 bar0_phys, u32 *raw_out)
+ {
+     void __iomem *tmp_map;
+     u64           page_aligned;
+@@ -231,7 +231,7 @@ static int tb_egpu_recover_read_wpr2(u64 bar0_phys, u32 *raw_out)
+  * pcie_capability_* helpers). No state mutation.
+  * --------------------------------------------------------------------- */
+ 
+-static struct pci_dev *tb_egpu_recover_walk_to_root_port(struct pci_dev *start)
++struct pci_dev *tb_egpu_recover_walk_to_root_port(struct pci_dev *start)
+ {
+     struct pci_dev *p = start;
+     int hops = 0;
+@@ -246,7 +246,7 @@ static struct pci_dev *tb_egpu_recover_walk_to_root_port(struct pci_dev *start)
+     return NULL;
+ }
+ 
+-static void tb_egpu_recover_read_dpc_state(struct pci_dev *pdev,
++void tb_egpu_recover_read_dpc_state(struct pci_dev *pdev,
+                                            bool *present_out,
+                                            u16 *dpc_status_out,
+                                            u16 *dpc_ctl_out)
+@@ -271,7 +271,7 @@ static void tb_egpu_recover_read_dpc_state(struct pci_dev *pdev,
+     *dpc_status_out = stat;
+ }
+ 
+-static void tb_egpu_recover_read_aer_full(struct pci_dev *pdev,
++void tb_egpu_recover_read_aer_full(struct pci_dev *pdev,
+                                           int *pos_out,
+                                           u32 *uesta, u32 *uemsk, u32 *uesvrt,
+                                           u32 *cesta, u32 *cemsk,
+diff --git a/kernel-open/nvidia/nv-tb-egpu-recover.h b/kernel-open/nvidia/nv-tb-egpu-recover.h
+index bf025ac..8763f45 100644
+--- a/kernel-open/nvidia/nv-tb-egpu-recover.h
++++ b/kernel-open/nvidia/nv-tb-egpu-recover.h
+@@ -293,4 +293,41 @@ void tb_egpu_close_diag(nv_linux_state_t *nvl,
+ void tb_egpu_close_diag_pdev(struct pci_dev *pdev, const char *site);
+ struct pci_dev *tb_egpu_get_gpu_pdev(void);
+ 
++/*
++ * Project-internal register-read helpers. Defined in nv-tb-egpu-recover.c
++ * and re-used by nv-tb-egpu-diag.c (cluster P6) so the diag dump doesn't
++ * have to duplicate the WPR2 / PCIe-walker / AER / DPC read patterns.
++ *
++ * All four are passive: PCI config-space reads + temporary ioremap
++ * (WPR2 only). No DMA, no register writes. Module-internal linkage —
++ * not EXPORT_SYMBOL'd.
++ *
++ * tb_egpu_recover_read_wpr2 — reads the GB100/GB202 published WPR2
++ *   status register via temporary ioremap. Returns 0 on success or
++ *   -errno on map failure; raw value stored in *raw_out.
++ *
++ * tb_egpu_recover_walk_to_root_port — walks pci_upstream_bridge until
++ *   a PCI_EXP_TYPE_ROOT_PORT device is found, bounded to 8 hops.
++ *   Returns NULL if not found within the hop bound.
++ *
++ * tb_egpu_recover_read_dpc_state — reads DPC capability presence,
++ *   Status, and Control registers for the given pdev.
++ *
++ * tb_egpu_recover_read_aer_full — reads the full AER register set
++ *   (Uncor/Cor Status, Masks, Severity, Header Log, Root Status/Cmd)
++ *   for the given pdev. Twelve output pointers are passed by reference
++ *   to avoid repacking — caller can ignore any subset by passing NULL.
++ */
++int tb_egpu_recover_read_wpr2(u64 bar0_phys, u32 *raw_out);
++struct pci_dev *tb_egpu_recover_walk_to_root_port(struct pci_dev *start);
++void tb_egpu_recover_read_dpc_state(struct pci_dev *pdev,
++                                    bool *present_out,
++                                    u16 *dpc_status_out,
++                                    u16 *dpc_ctl_out);
++void tb_egpu_recover_read_aer_full(struct pci_dev *pdev, int *pos_out,
++                                   u32 *uesta, u32 *uemsk, u32 *uesvrt,
++                                   u32 *cesta, u32 *cemsk,
++                                   u32 hdrlog[4],
++                                   u32 *rootcmd, u32 *rootsta, u32 *errsrc);
++
+ #endif /* _NV_TB_EGPU_RECOVER_H_ */
+diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
+index 63a515e..7202d3c 100644
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -56,6 +56,7 @@
+ #include "nv-dmabuf.h"
+ #include "nv-caps-imex.h"
+ #include "nv-tb-egpu-recover.h"  /* tb_egpu recovery (cluster P2) */
++#include "nv-tb-egpu-diag.h"     /* tb_egpu DIAG telemetry (cluster P6) */
+ 
+ /*
+  * Commit aefb2f2e619b ("x86/bugs: Rename CONFIG_RETPOLINE =>
+@@ -1387,6 +1388,13 @@ int nv_start_device(nv_state_t *nv, nvidia_stack_t *sp)
+     NvBool remove_numa_memory_kthread_init = NV_FALSE;
+     NvBool power_ref = NV_FALSE;
+ 
++    /*
++     * tb_egpu DIAG telemetry (cluster P6): startdev-entry site. Second
++     * lifecycle point. Captures hardware state at the start of device
++     * bring-up, before any of the per-open init runs.
++     */
++    tb_egpu_diag_dump(nvl, "startdev-entry");
++
+     rc = nv_get_rsync_info();
+     if (rc != 0)
+     {
+@@ -1523,11 +1531,27 @@ int nv_start_device(nv_state_t *nv, nvidia_stack_t *sp)
+         }
+     }
+ 
++    /*
++     * tb_egpu DIAG telemetry (cluster P6): pre-rmInit site. Third
++     * lifecycle point. Captures state immediately before
++     * rm_init_adapter — the destabilising step. Diff vs
++     * post-rmInit-{OK,FAIL} reveals what RM init does to firmware
++     * state across success and failure paths.
++     */
++    tb_egpu_diag_dump(nvl, "pre-rmInit");
++
+     if (!rm_init_adapter(sp, nv))
+     {
+         NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
+                       "rm_init_adapter failed, device minor number %d\n",
+                       nvl->minor_num);
++        /*
++         * tb_egpu DIAG telemetry (cluster P6): post-rmInit-FAIL site.
++         * Captures the firmware-state-after-failure for the recovery
++         * state machine's WPR2 stuck check (which fires next) to
++         * cross-reference against.
++         */
++        tb_egpu_diag_dump(nvl, "post-rmInit-FAIL");
+         /*
+          * tb_egpu recovery (cluster P2): post-rmInit-FAIL trigger.
+          * Reads WPR2; if stuck (and gates pass) schedules an async
+@@ -1540,6 +1564,14 @@ int nv_start_device(nv_state_t *nv, nvidia_stack_t *sp)
+         goto failed_release_irq;
+     }
+ 
++    /*
++     * tb_egpu DIAG telemetry (cluster P6): post-rmInit-OK site. Fifth
++     * lifecycle point. Captures firmware state on the success path so
++     * we have a known-good reference for the failure-path snapshot
++     * comparison.
++     */
++    tb_egpu_diag_dump(nvl, "post-rmInit-OK");
++
+     /*
+      * tb_egpu recovery (cluster P2): verified end-to-end recovery —
+      * reset attempt_count so the H1 MaxAttempts gate measures
+diff --git a/kernel-open/nvidia/nvidia-sources.Kbuild b/kernel-open/nvidia/nvidia-sources.Kbuild
+index eb237e8..03d4c1e 100644
+--- a/kernel-open/nvidia/nvidia-sources.Kbuild
++++ b/kernel-open/nvidia/nvidia-sources.Kbuild
+@@ -14,6 +14,7 @@ NVIDIA_SOURCES += nvidia/nv-pci.c
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-aer.c
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-qwd.c
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-recover.c
++NVIDIA_SOURCES += nvidia/nv-tb-egpu-diag.c
+ NVIDIA_SOURCES += nvidia/nv-dmabuf.c
+ NVIDIA_SOURCES += nvidia/nv-nano-timer.c
+ NVIDIA_SOURCES += nvidia/nv-acpi.c
+-- 
+2.54.0
+
