@@ -141,36 +141,17 @@ else
     fail_ "bridge-link-cap.service: not installed"
 fi
 
-if systemctl cat nvidia-driver-injector-gpu-engage.service >/dev/null 2>&1; then
-    if systemctl is-enabled nvidia-driver-injector-gpu-engage.service >/dev/null 2>&1; then
-        ok "gpu-engage.service: enabled (will run at next boot)"
+# Persistence mode is now engaged from inside the injector container's
+# entrypoint (nvidia-smi -pm 1 after bind), not via a Layer-1 service.
+# We verify the runtime effect here; the container-side check is in
+# section 12.
+if command -v nvidia-smi >/dev/null 2>&1; then
+    pm=$(nvidia-smi --query-gpu=persistence_mode --format=csv,noheader 2>/dev/null | head -1)
+    if [[ "$pm" == "Enabled" ]]; then
+        ok "GPU persistence_mode: Enabled (GSP + thermal subsystem engaged — set by injector container)"
     else
-        fail_ "gpu-engage.service: NOT enabled"
+        warn "GPU persistence_mode: ${pm:-unknown} — expected Enabled; injector container's nvidia-smi -pm 1 may have failed (idle power will be ~63 W instead of ~22 W)"
     fi
-    if systemctl is-active nvidia-driver-injector-gpu-engage.service >/dev/null 2>&1; then
-        ok "gpu-engage.service: active (persistence mode engaged)"
-    else
-        fail_ "gpu-engage.service: NOT active"
-    fi
-    # Verify ordering — must be After=docker.service so the injector
-    # container has finished binding nvidia.ko before we open /dev/nvidia0.
-    after=$(systemctl show -p After nvidia-driver-injector-gpu-engage.service --value 2>/dev/null)
-    if grep -q 'docker.service' <<<"$after"; then
-        ok "gpu-engage.service: ordered After=docker.service"
-    else
-        warn "gpu-engage.service: missing After=docker.service (may run before /dev/nvidia0 exists)"
-    fi
-    # Verify the runtime effect — persistence_mode should be Enabled.
-    if command -v nvidia-smi >/dev/null 2>&1; then
-        pm=$(nvidia-smi --query-gpu=persistence_mode --format=csv,noheader 2>/dev/null | head -1)
-        if [[ "$pm" == "Enabled" ]]; then
-            ok "GPU persistence_mode: Enabled (GSP + thermal subsystem engaged)"
-        else
-            warn "GPU persistence_mode: ${pm:-unknown} — expected Enabled; idle power will be ~63 W instead of ~22 W"
-        fi
-    fi
-else
-    fail_ "gpu-engage.service: not installed"
 fi
 
 # ============================================================================
