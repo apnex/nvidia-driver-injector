@@ -14,8 +14,8 @@ Use this as the entry point when resuming work in a fresh session.
 | | |
 |---|---|
 | **Phase** | 2 of 5 |
-| **Patches landed** | P5 (commit `b2891e5`), P1 (commit `f5d0900`) — 2 of 6 |
-| **Patches pending** | P3, P2, P4, P6 + metadata (P7) |
+| **Patches landed** | P5 (commit `b2891e5`), P1 (commit `f5d0900`), P3 (commit `a19c1ac`) — 3 of 6 |
+| **Patches pending** | P2, P4, P6 + metadata (P7) |
 | **Branch** | `refactor/p1-p6` in `/root/nvidia-driver-injector` |
 | **Legacy patches** | All 29 retained at `patches/legacy/` (fallback during transition) |
 | **Container image tag** | `apnex/nvidia-driver-injector:refactor-rc1` (refactor build); `:595.71.05-aorus.12` (legacy production build) |
@@ -112,26 +112,32 @@ patches/0007-tb-egpu-version-mark-and-kbuild.patch     (build metadata)
 | Validation | git apply --check vs vanilla OK; P5 stacks cleanly on top; container build OK |
 | Open items | (1) `TB_EGPU_LOG_ONCE` is per-site latch (matches legacy); user confirmed. (2) `rs_server.c` has two NV_ASSERT sites; legacy + subagent kept relaxed scope to the second only (recursive site unreachable on GPU-lost path). |
 
-### P3 — Q-watchdog Mode B detector (PENDING — write NEXT)
+### P3 — Q-watchdog Mode B detector (DONE)
 
 | | |
 |---|---|
-| Estimated patch file | `patches/0004-tb-egpu-qwatchdog.patch` |
-| Legacy source | 0014, 0015 (kthread + sysfs) |
-| Estimated final size | ~500 lines |
-| Dependencies | P1 (`tb_egpu_check_dead_bus`, `TB_EGPU_LOG_ONCE`) |
-| Key changes | kthread name rename `aorus-qwd-<bdf>` → `tb-egpu-qwd-<bdf>`; sysfs attr group consolidation; cross-reference docs/lever-catalog.md |
-| Open question | Should sysfs attrs go under `/sys/bus/pci/devices/<bdf>/tb_egpu_qwd_*` (per-attr) or `tb_egpu_qwd/<attr>` (kobj subdir)? Inventory recommends per-attr for simplicity. |
+| Commit | `a19c1ac` |
+| Patch file | `patches/0004-tb-egpu-qwatchdog.patch` (673 lines incl. header) |
+| Legacy source | 0014, 0015, S3 portion of 0023 |
+| Net code | +515 lines (new files +485, edits +30) |
+| New files | `kernel-open/nvidia/nv-tb-egpu-qwd.{c,h}` |
+| Module params | `NVreg_TbEgpuQwdEnable`, `NVreg_TbEgpuQwdIntervalMs` |
+| kthread name | `tb-egpu-qwd-<bus><slot>` |
+| Sysfs surface | per-attr (under `/sys/bus/pci/devices/<bdf>/`); registered via single `attribute_group` + `sysfs_create_group` |
+| Sysfs files | `tb_egpu_qwd_cycles`, `tb_egpu_qwd_detections`, `tb_egpu_qwd_last_detection_jiffies`, `tb_egpu_qwd_last_pmc_boot_0`, `tb_egpu_qwd_last_aer_summary` |
+| Validation | git apply --check vs vanilla 595.71.05 with P1+P5 stacked OK; container build (refactor-rc1) OK |
+| Cross-cluster note | **P2 must add one line to `tb_egpu_qwd_thread` detect branch**: `tb_egpu_dump_aer_trigger_event(nvl->pci_dev, "qwd-detect", &qwd->last_aer);`. Until then, `last_aer.valid` stays 0 and `last_aer_summary` reads `(no detection event yet)`. |
+| Open items | (1) README.md lines 236 + 238 still reference old sysfs prefix `tb_egpu_qwatchdog` and old kthread name `aorus-qwd-0400`; updates scoped to Phase 4. (2) Sysfs path layout: chose per-attr (decision #3 below). |
 
-### P2 — PCIe error handlers + Lever M-recover (PENDING — biggest)
+### P2 — PCIe error handlers + Lever M-recover (PENDING — biggest, write NEXT)
 
 | | |
 |---|---|
 | Estimated patch file | `patches/0003-tb-egpu-pcie-error-handlers-recover.patch` |
-| Legacy source | 0007, 0016, 0017, 0024, 0026, 0027, 0028 |
+| Legacy source | 0007, 0016, 0017, 0024, 0026, 0027, 0028, **+ S1+S2 portions of 0023** (AER capture helper + DIAG-AER2) |
 | Estimated final size | ~1,400 lines (largest of all six) |
-| Dependencies | P1 (crash-safety guards; recovery state machine needs them) |
-| Key changes | State machine consolidation; sysfs `tb_egpu_recover_*` attrs; H1/H2 gate result extraction (inventory item — duplicated between trigger and `nv_pci_error_detected`) |
+| Dependencies | P1 (crash-safety guards; recovery state machine needs them); P3 (must add one-line call into `tb_egpu_qwd_thread` to populate `last_aer`) |
+| Key changes | State machine consolidation; sysfs `tb_egpu_recover_*` attrs; H1/H2 gate result extraction (inventory item — duplicated between trigger and `nv_pci_error_detected`); **`tb_egpu_dump_aer_trigger_event()` helper** (legacy 0023 S1) + DIAG-AER2 expansion (legacy 0023 S2) + the one-line invocation inside `tb_egpu_qwd_thread`'s detect latch (writes `qwd->last_aer`) |
 | Strategy | Delegate to subagent like P1; review carefully due to size + ordering invariants |
 
 ### P4 — close-path safety (PENDING)
@@ -308,7 +314,7 @@ If pursued: P1 is the most upstream-ready (bug #979 core fix); P5 is also reason
 
 1. **`TB_EGPU_LOG_ONCE` semantics** — DECIDED 2026-05-12: per-site latch (matches legacy). Each call site gets its own function-scope-static.
 2. **`rs_server.c` two NV_ASSERT sites** — DECIDED 2026-05-12: kept legacy scope (relaxed only the in-place call, recursive site unreachable on GPU-lost path).
-3. **P3 sysfs path layout** — pending: per-attr (`tb_egpu_qwd_*`) vs kobj subdir (`tb_egpu_qwd/<attr>`). Lean per-attr per inventory.
+3. **P3 sysfs path layout** — DECIDED 2026-05-12: per-attr at the device level, but registered as a single `static const struct attribute_group` via `sysfs_create_group` (consolidates the 5 legacy `device_create_file` pairs to one init + one teardown call).
 4. **Kconfig wiring** — DEFERRED to end of Phase 2 (mechanical once all 6 patches exist).
 5. **Patch 0019 gap in legacy series** — irrelevant; legacy is going away.
 6. **Patch 0009 (Lever P-probe)** — DECIDED: drop entirely (purely investigation-period probes).
@@ -366,4 +372,5 @@ sed -n '/^### P3 /,/^### P/p' /root/nvidia-driver-injector/docs/patch-refactor-i
 | 2026-05-12 | initial | Phase 1 | Inventory doc produced (810 lines) |
 | 2026-05-12 | continued | Phase 2 (1/6) | P5 written + committed (b2891e5); naming rename ("Windows" → spec-justified) |
 | 2026-05-12 | continued | Phase 2 (2/6) | P1 written + committed (f5d0900); 6 consolidation wins; semantic correction |
-| _next_ | resume | Phase 2 (3/6) | P3 — Q-watchdog kthread + sysfs |
+| 2026-05-12 | continued | Phase 2 (3/6) | P3 written + committed (a19c1ac); legacy 0023 split — P3 owns S3 storage + sysfs, P2 will own AER-capture helper + call site |
+| _next_ | resume | Phase 2 (4/6) | P2 — PCIe error handlers + Lever M-recover (biggest; includes the S1+S2 portions of legacy 0023 and the one-line wire-in to P3's qwd detect path) |
