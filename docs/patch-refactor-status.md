@@ -14,8 +14,8 @@ Use this as the entry point when resuming work in a fresh session.
 | | |
 |---|---|
 | **Phase** | 2 of 5 |
-| **Patches landed** | P5 (`b2891e5`), P1 (`f5d0900`), P3 (`a19c1ac`), P2 (`e4cb622`), P4 (`52b43f0`) — 5 of 6 |
-| **Patches pending** | P6 + metadata (P7) |
+| **Patches landed** | P5 (`b2891e5`), P1 (`f5d0900`), P3 (`a19c1ac`), P2 (`e4cb622`), P4 (`52b43f0`), P6 (`6d52a06`) — **6 of 6 ✓** |
+| **Patches pending** | P7 (build metadata + Kconfig wiring) |
 | **Branch** | `refactor/p1-p6` in `/root/nvidia-driver-injector` |
 | **Legacy patches** | All 29 retained at `patches/legacy/` (fallback during transition) |
 | **Container image tag** | `apnex/nvidia-driver-injector:refactor-rc1` (refactor build); `:595.71.05-aorus.12` (legacy production build) |
@@ -164,27 +164,34 @@ patches/0007-tb-egpu-version-mark-and-kbuild.patch     (build metadata)
 | Cross-cluster | `tb_egpu_close_diag` (RM-side) uses its own `close_diag_pdev` for state capture — does NOT depend on P6's `recover_diag_dump`. P4 lands fully functional without P6. P4 also promotes P2's `tb_egpu_dump_aer_trigger_event` to `EXPORT_SYMBOL_GPL`. |
 | Validation | git apply --check vs vanilla 595.71.05 with P1+P5+P3+P2 stacked OK; container build (refactor-rc1) OK |
 
-### P6 — Diagnostic telemetry surface (PENDING — Kconfig-gated)
+### P6 — Diagnostic telemetry surface (DONE)
 
 | | |
 |---|---|
-| Estimated patch file | `patches/0006-tb-egpu-diag-telemetry.patch` |
-| Legacy source | 0009 (DROP — pure investigation probes), 0018 (introduces `tb_egpu_lever_m_diag_dump` — rename to `tb_egpu_recover_diag_dump`), 0020, 0021, **S2 portion of 0023** (DIAG-AER2 expansion — deferred here from P2), diag parts of 0029 (re-introduce diag_dump call in mmio_enabled), 0030 |
-| Estimated final size | ~600 lines (slight bump from S2 deferral) |
-| Dependencies | P2 (telemetry hooks attach to recovery state machine; diag_dump call sites in err_handlers) |
-| Gating | `#ifdef CONFIG_NV_TB_EGPU_DIAG` |
-| Drop list | Patch 0009 (Lever P-probe) deleted entirely per inventory recommendation (purely investigation-period probes) |
-| Inherited scope (from P2 deviation) | Introduce `tb_egpu_recover_diag_dump` (legacy 0018), apply S2 (DIAG-AER2) expansion (legacy 0023 S2), re-introduce diag_dump call inside P2's mmio_enabled callback. P2 already declared `tb_egpu_recover_walk_to_root_port`, `tb_egpu_recover_read_dpc_state`, `tb_egpu_recover_read_aer_full` — reusable here. |
+| Commit | `6d52a06` |
+| Patch file | `patches/0006-tb-egpu-diag-telemetry.patch` (611 lines incl. header) |
+| Legacy source | 0018, 0020, 0021, S2 portion of 0023 (DIAG-AER2 expansion); err_handlers parts of 0029 reintroduce diag_dump call. Legacy 0009 (Lever P-probe) DROPPED entirely. |
+| Net code | +364 / -6 across 7 files |
+| New files | `kernel-open/nvidia/nv-tb-egpu-diag.{c,h}` (223 + 52 lines) |
+| Function | `tb_egpu_diag_dump(nvl, site)` |
+| Call sites | 6 — probe-end (nv-pci.c), startdev-entry / pre-rmInit / post-rmInit-FAIL / post-rmInit-OK (nv.c), mmio-enabled (re-introduced in nv-pci.c — P2 had to drop pending P6) |
+| Log line classes | `[DIAG]` (always), `[DIAG-AER]` (GPU AER status non-zero only), `[DIAG-AER2]` (root port AER + DPC, always; cheap) |
+| Cohesion wins | (1) new file pair separates always-load-bearing recovery from observational diag; (2) reuses 4 P2 helpers (read_wpr2, walk_to_root_port, read_dpc_state, read_aer_full) via static-to-module-internal promotion — zero code duplication; (3) inventory's aspirational rename to `tb_egpu_diag_dump_pdev` rejected (would have duplicated P4's `tb_egpu_close_diag_pdev` — as-shipped name wins); (4) inter-commit history comments from legacy 0018 stripped |
+| Cross-cluster | Modifies P2: 4 helper `static` qualifiers lifted to module-internal linkage; declarations added to recover.h. Modifies P2: re-introduces `tb_egpu_diag_dump` call inside `nv_pci_mmio_enabled` (P2 forecast this). |
+| Kconfig gating | **NOT in P6.** P6 ships always-on. Deferred to P7 per locked decision "Kconfig wiring deferred to end of Phase 2". |
+| Validation | git apply --check vs vanilla 595.71.05 with P1+P5+P3+P2+P4 stacked OK; container build (refactor-rc1) OK |
 
-### P7 — version mark + kbuild (PENDING — trivial)
+### P7 — build metadata + Kconfig wiring (PENDING — write NEXT)
 
 | | |
 |---|---|
 | Estimated patch file | `patches/0007-tb-egpu-version-mark-and-kbuild.patch` |
-| Legacy source | 0005, 0025 |
-| Estimated final size | ~16 lines |
-| Dependencies | none |
-| Strategy | Hand-write at end of Phase 2; combine the two metadata patches into one |
+| Legacy source | 0005 (NVIDIA_VERSION bump), 0025 (Kbuild version-mk include) |
+| Estimated final size | ~50-100 lines (small build-metadata + Kconfig wiring) |
+| Dependencies | All 6 clusters landed |
+| Strategy | Hand-write; combines (a) the two legacy metadata patches and (b) Kconfig wiring per inventory Section 4 |
+| Kconfig wiring (locked-decision deferred from P6) | `CONFIG_NV_TB_EGPU` (y) gates P1-P5; `CONFIG_NV_TB_EGPU_DIAG` (n) gates P6 diag content (`nv-tb-egpu-diag.c` source line + 6 call sites + the DIAG-only sysfs files from P3 last_aer_summary / last_pmc_boot_0 / last_detection_jiffies). NVIDIA's kernel-open uses Makefile conditionals — fallback approach per inventory Section 4 (CONFIG_NV_TB_EGPU ?= y in Kbuild). |
+| Version-mk handling | Single Kbuild include replaces both legacy patches (0005's manual `-DNV_VERSION_STRING=` literal AND 0025's include mechanism). Net: one minimal Kbuild change. |
 
 ---
 
@@ -391,4 +398,5 @@ sed -n '/^### P3 /,/^### P/p' /root/nvidia-driver-injector/docs/patch-refactor-i
 | 2026-05-12 | continued | Phase 2 (3.5/6) | Renumber chore (aacf661): P3 file 0004→0003, P2 reserved as 0004 (correct apply-time dependency direction after Option-1 split) |
 | 2026-05-12 | continued | Phase 2 (4/6) | P2 written via subagent + committed (e4cb622); 5 consolidation wins; S2/DIAG-AER2 deferred to P6 (host function lives in legacy 0018 = P6 territory); gate helper takes pdev |
 | 2026-05-12 | continued | Phase 2 (5/6) | P4 written + committed (52b43f0); UVM-side helpers moved to new nv-tb-egpu-uvm.{c,h} pair (cohesion win); hardcoded BDF replaced by walker; close_diag uses pdev variant — no P6 dependency |
-| _next_ | resume | Phase 2 (6/6) | P6 — Kconfig-gated DIAG telemetry: introduce `tb_egpu_recover_diag_dump` (legacy 0018), apply S2/DIAG-AER2 expansion (legacy 0023 S2), re-introduce `diag_dump` call inside P2's `mmio_enabled` callback; plus 0020 / 0021 contents; drop legacy 0009 |
+| 2026-05-12 | continued | Phase 2 (6/6 ✓) | P6 written + committed (6d52a06); new nv-tb-egpu-diag.{c,h} pair; reuses 4 P2 helpers via static-to-module-internal promotion; S2/DIAG-AER2 expansion landed; mmio-enabled diag_dump re-introduction landed; legacy 0009 dropped. **Phase 2 complete — all 6 cluster patches in.** |
+| _next_ | resume | P7 + Phase 3 | P7 — build metadata + Kconfig wiring (consolidates legacy 0005+0025; adds CONFIG_NV_TB_EGPU and CONFIG_NV_TB_EGPU_DIAG per inventory Section 4). Then Phase 3 stack validation per uninstall/reinstall cycle. |
