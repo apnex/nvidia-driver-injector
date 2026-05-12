@@ -13,9 +13,9 @@ Use this as the entry point when resuming work in a fresh session.
 
 | | |
 |---|---|
-| **Phase** | 2 of 5 |
-| **Patches landed** | P5 (`b2891e5`), P1 (`f5d0900`), P3 (`a19c1ac`), P2 (`e4cb622`), P4 (`52b43f0`), P6 (`6d52a06`) — **6 of 6 ✓** |
-| **Patches pending** | P7 (build metadata + Kconfig wiring) |
+| **Phase** | 2 ✓ — ready for Phase 3 |
+| **Patches landed** | P5 (`b2891e5`), P1 (`f5d0900`), P3 (`a19c1ac`), P2 (`e4cb622`), P4 (`52b43f0`), P6 (`6d52a06`), P7 (`16921cb`) — **7 of 7 ✓** |
+| **Patches pending** | none |
 | **Branch** | `refactor/p1-p6` in `/root/nvidia-driver-injector` |
 | **Legacy patches** | All 29 retained at `patches/legacy/` (fallback during transition) |
 | **Container image tag** | `apnex/nvidia-driver-injector:refactor-rc1` (refactor build); `:595.71.05-aorus.12` (legacy production build) |
@@ -181,17 +181,20 @@ patches/0007-tb-egpu-version-mark-and-kbuild.patch     (build metadata)
 | Kconfig gating | **NOT in P6.** P6 ships always-on. Deferred to P7 per locked decision "Kconfig wiring deferred to end of Phase 2". |
 | Validation | git apply --check vs vanilla 595.71.05 with P1+P5+P3+P2+P4 stacked OK; container build (refactor-rc1) OK |
 
-### P7 — build metadata + Kconfig wiring (PENDING — write NEXT)
+### P7 — build metadata + Kconfig wiring (DONE)
 
 | | |
 |---|---|
-| Estimated patch file | `patches/0007-tb-egpu-version-mark-and-kbuild.patch` |
+| Commit | `16921cb` |
+| Patch file | `patches/0007-tb-egpu-version-mark-and-kbuild.patch` (219 lines incl. header) |
 | Legacy source | 0005 (NVIDIA_VERSION bump), 0025 (Kbuild version-mk include) |
-| Estimated final size | ~50-100 lines (small build-metadata + Kconfig wiring) |
-| Dependencies | All 6 clusters landed |
-| Strategy | Hand-write; combines (a) the two legacy metadata patches and (b) Kconfig wiring per inventory Section 4 |
-| Kconfig wiring (locked-decision deferred from P6) | `CONFIG_NV_TB_EGPU` (y) gates P1-P5; `CONFIG_NV_TB_EGPU_DIAG` (n) gates P6 diag content (`nv-tb-egpu-diag.c` source line + 6 call sites + the DIAG-only sysfs files from P3 last_aer_summary / last_pmc_boot_0 / last_detection_jiffies). NVIDIA's kernel-open uses Makefile conditionals — fallback approach per inventory Section 4 (CONFIG_NV_TB_EGPU ?= y in Kbuild). |
-| Version-mk handling | Single Kbuild include replaces both legacy patches (0005's manual `-DNV_VERSION_STRING=` literal AND 0025's include mechanism). Net: one minimal Kbuild change. |
+| Net code | +61 / -2 across 4 files |
+| Version | NVIDIA_VERSION bumped to `595.71.05-aorus.13` |
+| Single source of truth | `kernel-open/Kbuild` now `include $(src)/../version.mk` and uses `$(NVIDIA_VERSION)` in `-DNV_VERSION_STRING` — Kbuild/version.mk drift impossible |
+| Kconfig toggles | `CONFIG_NV_TB_EGPU ?= y` (master, documentation-only today), `CONFIG_NV_TB_EGPU_DIAG ?= n` (real toggle for P6 diag content) |
+| DIAG=n strip mechanism | nvidia-sources.Kbuild wraps `nv-tb-egpu-diag.c` in `ifeq ($(CONFIG_NV_TB_EGPU_DIAG),y)`; `nv-tb-egpu-diag.h` provides `static inline` no-op stub. The 6 call sites in nv.c + nv-pci.c compile to nothing when DIAG=n. ~10% binary size win on production builds per inventory Section 4 |
+| Deferred to follow-up | (a) CONFIG_NV_TB_EGPU=n full opt-out (would require wrapping all P1-P5 additions in `#ifdef` — hundreds of additional gates); (b) DIAG-only sysfs gating for qwd `last_aer_summary` / `last_pmc_boot_0` / `last_detection_jiffies` files |
+| Validation | git apply --check vs vanilla 595.71.05 with all 6 prior patches stacked OK; container build (refactor-rc1) OK with default DIAG=n and with explicit DIAG=y override |
 
 ---
 
@@ -398,5 +401,6 @@ sed -n '/^### P3 /,/^### P/p' /root/nvidia-driver-injector/docs/patch-refactor-i
 | 2026-05-12 | continued | Phase 2 (3.5/6) | Renumber chore (aacf661): P3 file 0004→0003, P2 reserved as 0004 (correct apply-time dependency direction after Option-1 split) |
 | 2026-05-12 | continued | Phase 2 (4/6) | P2 written via subagent + committed (e4cb622); 5 consolidation wins; S2/DIAG-AER2 deferred to P6 (host function lives in legacy 0018 = P6 territory); gate helper takes pdev |
 | 2026-05-12 | continued | Phase 2 (5/6) | P4 written + committed (52b43f0); UVM-side helpers moved to new nv-tb-egpu-uvm.{c,h} pair (cohesion win); hardcoded BDF replaced by walker; close_diag uses pdev variant — no P6 dependency |
-| 2026-05-12 | continued | Phase 2 (6/6 ✓) | P6 written + committed (6d52a06); new nv-tb-egpu-diag.{c,h} pair; reuses 4 P2 helpers via static-to-module-internal promotion; S2/DIAG-AER2 expansion landed; mmio-enabled diag_dump re-introduction landed; legacy 0009 dropped. **Phase 2 complete — all 6 cluster patches in.** |
-| _next_ | resume | P7 + Phase 3 | P7 — build metadata + Kconfig wiring (consolidates legacy 0005+0025; adds CONFIG_NV_TB_EGPU and CONFIG_NV_TB_EGPU_DIAG per inventory Section 4). Then Phase 3 stack validation per uninstall/reinstall cycle. |
+| 2026-05-12 | continued | Phase 2 (6/6) | P6 written + committed (6d52a06); new nv-tb-egpu-diag.{c,h} pair; reuses 4 P2 helpers via static-to-module-internal promotion; S2/DIAG-AER2 expansion landed; mmio-enabled diag_dump re-introduction landed; legacy 0009 dropped. |
+| 2026-05-12 | continued | **Phase 2 ✓** | P7 written + committed (16921cb); NVIDIA_VERSION → aorus.13; version.mk-as-source-of-truth; CONFIG_NV_TB_EGPU_DIAG toggle (default n) with inline no-op stub. **Phase 2 complete — all 7 patches in.** |
+| _next_ | resume | Phase 3 | Stack validation: switch live host from legacy aorus.12 to refactor-rc1, run the uninstall/reinstall cycle from docs/install-workflow.md, soak test 24-48h on production vLLM workload, verify counters in /sys/.../tb_egpu_*. If green, promote `refactor-rc1` → `595.71.05-aorus.13` and merge `refactor/p1-p6` to main. |
