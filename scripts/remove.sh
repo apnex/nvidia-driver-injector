@@ -98,7 +98,7 @@ fi
 # ===========================================================================
 # Step 1: bridge-link-cap systemd unit
 # ===========================================================================
-step "1/6 bridge-link-cap systemd unit"
+step "1/8 bridge-link-cap systemd unit"
 
 unit="nvidia-driver-injector-bridge-link-cap.service"
 unit_path="/etc/systemd/system/${unit}"
@@ -115,7 +115,7 @@ fi
 # ===========================================================================
 # Step 2: bridge-link-cap binary
 # ===========================================================================
-step "2/6 bridge-link-cap binary"
+step "2/8 bridge-link-cap binary"
 
 bin="/usr/local/sbin/nvidia-driver-injector-bridge-link-cap"
 if [[ -f "$bin" ]]; then
@@ -126,9 +126,39 @@ else
 fi
 
 # ===========================================================================
-# Step 3: modprobe.d
+# Step 3: engage-persistence systemd unit
 # ===========================================================================
-step "3/6 /etc/modprobe.d/nvidia-driver-injector.conf"
+step "3/8 engage-persistence systemd unit"
+
+unit="nvidia-driver-injector-engage-persistence.service"
+unit_path="/etc/systemd/system/${unit}"
+
+if systemctl list-unit-files "$unit" 2>/dev/null | grep -q "$unit"; then
+    act "systemctl stop ${unit} 2>/dev/null || true"
+    act "systemctl disable ${unit} 2>/dev/null || true"
+    act "rm -f ${unit_path}"
+    green "  removed ${unit_path}"
+else
+    yellow "  ${unit} not installed — already absent"
+fi
+
+# ===========================================================================
+# Step 4: engage-persistence binary
+# ===========================================================================
+step "4/8 engage-persistence binary"
+
+bin="/usr/local/sbin/nvidia-driver-injector-engage-persistence"
+if [[ -f "$bin" ]]; then
+    act "rm -f ${bin}"
+    green "  removed ${bin}"
+else
+    yellow "  ${bin} already absent"
+fi
+
+# ===========================================================================
+# Step 5: modprobe.d
+# ===========================================================================
+step "5/8 /etc/modprobe.d/nvidia-driver-injector.conf"
 
 f="/etc/modprobe.d/nvidia-driver-injector.conf"
 if [[ -f "$f" ]]; then
@@ -141,7 +171,7 @@ fi
 # ===========================================================================
 # Step 4: udev rule
 # ===========================================================================
-step "4/6 /etc/udev/rules.d/79-nvidia-driver-injector.rules"
+step "6/8 /etc/udev/rules.d/79-nvidia-driver-injector.rules"
 
 f="/etc/udev/rules.d/79-nvidia-driver-injector.rules"
 if [[ -f "$f" ]]; then
@@ -154,7 +184,7 @@ fi
 # ===========================================================================
 # Step 5: re-enable ICDs
 # ===========================================================================
-step "5/6 re-enable Vulkan/EGL/OpenCL ICDs"
+step "7/8 re-enable Vulkan/EGL/OpenCL ICDs"
 
 icd_paths=(
     /usr/share/vulkan/icd.d/nvidia_icd.x86_64.json
@@ -177,7 +207,7 @@ done
 # ===========================================================================
 # Step 6: optional cmdline revert
 # ===========================================================================
-step "6/6 reload + optional cmdline revert"
+step "8/8 reload + optional cmdline revert"
 
 act "systemctl daemon-reload"
 act "udevadm control --reload-rules"
@@ -215,7 +245,7 @@ fi
 # Step 7: --purge mode — deep clean for "fresh-host" testing
 # ===========================================================================
 if [[ "$PURGE" -eq 1 ]]; then
-    step "7/7 --purge: deep clean (patched .ko + legacy .aorus-disabled ICDs)"
+    step "9/9 --purge: deep clean (patched .ko + legacy .aorus-disabled ICDs)"
 
     # Patched on-disk module from a prior install. /usr/lib/modules/<kver>/
     # extra/ is the canonical location for vendor-rebuilt or akmod modules.

@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# nvidia-driver-injector-engage-persistence
+#
+# Engage NVIDIA persistence mode after the injector container has
+# bound nvidia.ko. Runs as a host-side oneshot service after docker.service.
+#
+# === Mechanism ===
+#
+# nvidia.ko is loaded by the injector container's entrypoint, and the
+# bind creates /dev/nvidia0 via devtmpfs. But the driver does LAZY
+# hardware bringup — GSP firmware, PMU, and the AORUS waterblock
+# thermal subsystem only fully engage on the first client open of
+# /dev/nvidia0. Without that open, the GPU sits in a post-POST minimal
+# state: cooler at floor RPM, GSP not loaded, idle power ~63 W instead
+# of ~22 W in proper P8.
+#
+# Empirically measured 2026-05-12 on this stack:
+#   Disabled (lazy):  63 W, 40 °C
+#   Enabled  (post-pm 1): 22 W, 38 °C
+#   Savings: −41 W continuous idle draw (−65 %).
+#
+# `nvidia-smi -pm 1` does two things in one call:
+#   1. Opens /dev/nvidia0 -> first-client bringup (GSP, PMU, thermal).
+#   2. Sets the driver sysfs persistence flag so the GPU stays
+#      initialized after this script exits. NOT the retired
+#      nvidia-persistenced daemon — this is a runtime driver flag
+#      with no userspace process.
+#
+# === Lifecycle ===
+#
+# Idempotent: safe to re-run. Reading persistence_mode on an already-
+# enabled GPU and calling -pm 1 again is a no-op (driver checks).
+#
+# Failure modes are tolerated by the service (RemainAfterExit=yes):
+#   - /dev/nvidia0 absent: injector container didn't bind. We poll for
+#     60 s then warn; the GPU isn't usable anyway, so no engagement
+#     to do.
+#   - nvidia-smi missing on host: warn; install the userspace driver
+#     package or fall back to opening /dev/nvidia0 some other way.
+#   - nvidia-smi -pm 1 fails: warn; GPU is functional in lazy state,
+#     just thermally suboptimal.
+
+set -euo pipefail
+
+# Colour helpers (match bridge-link-cap style).
+green()  { printf '\033[32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
+red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
+
+# Wait up to 60 s for the injector container to finish binding nvidia.ko.
+# /dev/nvidia0 appears as a side-effect of the bind step in entrypoint.sh.
+for _ in $(seq 60); do
+    [[ -e /dev/nvidia0 ]] && break
+    sleep 1
+done
+
+if [[ ! -e /dev/nvidia0 ]]; then
+    yellow "/dev/nvidia0 did not appear within 60 s — injector container did not bind nvidia.ko"
+    yellow "  Skipping persistence engagement; nothing to engage."
+    exit 0  # graceful no-op
+fi
+
+# Engage persistence mode + trigger full hardware init.
+if ! command -v nvidia-smi >/dev/null 2>&1; then
+    red "nvidia-smi not on PATH; cannot engage persistence mode."
+    red "  Install the NVIDIA userspace driver utilities on the host"
+    red "  (the patched .ko is sufficient for inference but persistence"
+    red "  engagement needs the NVML-using userspace tool)."
+    exit 1
+fi
+
+# Capture pre-state for the log line.
+pre=$(nvidia-smi --query-gpu=persistence_mode,power.draw --format=csv,noheader 2>/dev/null || echo "unknown")
+
+if nvidia-smi -pm 1 >/dev/null 2>&1; then
+    post=$(nvidia-smi --query-gpu=persistence_mode,power.draw --format=csv,noheader 2>/dev/null || echo "unknown")
+    green "Persistence mode engaged."
+    printf '  before: %s\n' "$pre"
+    printf '  after:  %s\n' "$post"
+else
+    red "nvidia-smi -pm 1 failed; GPU may stay in lazy-init state"
+    red "  (cooler at floor RPM, ~63 W idle vs ~22 W expected)."
+    exit 1
+fi
