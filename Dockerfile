@@ -57,6 +57,32 @@ RUN git clone --depth 1 -b ${NVIDIA_OPEN_TAG} \
     install -m 4755 _out/Linux_$(uname -m)/nvidia-modprobe /usr/bin/nvidia-modprobe && \
     cd / && rm -rf /tmp/nvidia-modprobe
 
+# Extract nvidia-smi + libnvidia-ml.so from NVIDIA's proprietary 595.71.05
+# tarball. We use the OPEN kernel modules (above) but the userspace tools
+# (nvidia-smi, NVML library) are closed-source and come from the .run bundle.
+# NVIDIA's official position is that the open kernel modules use the same
+# userspace tools as the proprietary build — they share the NVML interface.
+#
+# Why we need nvidia-smi: the entrypoint calls `nvidia-smi -pm 1` once after
+# binding nvidia.ko, which sets the driver's persistence-mode flag. Without
+# this, the GPU stays in lazy-init state (~63 W idle vs ~22 W proper P8;
+# cooler at floor RPM). Measured 2026-05-12.
+#
+# We ship the version-matched binary so there is no NVML interface skew
+# between the userspace tool and the in-kernel driver.
+#
+# Strip out everything we don't need (kernel module source, libcuda, GL
+# libraries, etc.) — image footprint adds ~5-10 MB net.
+RUN curl -fsSL -o /tmp/nvidia.run \
+        https://us.download.nvidia.com/XFree86/Linux-x86_64/${NVIDIA_OPEN_TAG}/NVIDIA-Linux-x86_64-${NVIDIA_OPEN_TAG}.run && \
+    chmod +x /tmp/nvidia.run && \
+    /tmp/nvidia.run --extract-only --target /tmp/nv-extract && \
+    install -m 0755 /tmp/nv-extract/nvidia-smi /usr/bin/nvidia-smi && \
+    install -m 0644 /tmp/nv-extract/libnvidia-ml.so.${NVIDIA_OPEN_TAG} /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.${NVIDIA_OPEN_TAG} && \
+    ln -sf libnvidia-ml.so.${NVIDIA_OPEN_TAG} /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1 && \
+    ldconfig && \
+    rm -rf /tmp/nvidia.run /tmp/nv-extract
+
 # Fetch upstream NVIDIA open driver source at image-build time.
 WORKDIR /src
 RUN git clone --depth 1 -b ${NVIDIA_OPEN_TAG} \

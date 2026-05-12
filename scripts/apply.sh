@@ -85,7 +85,7 @@ act() {
 # ===========================================================================
 # Step 0: conflict check
 # ===========================================================================
-step "0/10 conflict check (apnex/aorus-5090-egpu artifacts?)"
+step "0/9 conflict check (apnex/aorus-5090-egpu artifacts?)"
 
 if [[ "$FORCE_COEXIST" -eq 1 ]]; then
     yellow "  --force-coexist set; skipping conflict check (you own the consequences)"
@@ -100,7 +100,7 @@ fi
 # ===========================================================================
 # Step 1: kernel cmdline
 # ===========================================================================
-step "1/10 kernel cmdline (grubby)"
+step "1/9 kernel cmdline (grubby)"
 
 REQUIRED_ARGS=(
     "iommu=off"
@@ -177,7 +177,7 @@ fi
 # ===========================================================================
 # Step 2: kernel-devel
 # ===========================================================================
-step "2/10 kernel-devel for $(uname -r)"
+step "2/9 kernel-devel for $(uname -r)"
 
 KSRC="/lib/modules/$(uname -r)/build"
 if [[ -e "$KSRC/Makefile" ]]; then
@@ -199,7 +199,7 @@ fi
 # ===========================================================================
 # Step 3: ollama group + rewrite NVreg_DeviceFileGID in modprobe.d
 # ===========================================================================
-step "3/10 ollama UNIX group + GID-rewrite in modprobe.d"
+step "3/9 ollama UNIX group + GID-rewrite in modprobe.d"
 
 if getent group ollama >/dev/null 2>&1; then
     OLLAMA_GID=$(getent group ollama | cut -d: -f3)
@@ -213,7 +213,7 @@ fi
 # ===========================================================================
 # Step 4: modprobe.d
 # ===========================================================================
-step "4/10 /etc/modprobe.d/nvidia-driver-injector.conf"
+step "4/9 /etc/modprobe.d/nvidia-driver-injector.conf"
 
 # Clean up the aorus-5090-egpu transition stub if it exists. remove.sh
 # from that repo installs zz-aorus-egpu-blacklist.conf as a temporary
@@ -243,7 +243,7 @@ fi
 # ===========================================================================
 # Step 5: systemd unit + binary for bridge-link-cap
 # ===========================================================================
-step "5/10 nvidia-driver-injector-bridge-link-cap (binary + systemd unit)"
+step "5/9 nvidia-driver-injector-bridge-link-cap (binary + systemd unit)"
 
 act "install -m 0755 -D ${HOST_FILES}/usr/local/sbin/nvidia-driver-injector-bridge-link-cap /usr/local/sbin/nvidia-driver-injector-bridge-link-cap"
 act "install -m 0644 -D ${HOST_FILES}/etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service /etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service"
@@ -252,30 +252,14 @@ act "systemctl enable nvidia-driver-injector-bridge-link-cap.service"
 green "  bridge-link-cap installed + enabled"
 
 # ===========================================================================
-# Step 6: systemd unit + binary for gpu-engage
-# ===========================================================================
-# Post-bind counterpart to bridge-link-cap: runs after docker starts the
-# injector container, opens /dev/nvidia0 once to trigger full hardware
-# bringup (GSP, PMU, AORUS thermal subsystem), and enables persistence
-# mode so the engagement survives client disconnect. Without this, the
-# GPU sits in lazy-init state and wastes ~41 W idle (measured 2026-05-12).
-step "6/10 nvidia-driver-injector-gpu-engage (binary + systemd unit)"
-
-act "install -m 0755 -D ${HOST_FILES}/usr/local/sbin/nvidia-driver-injector-gpu-engage /usr/local/sbin/nvidia-driver-injector-gpu-engage"
-act "install -m 0644 -D ${HOST_FILES}/etc/systemd/system/nvidia-driver-injector-gpu-engage.service /etc/systemd/system/nvidia-driver-injector-gpu-engage.service"
-act "systemctl daemon-reload"
-act "systemctl enable nvidia-driver-injector-gpu-engage.service"
-green "  gpu-engage installed + enabled"
-
-# ===========================================================================
-# Step 7: udev rules
+# Step 6: udev rules
 # ===========================================================================
 # Two rules:
 #   79-nvidia-driver-injector.rules           — /dev/nvidia* permissions
 #   80-nvidia-driver-injector-disable-audio.rules — unbind the eGPU's HDMI
 #       audio function (compute-only host; keeps it out of D0 and off the
 #       snd_hda_intel autoload path)
-step "7/10 udev rules"
+step "6/9 udev rules"
 
 act "install -m 0644 -D ${HOST_FILES}/etc/udev/rules.d/79-nvidia-driver-injector.rules /etc/udev/rules.d/79-nvidia-driver-injector.rules"
 act "install -m 0644 -D ${HOST_FILES}/etc/udev/rules.d/80-nvidia-driver-injector-disable-audio.rules /etc/udev/rules.d/80-nvidia-driver-injector-disable-audio.rules"
@@ -286,7 +270,7 @@ green "  udev rules installed (perms + audio-disable)"
 # ===========================================================================
 # Step 7: Vulkan/EGL/OpenCL ICD disable (compute-only posture)
 # ===========================================================================
-step "8/10 Vulkan/EGL/OpenCL ICD disable"
+step "7/9 Vulkan/EGL/OpenCL ICD disable"
 
 if [[ "$SKIP_ICD" -eq 1 ]]; then
     yellow "  --skip-icd set; not touching ICD files"
@@ -312,7 +296,7 @@ fi
 # ===========================================================================
 # Step 8: summary + reboot guidance
 # ===========================================================================
-step "9/10 summary"
+step "8/9 summary"
 
 green "Layer 1 install complete."
 echo
@@ -335,7 +319,7 @@ echo
 # ===========================================================================
 # Step 9: optional kick-the-bridge-cap-now if no reboot needed
 # ===========================================================================
-step "10/10 apply bridge-link-cap now (without rebooting)"
+step "9/9 apply bridge-link-cap now (without rebooting)"
 
 if [[ "${CMDLINE_CHANGED:-0}" -eq 0 && "$NO_ACT" -eq 0 ]]; then
     if /usr/local/sbin/nvidia-driver-injector-bridge-link-cap status 2>/dev/null | grep -q '^bridge='; then

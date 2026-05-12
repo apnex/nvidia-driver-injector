@@ -392,6 +392,37 @@ fi
 ls -la /dev/nvidia* 2>/dev/null | sed 's/^/  /' || true
 
 # ============================================================================
+# Step 7: Engage GPU — persistence mode + full hardware bringup
+# ============================================================================
+# `nvidia-smi -pm 1` opens /dev/nvidia0 once (first-client trigger → GSP load,
+# PMU init, AORUS waterblock thermal subsystem engagement) AND sets the
+# driver's runtime persistence-mode flag so the engagement survives the
+# nvidia-smi process exit. Without this, the GPU sits in lazy-init state:
+# cooler at floor RPM, idle power ~63 W instead of ~22 W proper P8
+# (measured 2026-05-12).
+#
+# This is NOT the retired nvidia-persistenced daemon. -pm 1 sets a driver
+# sysfs-style flag; no userspace process is kept alive. Same flag survives
+# until module unload or explicit -pm 0.
+#
+# Tolerate failure: lazy state is functional, just thermally suboptimal.
+
+if command -v nvidia-smi >/dev/null 2>&1; then
+    log "engaging GPU (nvidia-smi -pm 1) ..."
+    pre=$(nvidia-smi --query-gpu=persistence_mode,power.draw --format=csv,noheader 2>/dev/null || echo "unknown")
+    if nvidia-smi -pm 1 >/dev/null 2>&1; then
+        post=$(nvidia-smi --query-gpu=persistence_mode,power.draw --format=csv,noheader 2>/dev/null || echo "unknown")
+        log "engage ✓ — persistence_mode + thermal subsystem engaged"
+        log "  before: ${pre}"
+        log "  after:  ${post}"
+    else
+        warn "nvidia-smi -pm 1 failed — GPU may stay in lazy state (higher idle power until first client open)"
+    fi
+else
+    warn "nvidia-smi missing from image — skipping persistence engagement (GPU will stay lazy)"
+fi
+
+# ============================================================================
 # Done — sleep as container of intent
 # ============================================================================
 log "=========================================="
