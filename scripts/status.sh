@@ -141,6 +141,38 @@ else
     fail_ "bridge-link-cap.service: not installed"
 fi
 
+if systemctl cat nvidia-driver-injector-engage-persistence.service >/dev/null 2>&1; then
+    if systemctl is-enabled nvidia-driver-injector-engage-persistence.service >/dev/null 2>&1; then
+        ok "engage-persistence.service: enabled (will run at next boot)"
+    else
+        fail_ "engage-persistence.service: NOT enabled"
+    fi
+    if systemctl is-active nvidia-driver-injector-engage-persistence.service >/dev/null 2>&1; then
+        ok "engage-persistence.service: active (persistence mode engaged)"
+    else
+        fail_ "engage-persistence.service: NOT active"
+    fi
+    # Verify ordering — must be After=docker.service so the injector
+    # container has finished binding nvidia.ko before we open /dev/nvidia0.
+    after=$(systemctl show -p After nvidia-driver-injector-engage-persistence.service --value 2>/dev/null)
+    if grep -q 'docker.service' <<<"$after"; then
+        ok "engage-persistence.service: ordered After=docker.service"
+    else
+        warn "engage-persistence.service: missing After=docker.service (may run before /dev/nvidia0 exists)"
+    fi
+    # Verify the runtime effect — persistence_mode should be Enabled.
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        pm=$(nvidia-smi --query-gpu=persistence_mode --format=csv,noheader 2>/dev/null | head -1)
+        if [[ "$pm" == "Enabled" ]]; then
+            ok "GPU persistence_mode: Enabled (GSP + thermal subsystem engaged)"
+        else
+            warn "GPU persistence_mode: ${pm:-unknown} — expected Enabled; idle power will be ~63 W instead of ~22 W"
+        fi
+    fi
+else
+    fail_ "engage-persistence.service: not installed"
+fi
+
 # ============================================================================
 section "4. PCI device + bridge link"
 # ============================================================================
