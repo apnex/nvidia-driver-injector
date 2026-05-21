@@ -58,6 +58,30 @@ check_arg_in_cmdline() {
 
 mod_loaded() { awk '$1 == "'"$1"'" {found=1; exit} END {exit !found}' /proc/modules; }
 
+# nvidia-smi resolver. The host no longer ships nvidia-smi — the
+# vanilla nvidia-driver-cuda package was removed (2026-05-22) to stop
+# DKMS auto-building a vanilla module that collides with the injector's
+# patched build. The driver now comes 100% from the injector container,
+# which carries its own nvidia-smi. Prefer host nvidia-smi if present
+# (older installs), else exec it inside the injector container.
+NVSMI_MODE=""
+nvsmi_available() {
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        NVSMI_MODE="host"; return 0
+    fi
+    if docker exec nvidia-driver-injector sh -c 'command -v nvidia-smi' >/dev/null 2>&1; then
+        NVSMI_MODE="container"; return 0
+    fi
+    return 1
+}
+nvsmi() {
+    case "$NVSMI_MODE" in
+        host)      timeout 20 nvidia-smi "$@" ;;
+        container) timeout 20 docker exec nvidia-driver-injector nvidia-smi "$@" ;;
+        *)         return 1 ;;
+    esac
+}
+
 # ============================================================================
 section "0. Geometry boundary — apnex/aorus-5090-egpu artifacts"
 # ============================================================================
@@ -145,8 +169,8 @@ fi
 # entrypoint (nvidia-smi -pm 1 after bind), not via a Layer-1 service.
 # We verify the runtime effect here; the container-side check is in
 # section 12.
-if command -v nvidia-smi >/dev/null 2>&1; then
-    pm=$(nvidia-smi --query-gpu=persistence_mode --format=csv,noheader 2>/dev/null | head -1)
+if nvsmi_available; then
+    pm=$(nvsmi --query-gpu=persistence_mode --format=csv,noheader 2>/dev/null | head -1)
     if [[ "$pm" == "Enabled" ]]; then
         ok "GPU persistence_mode: Enabled (GSP + thermal subsystem engaged — set by injector container)"
     else
@@ -332,15 +356,15 @@ fi
 # ============================================================================
 section "11. nvidia-smi smoke test"
 # ============================================================================
-if mod_loaded nvidia && command -v nvidia-smi >/dev/null 2>&1; then
-    out=$(timeout 15 nvidia-smi --query-gpu=name,temperature.gpu,utilization.gpu,power.draw,pstate --format=csv,noheader 2>&1)
+if mod_loaded nvidia && nvsmi_available; then
+    out=$(nvsmi --query-gpu=name,temperature.gpu,utilization.gpu,power.draw,pstate --format=csv,noheader 2>&1)
     if [[ "$out" == *"NVIDIA"* ]]; then
-        ok "nvidia-smi: $out"
+        ok "nvidia-smi: $out  (via ${NVSMI_MODE})"
     else
         fail_ "nvidia-smi: $out"
     fi
 elif mod_loaded nvidia; then
-    info "nvidia-smi not in PATH (expected if compute-only host has no userspace tools)"
+    info "nvidia-smi unavailable on host AND in injector container — cannot smoke-test"
 fi
 
 # ============================================================================
