@@ -58,6 +58,30 @@ check_arg_in_cmdline() {
 
 mod_loaded() { awk '$1 == "'"$1"'" {found=1; exit} END {exit !found}' /proc/modules; }
 
+# nvidia-smi resolver. The host no longer ships nvidia-smi — the
+# vanilla nvidia-driver-cuda package was removed (2026-05-22) to stop
+# DKMS auto-building a vanilla module that collides with the injector's
+# patched build. The driver now comes 100% from the injector container,
+# which carries its own nvidia-smi. Prefer host nvidia-smi if present
+# (older installs), else exec it inside the injector container.
+NVSMI_MODE=""
+nvsmi_available() {
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        NVSMI_MODE="host"; return 0
+    fi
+    if docker exec nvidia-driver-injector sh -c 'command -v nvidia-smi' >/dev/null 2>&1; then
+        NVSMI_MODE="container"; return 0
+    fi
+    return 1
+}
+nvsmi() {
+    case "$NVSMI_MODE" in
+        host)      timeout 20 nvidia-smi "$@" ;;
+        container) timeout 20 docker exec nvidia-driver-injector nvidia-smi "$@" ;;
+        *)         return 1 ;;
+    esac
+}
+
 # ============================================================================
 section "0. Geometry boundary — apnex/aorus-5090-egpu artifacts"
 # ============================================================================
@@ -145,8 +169,8 @@ fi
 # entrypoint (nvidia-smi -pm 1 after bind), not via a Layer-1 service.
 # We verify the runtime effect here; the container-side check is in
 # section 12.
-if command -v nvidia-smi >/dev/null 2>&1; then
-    pm=$(nvidia-smi --query-gpu=persistence_mode --format=csv,noheader 2>/dev/null | head -1)
+if nvsmi_available; then
+    pm=$(nvsmi --query-gpu=persistence_mode --format=csv,noheader 2>/dev/null | head -1)
     if [[ "$pm" == "Enabled" ]]; then
         ok "GPU persistence_mode: Enabled (GSP + thermal subsystem engaged — set by injector container)"
     else
@@ -242,16 +266,16 @@ section "6. NVreg parameters (production posture from modprobe.d)"
 # Only meaningful when nvidia is loaded. Most NVreg_* options are
 # write-only at module-load time — they aren't exposed at runtime
 # under /sys/module/nvidia/parameters/. We verify the ones we can
-# (LeverMRecoverEnable IS exposed) and trust section 7's /dev/nvidia*
+# (RecoverEnable IS exposed) and trust section 7's /dev/nvidia*
 # perm check to indirectly confirm NVreg_DeviceFile* applied.
 if mod_loaded nvidia; then
-    re=$(cat /sys/module/nvidia/parameters/NVreg_TbEgpuLeverMRecoverEnable 2>/dev/null || echo "?")
+    re=$(cat /sys/module/nvidia/parameters/NVreg_TbEgpuRecoverEnable 2>/dev/null || echo "?")
     if [[ "$re" == "1" ]]; then
-        ok "Lever M-recover: armed (RecoverEnable=1)"
+        ok "tb_egpu recover: armed (RecoverEnable=1)"
     elif [[ "$re" == "0" ]]; then
-        fail_ "Lever M-recover: NOT armed (RecoverEnable=0; modprobe.d not in load path)"
+        fail_ "tb_egpu recover: NOT armed (RecoverEnable=0; modprobe.d not in load path)"
     else
-        warn "Lever M-recover: unknown (RecoverEnable=$re)"
+        warn "tb_egpu recover: unknown (RecoverEnable=$re)"
     fi
     info "NVreg_DeviceFile* + RmForceExternalGpu are write-only at load;"
     info "  see section 7 (perm check) for indirect verification of DeviceFileMode/UID/GID."
@@ -279,8 +303,8 @@ fi
 section "8. Q-watchdog kthread (Mode B detector)"
 # ============================================================================
 if mod_loaded nvidia; then
-    if pgrep -af '\[aorus-qwd-' >/dev/null 2>&1; then
-        kt=$(pgrep -af '\[aorus-qwd-' | awk '{print $NF}')
+    if pgrep -af '\[tb-egpu-qwd-' >/dev/null 2>&1; then
+        kt=$(pgrep -af '\[tb-egpu-qwd-' | awk '{print $NF}')
         ok "Q-watchdog kthread running: $kt"
     else
         warn "Q-watchdog kthread NOT running"
@@ -306,29 +330,41 @@ for f in /usr/share/vulkan/icd.d/nvidia_icd.x86_64.json \
 done
 
 # ============================================================================
-section "10. Recent kernel error signals (last 24h)"
+section "10. Recent kernel error signals (since current module load)"
 # ============================================================================
-errors=$(journalctl -k --since='24 hours ago' --no-pager 2>/dev/null | \
+# Use the nvidia module's load time as the cutoff. Anything older came from
+# a previous module instance (e.g. a failed first boot during cutover) and
+# isn't relevant to the current driver's health. Falls back to "24 hours
+# ago" if the module isn't loaded (in which case the journal-scan label
+# matches the legacy behaviour).
+if [[ -d /sys/module/nvidia ]]; then
+    since_arg=$(stat -c %y /sys/module/nvidia 2>/dev/null | cut -d. -f1)
+    since_label="since module load at $since_arg"
+else
+    since_arg='24 hours ago'
+    since_label='in last 24h (nvidia not loaded)'
+fi
+errors=$(journalctl -k --since="$since_arg" --no-pager 2>/dev/null | \
          grep -iE 'Xid|fallen off the bus|GPU IS LOST|NVRM.*Failed|aer.*uncorrectable' | head -10)
 if [[ -z "$errors" ]]; then
-    ok "no Xid / fallen-off-bus / uncorrectable AER / NVRM Failed in last 24h"
+    ok "no Xid / fallen-off-bus / uncorrectable AER / NVRM Failed $since_label"
 else
-    fail_ "kernel error signals found:"
+    fail_ "kernel error signals found ($since_label):"
     printf '%s\n' "$errors" | sed 's/^/        /'
 fi
 
 # ============================================================================
 section "11. nvidia-smi smoke test"
 # ============================================================================
-if mod_loaded nvidia && command -v nvidia-smi >/dev/null 2>&1; then
-    out=$(timeout 15 nvidia-smi --query-gpu=name,temperature.gpu,utilization.gpu,power.draw,pstate --format=csv,noheader 2>&1)
+if mod_loaded nvidia && nvsmi_available; then
+    out=$(nvsmi --query-gpu=name,temperature.gpu,utilization.gpu,power.draw,pstate --format=csv,noheader 2>&1)
     if [[ "$out" == *"NVIDIA"* ]]; then
-        ok "nvidia-smi: $out"
+        ok "nvidia-smi: $out  (via ${NVSMI_MODE})"
     else
         fail_ "nvidia-smi: $out"
     fi
 elif mod_loaded nvidia; then
-    info "nvidia-smi not in PATH (expected if compute-only host has no userspace tools)"
+    info "nvidia-smi unavailable on host AND in injector container — cannot smoke-test"
 fi
 
 # ============================================================================

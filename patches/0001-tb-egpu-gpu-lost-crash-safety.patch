@@ -1,0 +1,681 @@
+From: nvidia-driver-injector <noreply@example.invalid>
+Date: 2026-05-12
+Subject: [PATCH 0001/0007] tb-egpu: GPU-lost crash-safety cascade
+
+Cluster P1 of the P1-P6 refactor. Foundation patch — defensive guards
+against kernel panic when the GPU enters NV_ERR_GPU_IS_LOST state due
+to a transient PCIe failure (the core upstream bug #979 fix).
+
+Background
+----------
+On a Thunderbolt-attached eGPU, a single transient PCIe failure causes
+osHandleGpuLost to declare PDB_PROP_GPU_IS_LOST permanently. From that
+point on, six distinct call-site cascades will, on the unpatched driver,
+either deadlock the GPU lock or trip an NV_ASSERT and crash the kernel:
+
+  1. osHandleGpuLost — commits to permanent loss on a single bad read.
+  2. _rcdbAddRmGpuDump / nvdDumpAllEngines — try to crash-dump a GPU
+     that is no longer there, fanning out RPC failures.
+  3. clientFreeResource / serverFreeResourceTreeUnderLock — NV_ASSERT
+     fires when the cleanup RPC returns NV_ERR_GPU_IS_LOST.
+  4. _issueRpcAndWait — every subsequent RPC hangs the GPU lock for
+     ~5s, starving the rest of the kernel.
+  5. rpcRmApiFree_GSP — 107 cleanup-path NV_ASSERT sites would fire
+     if the free RPC did not return NV_OK.
+  6. osDevReadReg008/016/032 — once the bus is dead, every read waits
+     for the hardware completion timeout (~50ms each).
+
+This patch adds a single coherent set of guards covering all six call
+sites, plus the kernel-open <-> RM bridge needed to propagate the
+disconnect state between layers without leaking <linux/pci.h> into RM.
+
+Consolidation
+-------------
+Replaces 10 legacy patches in patches/legacy/ (0001, 0002, 0003, 0004,
+0006, 0008, 0010, 0011, 0012, 0013) with one structured patch.
+Consolidation wins:
+
+  * New header src/nvidia/arch/nvalloc/unix/include/nv-tb-egpu.h with
+    shared constants TB_EGPU_GPU_LOST_RETRIES, TB_EGPU_GPU_LOST_DELAY_US,
+    TB_EGPU_DEAD_BUS_U32/U16/U8, plus the TB_EGPU_LOG_ONCE() macro and
+    the NV_ASSERT_OR_GPU_LOST() macro.
+
+  * The six near-identical "static int s_..._logged = 0;" log-once
+    latches that the legacy series duplicated are now one macro.
+
+  * The 8/16/32-bit dead-bus check in osDevReadReg008/016/032 is now
+    a single static inline tb_egpu_check_dead_bus() predicate; only
+    the return constant differs per width.
+
+  * The (NV_OK || GPU_IN_FULLCHIP_RESET || GPU_IS_LOST) resserv assert
+    triplet collapses to NV_ASSERT_OR_GPU_LOST(status).
+
+  * All AORUS branding / date stamps / per-Lever commentary stripped
+    from log strings and replaced with a cross-reference to
+    docs/lever-catalog.md. Log prefix is "tb_egpu: ".
+
+  * Q-active's "pmc_boot_0_now != nvp->pmc_boot_0" sanity test is
+    replaced with "pmc_boot_0_now == TB_EGPU_DEAD_BUS_U32", which is
+    the semantically correct dead-bus signal regardless of whatever
+    nvp->pmc_boot_0 happened to be at boot.
+
+Files changed
+-------------
+ kernel-open/common/inc/os-interface.h              |   9 ++
+ kernel-open/nvidia/os-pci.c                        |  39 ++++++++
+ src/nvidia/arch/nvalloc/unix/include/nv-tb-egpu.h  |  77 +++++++++++++++
+ src/nvidia/arch/nvalloc/unix/include/os-interface.h|   9 ++
+ src/nvidia/arch/nvalloc/unix/src/os.c              | 105 +++++++++++++++++++++
+ src/nvidia/arch/nvalloc/unix/src/osinit.c          |  29 +++++-
+ src/nvidia/src/kernel/diagnostics/journal.c        |  23 ++++-
+ src/nvidia/src/kernel/diagnostics/nv_debug_dump.c  |  20 ++++
+ src/nvidia/src/kernel/vgpu/rpc.c                   |  41 ++++++++
+ src/nvidia/src/libraries/resserv/src/rs_client.c   |   9 +-
+ src/nvidia/src/libraries/resserv/src/rs_server.c   |   9 +-
+ 11 files changed, 366 insertions(+), 4 deletions(-)
+
+---
+ kernel-open/common/inc/os-interface.h         |   9 ++
+ kernel-open/nvidia/os-pci.c                   |  39 +++++++
+ .../arch/nvalloc/unix/include/nv-tb-egpu.h    |  77 +++++++++++++
+ .../arch/nvalloc/unix/include/os-interface.h  |   9 ++
+ src/nvidia/arch/nvalloc/unix/src/os.c         | 105 ++++++++++++++++++
+ src/nvidia/arch/nvalloc/unix/src/osinit.c     |  29 ++++-
+ src/nvidia/src/kernel/diagnostics/journal.c   |  23 +++-
+ .../src/kernel/diagnostics/nv_debug_dump.c    |  20 ++++
+ src/nvidia/src/kernel/vgpu/rpc.c              |  41 +++++++
+ .../src/libraries/resserv/src/rs_client.c     |   9 +-
+ .../src/libraries/resserv/src/rs_server.c     |   9 +-
+ 11 files changed, 366 insertions(+), 4 deletions(-)
+ create mode 100644 src/nvidia/arch/nvalloc/unix/include/nv-tb-egpu.h
+
+diff --git a/kernel-open/common/inc/os-interface.h b/kernel-open/common/inc/os-interface.h
+index b71946b..0b96188 100644
+--- a/kernel-open/common/inc/os-interface.h
++++ b/kernel-open/common/inc/os-interface.h
+@@ -108,6 +108,15 @@ NV_STATUS   NV_API_CALL  os_pci_write_word                (void *, NvU32, NvU16)
+ NV_STATUS   NV_API_CALL  os_pci_write_dword               (void *, NvU32, NvU32);
+ NvBool      NV_API_CALL  os_pci_remove_supported          (void);
+ void        NV_API_CALL  os_pci_remove                    (void *);
++//
++// Disconnected-device helpers used by the GPU-lost crash-safety
++// cascade in src/nvidia/arch/nvalloc/unix/src/os.c. Wrap the kernel's
++// pci_dev_is_disconnected() / pci_channel_io_perm_failure transition
++// so RM-side code does not have to include <linux/pci.h>.
++// Crash-safety guard; see docs/lever-catalog.md.
++//
++NvBool      NV_API_CALL  os_pci_is_disconnected           (void *);
++void        NV_API_CALL  os_pci_set_disconnected          (void *);
+ void*       NV_API_CALL  os_map_kernel_space              (NvU64, NvU64, NvU32);
+ void        NV_API_CALL  os_unmap_kernel_space            (void *, NvU64);
+ #if defined(NV_VMWARE)
+diff --git a/kernel-open/nvidia/os-pci.c b/kernel-open/nvidia/os-pci.c
+index 4190c59..70bf34f 100644
+--- a/kernel-open/nvidia/os-pci.c
++++ b/kernel-open/nvidia/os-pci.c
+@@ -147,6 +147,45 @@ void NV_API_CALL os_pci_remove(
+     pci_stop_and_remove_bus_device(handle);
+ }
+ 
++//
++// Disconnected-device helpers used by the GPU-lost crash-safety
++// cascade in src/nvidia/arch/nvalloc/unix/src/os.c. Keep <linux/pci.h>
++// confined to kernel-open so RM-side code (os.c) only needs the
++// generic os_pci_* prototypes from os-interface.h.
++//
++// Crash-safety guard; see docs/lever-catalog.md.
++//
++NvBool NV_API_CALL os_pci_is_disconnected(
++    void *handle
++)
++{
++    struct pci_dev *pdev = (struct pci_dev *) handle;
++    if (!pdev)
++        return NV_FALSE;
++    return pci_dev_is_disconnected(pdev) ? NV_TRUE : NV_FALSE;
++}
++
++void NV_API_CALL os_pci_set_disconnected(
++    void *handle
++)
++{
++    struct pci_dev *pdev = (struct pci_dev *) handle;
++    if (!pdev)
++        return;
++    //
++    // pci_channel_io_perm_failure is a sink state — once set, no
++    // transitions out — so a non-atomic WRITE_ONCE is race-safe even
++    // if AER is concurrently transitioning the device through other
++    // states. The kernel's own pci_dev_is_disconnected() inline reads
++    // via READ_ONCE, so this matches the kernel's pattern.
++    //
++    // Linux 6.x has pci_dev_set_io_state() in drivers/pci/pci.c but
++    // it is private (not exported). Reproducing the relevant write
++    // here is the cleanest module-friendly equivalent.
++    //
++    WRITE_ONCE(pdev->error_state, pci_channel_io_perm_failure);
++}
++
+ NV_STATUS NV_API_CALL
+ os_enable_pci_req_atomics(
+     void *handle,
+diff --git a/src/nvidia/arch/nvalloc/unix/include/nv-tb-egpu.h b/src/nvidia/arch/nvalloc/unix/include/nv-tb-egpu.h
+new file mode 100644
+index 0000000..64f2bf5
+--- /dev/null
++++ b/src/nvidia/arch/nvalloc/unix/include/nv-tb-egpu.h
+@@ -0,0 +1,77 @@
++/*
++ * SPDX-FileCopyrightText: nvidia-driver-injector contributors
++ * SPDX-License-Identifier: MIT
++ *
++ * tb-egpu crash-safety helpers — shared constants and macros used by
++ * the GPU-lost crash-safety cascade (cluster P1).
++ *
++ * Crash-safety guard; see docs/lever-catalog.md for the full taxonomy
++ * of reliability levers this header backs.
++ *
++ * This header is intentionally self-contained: it only depends on
++ * NV_PRINTF / NV_ASSERT being already in scope at the include site,
++ * so it can be pulled in from anywhere in the RM tree that already
++ * includes the standard utility headers.
++ */
++
++#ifndef _NV_TB_EGPU_H_
++#define _NV_TB_EGPU_H_
++
++/*
++ * Retry policy for osHandleGpuLost. Tuned empirically against the
++ * Thunderbolt-attached eGPU transient PCIe failure window:
++ * 10 * 100us = ~1ms total stall, well below GSP RPC poll cadence.
++ */
++#define TB_EGPU_GPU_LOST_RETRIES        10U
++#define TB_EGPU_GPU_LOST_DELAY_US       100U
++
++/*
++ * Canonical "dead bus" MMIO read return values. A PCIe device that
++ * has fallen off the bus completes config/MMIO reads with all-1s after
++ * the hardware completion timeout (~50ms per read).
++ */
++#define TB_EGPU_DEAD_BUS_U32            0xFFFFFFFFU
++#define TB_EGPU_DEAD_BUS_U16            0xFFFFU
++#define TB_EGPU_DEAD_BUS_U8             0xFFU
++
++/*
++ * Emit an NV_PRINTF exactly once per kernel-module lifetime at the
++ * call site. Replaces the six near-identical
++ *
++ *     static int s_..._logged = 0;
++ *     if (!s_..._logged) { s_..._logged = 1; NV_PRINTF(...); }
++ *
++ * patterns that were duplicated across the legacy GPU-lost cascade.
++ * The latch is function-scope-static, so each call site gets its own
++ * independent latch.
++ */
++#define TB_EGPU_LOG_ONCE(level, fmt, ...)                                      \
++    do {                                                                       \
++        static int _tb_egpu_logged_ = 0;                                       \
++        if (!_tb_egpu_logged_) {                                               \
++            _tb_egpu_logged_ = 1;                                              \
++            NV_PRINTF(level, fmt, ##__VA_ARGS__);                              \
++        }                                                                     \
++    } while (0)
++
++/*
++ * Cleanup-path assert relaxation: NV_OK and NV_ERR_GPU_IN_FULLCHIP_RESET
++ * are the upstream-accepted statuses; NV_ERR_GPU_IS_LOST is also benign
++ * during resource teardown when the GPU has fallen off the bus (the
++ * cleanup is purely host-side bookkeeping at that point).
++ *
++ * Used in place of the
++ *
++ *     NV_ASSERT((status == NV_OK) ||
++ *               (status == NV_ERR_GPU_IN_FULLCHIP_RESET) ||
++ *               (status == NV_ERR_GPU_IS_LOST));
++ *
++ * triplet that the legacy patch series had to repeat at every resserv
++ * cleanup site.
++ */
++#define NV_ASSERT_OR_GPU_LOST(status)                                          \
++    NV_ASSERT(((status) == NV_OK) ||                                           \
++              ((status) == NV_ERR_GPU_IN_FULLCHIP_RESET) ||                    \
++              ((status) == NV_ERR_GPU_IS_LOST))
++
++#endif /* _NV_TB_EGPU_H_ */
+diff --git a/src/nvidia/arch/nvalloc/unix/include/os-interface.h b/src/nvidia/arch/nvalloc/unix/include/os-interface.h
+index 2a3612f..39f503e 100644
+--- a/src/nvidia/arch/nvalloc/unix/include/os-interface.h
++++ b/src/nvidia/arch/nvalloc/unix/include/os-interface.h
+@@ -108,6 +108,15 @@ NV_STATUS   NV_API_CALL  os_pci_write_word                (void *, NvU32, NvU16)
+ NV_STATUS   NV_API_CALL  os_pci_write_dword               (void *, NvU32, NvU32);
+ NvBool      NV_API_CALL  os_pci_remove_supported          (void);
+ void        NV_API_CALL  os_pci_remove                    (void *);
++//
++// Disconnected-device helpers used by the GPU-lost crash-safety
++// cascade in src/nvidia/arch/nvalloc/unix/src/os.c. Wrap the kernel's
++// pci_dev_is_disconnected() / pci_channel_io_perm_failure transition
++// so RM-side code does not have to include <linux/pci.h>.
++// Crash-safety guard; see docs/lever-catalog.md.
++//
++NvBool      NV_API_CALL  os_pci_is_disconnected           (void *);
++void        NV_API_CALL  os_pci_set_disconnected          (void *);
+ void*       NV_API_CALL  os_map_kernel_space              (NvU64, NvU64, NvU32);
+ void        NV_API_CALL  os_unmap_kernel_space            (void *, NvU64);
+ NV_STATUS   NV_API_CALL  os_flush_cpu_cache_all           (void);
+diff --git a/src/nvidia/arch/nvalloc/unix/src/os.c b/src/nvidia/arch/nvalloc/unix/src/os.c
+index bc784af..5a419df 100644
+--- a/src/nvidia/arch/nvalloc/unix/src/os.c
++++ b/src/nvidia/arch/nvalloc/unix/src/os.c
+@@ -24,9 +24,11 @@
+ #include <nv.h>                     // NV device driver interface
+ #include <nv-priv.h>
+ #include <nv-caps.h>
++#include <nv-tb-egpu.h>             // crash-safety guard; see docs/lever-catalog.md
+ #include <os/os.h>
+ #include <nvos.h>
+ #include <osapi.h>
++#include <nv_ref.h>                 // NV_PMC_BOOT_0 for Q-active verification read
+ #include <ctrl/ctrl0000/ctrl0000gpu.h>
+ #include <ctrl/ctrl0000/ctrl0000unix.h>
+ #include <class/cl90cd.h> // NV_EVENT_BUFFER_BIND
+@@ -1870,6 +1872,31 @@ void osDevWriteReg032(
+     NV_PRIV_REG_WR32(pMapping->gpuNvAddr, thisAddress, thisValue);
+ }
+ 
++//
++// Crash-safety guard; see docs/lever-catalog.md.
++//
++// Shared dead-bus predicate used by the 8/16/32-bit osDevReadRegNNN
++// short-circuit (Q-passive). Returns NV_TRUE if either the kernel's
++// PCI layer has marked the device disconnected (e.g. via AER) or the
++// driver itself has declared PDB_PROP_GPU_IS_LOST.
++//
++// Consolidates the three near-identical pGpu/nv/handle/property
++// dances that the legacy patches duplicated across the readers.
++//
++static NV_INLINE NvBool tb_egpu_check_dead_bus(OBJGPU *pGpu)
++{
++    nv_state_t *nv;
++
++    if (pGpu == NULL)
++        return NV_FALSE;
++
++    nv = NV_GET_NV_STATE(pGpu);
++    if (nv != NULL && os_pci_is_disconnected(nv->handle))
++        return NV_TRUE;
++
++    return pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST) ? NV_TRUE : NV_FALSE;
++}
++
+ NvU8 osDevReadReg008(
+     OBJGPU             *pGpu,
+     DEVICE_MAPPING     *pMapping,
+@@ -1878,6 +1905,16 @@ NvU8 osDevReadReg008(
+ {
+     NvU8 retval = 0;
+ 
++    //
++    // Crash-safety guard (Q-passive); see docs/lever-catalog.md.
++    // 8-bit reads have no vGPU passthrough — they go straight to MMIO,
++    // so they need the same dead-bus short-circuit as the 32-bit path.
++    //
++    if (tb_egpu_check_dead_bus(pGpu))
++    {
++        return TB_EGPU_DEAD_BUS_U8;
++    }
++
+     if (thisAddress >= pMapping->gpuNvLength)
+     {
+         NV_ASSERT(thisAddress < pMapping->gpuNvLength);
+@@ -1896,6 +1933,12 @@ NvU16 osDevReadReg016(
+ {
+     NvU16 retval = 0;
+ 
++    // Crash-safety guard (Q-passive); see docs/lever-catalog.md.
++    if (tb_egpu_check_dead_bus(pGpu))
++    {
++        return TB_EGPU_DEAD_BUS_U16;
++    }
++
+     if (thisAddress >= pMapping->gpuNvLength)
+     {
+         NV_ASSERT(thisAddress < pMapping->gpuNvLength);
+@@ -1921,6 +1964,23 @@ NvU32 osDevReadReg032(
+         return retval;
+     }
+ 
++    //
++    // Crash-safety guard (Q-passive); see docs/lever-catalog.md.
++    //
++    // Once either the kernel-level disconnect flag or the driver-level
++    // PDB_PROP_GPU_IS_LOST property is set, every subsequent MMIO read
++    // returns immediately. Without this, each post-loss read would wait
++    // for the PCIe hardware completion timeout (~50ms), saturating the
++    // GPU lock and stalling the host for seconds at a time.
++    //
++    if (tb_egpu_check_dead_bus(pGpu))
++    {
++        TB_EGPU_LOG_ONCE(LEVEL_ERROR,
++            "tb_egpu: osDevReadReg032: dead-bus short-circuit engaged at offset 0x%08x\n",
++            thisAddress);
++        return TB_EGPU_DEAD_BUS_U32;
++    }
++
+     if (thisAddress >= pMapping->gpuNvLength)
+     {
+         NV_ASSERT(thisAddress < pMapping->gpuNvLength);
+@@ -1928,6 +1988,51 @@ NvU32 osDevReadReg032(
+     else
+         retval = NV_PRIV_REG_RD32(pMapping->gpuNvAddr, thisAddress);
+ 
++    //
++    // Crash-safety guard (Q-active); see docs/lever-catalog.md.
++    //
++    // Post-read sanity check. If the read returned TB_EGPU_DEAD_BUS_U32
++    // the bus may have just died — verify by reading NV_PMC_BOOT_0
++    // directly. If THAT also returns TB_EGPU_DEAD_BUS_U32 (i.e. is the
++    // dead-bus all-1s value, not the saved boot ID), the GPU is
++    // genuinely gone. Declare it lost via gpuSetDisconnectedProperties
++    // (sets PDB_PROP_GPU_IS_LOST so Q-passive short-circuits all
++    // subsequent reads) AND propagate the disconnect state kernel-wide
++    // via os_pci_set_disconnected.
++    //
++    // The verification read uses NV_PRIV_REG_RD32 directly, bypassing
++    // this function to avoid recursion. If the bus is dead, this read
++    // takes one hardware-completion-timeout (~50ms), but happens at
++    // most ONCE per failure event thanks to the LOG_ONCE latch plus
++    // Q-passive intercepting all further reads.
++    //
++    // Note: we compare against TB_EGPU_DEAD_BUS_U32 (all-1s) rather
++    // than against the saved nvp->pmc_boot_0. The legacy comparison
++    // pmc_boot_0_now != nvp->pmc_boot_0 was semantically wrong: if
++    // nvp->pmc_boot_0 was 0 at boot due to a different transient, the
++    // post-read sanity check would false-positive on every healthy
++    // read. The dead-bus value is the canonical signal.
++    //
++    if (retval == TB_EGPU_DEAD_BUS_U32 && pGpu)
++    {
++        nv_state_t *nv = NV_GET_NV_STATE(pGpu);
++        if (nv && nv->regs && nv->regs->map_u &&
++            !pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST))
++        {
++            NvU32 pmc_boot_0_now = NV_PRIV_REG_RD32(nv->regs->map_u, NV_PMC_BOOT_0);
++            if (pmc_boot_0_now == TB_EGPU_DEAD_BUS_U32)
++            {
++                TB_EGPU_LOG_ONCE(LEVEL_ERROR,
++                    "tb_egpu: osDevReadReg032: dead-bus DETECTED via post-read sanity check"
++                    " (trigger_offset=0x%08x, pmc_boot_0=0x%08x);"
++                    " declaring GPU lost\n",
++                    thisAddress, pmc_boot_0_now);
++                gpuSetDisconnectedProperties(pGpu);
++                os_pci_set_disconnected(nv->handle);
++            }
++        }
++    }
++
+     return retval;
+ }
+ 
+diff --git a/src/nvidia/arch/nvalloc/unix/src/osinit.c b/src/nvidia/arch/nvalloc/unix/src/osinit.c
+index 25a7b6c..aa07271 100644
+--- a/src/nvidia/arch/nvalloc/unix/src/osinit.c
++++ b/src/nvidia/arch/nvalloc/unix/src/osinit.c
+@@ -34,6 +34,7 @@
+ #include <nv.h>                 // NV device driver interface
+ #include <nv-reg.h>
+ #include <nv-priv.h>
++#include <nv-tb-egpu.h>         // crash-safety guard; see docs/lever-catalog.md
+ #include <nvos.h>
+ #include <nvrm_registry.h>
+ #include <platform/sli/sli.h>
+@@ -347,6 +348,7 @@ osHandleGpuLost
+     nv_state_t *nv = NV_GET_NV_STATE(pGpu);
+     nv_priv_t *nvp = NV_GET_NV_PRIV(nv);
+     NvU32 pmc_boot_0;
++    NvU32 retry;
+ 
+     // Determine if we've already run the handler
+     if (!pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_CONNECTED))
+@@ -354,7 +356,32 @@ osHandleGpuLost
+         return NV_OK;
+     }
+ 
+-    pmc_boot_0 = NV_PRIV_REG_RD32(nv->regs->map_u, NV_PMC_BOOT_0);
++    //
++    // Crash-safety guard; see docs/lever-catalog.md.
++    //
++    // Retry NV_PMC_BOOT_0 up to TB_EGPU_GPU_LOST_RETRIES times with
++    // TB_EGPU_GPU_LOST_DELAY_US between attempts before declaring the
++    // GPU permanently lost. The unpatched single-read commits to
++    // permanent GPU-lost on a single transient PCIe failure (upstream
++    // bug #979), which is the core defect this cascade defends against.
++    //
++    for (retry = 0; retry < TB_EGPU_GPU_LOST_RETRIES; retry++)
++    {
++        pmc_boot_0 = NV_PRIV_REG_RD32(nv->regs->map_u, NV_PMC_BOOT_0);
++        if (pmc_boot_0 == nvp->pmc_boot_0)
++        {
++            if (retry > 0)
++            {
++                NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++                              "tb_egpu: GPU lost retry succeeded after %u attempts (%u us)\n",
++                              retry, retry * TB_EGPU_GPU_LOST_DELAY_US);
++            }
++            return NV_OK;
++        }
++        if (retry < (TB_EGPU_GPU_LOST_RETRIES - 1))
++            osDelayUs(TB_EGPU_GPU_LOST_DELAY_US);
++    }
++
+     if (pmc_boot_0 != nvp->pmc_boot_0)
+     {
+         //
+diff --git a/src/nvidia/src/kernel/diagnostics/journal.c b/src/nvidia/src/kernel/diagnostics/journal.c
+index ab42cdc..405dea1 100644
+--- a/src/nvidia/src/kernel/diagnostics/journal.c
++++ b/src/nvidia/src/kernel/diagnostics/journal.c
+@@ -46,6 +46,7 @@
+ #include "nvdevid.h"
+ #include "nvop.h"
+ #include "jt.h"
++#include "nv-tb-egpu.h"  // crash-safety guard; see docs/lever-catalog.md
+ 
+ 
+ 
+@@ -2236,7 +2237,12 @@ _rcdbAddRmGpuDumpCallback
+                 pRcDB->setProperty(pRcDB, PDB_PROP_RCDB_IN_DEFERRED_DUMP_CODEPATH, NV_TRUE);
+ 
+                 status = rcdbAddRmGpuDump(pGpu);
+-                NV_ASSERT(status == NV_OK);
++                // Crash-safety guard; see docs/lever-catalog.md.
++                if (status != NV_OK) {
++                    NV_PRINTF(LEVEL_ERROR,
++                              "tb_egpu: rcdbAddRmGpuDump returned 0x%x in deferred dump path\n",
++                              status);
++                }
+ 
+                 pRcDB->setProperty(pRcDB, PDB_PROP_RCDB_IN_DEFERRED_DUMP_CODEPATH, NV_FALSE);
+ 
+@@ -2914,6 +2920,21 @@ rcdbAddRmGpuDump
+     NvU32               bufferUsed;
+     NvU8               *pBuf               = NULL;
+ 
++    //
++    // Crash-safety guard; see docs/lever-catalog.md.
++    //
++    // Short-circuit on PDB_PROP_GPU_IS_LOST. A GPU known to be lost has
++    // nothing to dump; attempting to iterate engine callbacks via
++    // nvdDumpAllEngines just exercises the GSP-RPC failure cascade that
++    // deadlocks the kernel at the NV_ASSERT in _rcdbAddRmGpuDumpCallback.
++    //
++    if (pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST))
++    {
++        TB_EGPU_LOG_ONCE(LEVEL_ERROR,
++                         "tb_egpu: rcdbAddRmGpuDump: GPU lost, skipping crash dump\n");
++        return NV_OK;
++    }
++
+     if (pGpu->getProperty(pGpu, PDB_PROP_GPU_TEGRA_SOC_NVDISPLAY))
+     {
+         return NV_ERR_NOT_SUPPORTED;
+diff --git a/src/nvidia/src/kernel/diagnostics/nv_debug_dump.c b/src/nvidia/src/kernel/diagnostics/nv_debug_dump.c
+index d76f255..1af0555 100644
+--- a/src/nvidia/src/kernel/diagnostics/nv_debug_dump.c
++++ b/src/nvidia/src/kernel/diagnostics/nv_debug_dump.c
+@@ -31,6 +31,7 @@
+ #include "lib/protobuf/prb_util.h"
+ #include "g_all_dcl_pb.h"
+ #include "g_nvdebug_pb.h"
++#include "nv-tb-egpu.h"  // crash-safety guard; see docs/lever-catalog.md
+ 
+ static NV_STATUS prbAppendSubMsg(PRB_ENCODER *pPrbEnc, NvU32 tag, NvU8 *buffer, NvU32 size);
+ 
+@@ -270,6 +271,25 @@ nvdDumpAllEngines_IMPL
+         (prbEncBufLeft(pPrbEnc) > 0) && (pEngineCallback != NULL);
+         pEngineCallback = pEngineCallback->pNext)
+     {
++        //
++        // Crash-safety guard; see docs/lever-catalog.md.
++        //
++        // Per-iteration guard. The existing PDB_PROP_GPU_INACCESSIBLE
++        // check below sets the advisory flag but does NOT break the
++        // loop; without this break, a lost GPU will exercise every
++        // remaining engine callback in turn, each one waiting for a
++        // dead bus completion timeout. Also catches PDB_PROP_GPU_IS_LOST
++        // which the upstream loop did not consider.
++        //
++        if (pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST) ||
++            pGpu->getProperty(pGpu, PDB_PROP_GPU_INACCESSIBLE))
++        {
++            TB_EGPU_LOG_ONCE(LEVEL_ERROR,
++                "tb_egpu: nvdDumpAllEngines: GPU lost/inaccessible, skipping remaining engine dumps\n");
++            pNvDumpState->bGpuAccessible = NV_FALSE;
++            break;
++        }
++
+         NV_CHECK_OK_OR_CAPTURE_FIRST_ERROR(nvStatus, LEVEL_ERROR,
+             nvdEngineDumpCallbackHelper(pGpu, pPrbEnc, pNvDumpState, pEngineCallback));
+ 
+diff --git a/src/nvidia/src/kernel/vgpu/rpc.c b/src/nvidia/src/kernel/vgpu/rpc.c
+index 77954e1..cc49951 100644
+--- a/src/nvidia/src/kernel/vgpu/rpc.c
++++ b/src/nvidia/src/kernel/vgpu/rpc.c
+@@ -58,6 +58,7 @@
+ #if defined(NV_UNIX) && RMCFG_FEATURE_GSP_CLIENT_RM
+ #include "os-interface.h"
+ #endif
++#include "nv-tb-egpu.h"  // crash-safety guard; see docs/lever-catalog.md
+ 
+ #include "griddisplayless/objgriddisplayless.h"
+ 
+@@ -1841,6 +1842,27 @@ static NV_STATUS _issueRpcAndWait(OBJGPU *pGpu, OBJRPC *pRpc)
+     NV_ASSERT_OR_RETURN(!gpumgrGetBcEnabledStatus(pGpu), NV_ERR_INVALID_STATE);
+     NV_CHECK(LEVEL_ERROR, rmDeviceGpuLockIsOwner(pGpu->gpuInstance));
+ 
++    //
++    // Crash-safety guard; see docs/lever-catalog.md.
++    //
++    // After PDB_PROP_GPU_IS_LOST is set (by gpuSetDisconnectedProperties
++    // from osHandleGpuLost retry exhaustion), every subsequent GSP RPC
++    // would go through the full send/poll/sanity-fail cycle, holding
++    // the GPU lock for ~5s each. Short-circuit here and return the
++    // canonical NV_ERR_GPU_IS_LOST so callers know not to wait.
++    //
++    // This funnel handles the 50+ non-cleanup RPC paths (alloc,
++    // control, register, unregister, etc.). The cleanup path is
++    // covered separately in rpcRmApiFree_GSP below — that one must
++    // return NV_OK because resserv asserts on it.
++    //
++    if (pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST))
++    {
++        TB_EGPU_LOG_ONCE(LEVEL_ERROR,
++            "tb_egpu: _issueRpcAndWait: GPU lost, RPCs returning NV_ERR_GPU_IS_LOST without sending\n");
++        return NV_ERR_GPU_IS_LOST;
++    }
++
+     if (bProfileRPC)
+     {
+         // Create a new entry for our RPC profiler
+@@ -11493,6 +11515,25 @@ NV_STATUS rpcRmApiFree_GSP
+     NV_STATUS status = NV_OK;
+     NvU32 gpuMaskRelease = 0;
+ 
++    //
++    // Crash-safety guard; see docs/lever-catalog.md.
++    //
++    // When the GPU is logically lost, device-side resource free is
++    // moot — the GPU is unresponsive anyway and a host reboot is
++    // mandatory per the ROBUST_CHANNEL_GPU_HAS_FALLEN_OFF_THE_BUS
++    // notification. Returning NV_OK silently makes the 107
++    // NV_ASSERT(status == NV_OK) sites in the cleanup paths pass
++    // without firing, and the host-side resserv bookkeeping cleans up
++    // correctly. This eliminates the entire fn-10 RPC failure cascade
++    // at one site instead of patching 107 individual asserts.
++    //
++    if (pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_LOST))
++    {
++        TB_EGPU_LOG_ONCE(LEVEL_ERROR,
++            "tb_egpu: rpcRmApiFree_GSP: GPU lost, free RPCs returning NV_OK silently for cleanup\n");
++        return NV_OK;
++    }
++
+     if (!rmDeviceGpuLockIsOwner(pGpu->gpuInstance))
+     {
+         NV_PRINTF(LEVEL_WARNING, "Calling RPC RmFree without adequate locks!\n");
+diff --git a/src/nvidia/src/libraries/resserv/src/rs_client.c b/src/nvidia/src/libraries/resserv/src/rs_client.c
+index 0fa885c..b2a402d 100644
+--- a/src/nvidia/src/libraries/resserv/src/rs_client.c
++++ b/src/nvidia/src/libraries/resserv/src/rs_client.c
+@@ -30,6 +30,7 @@
+ #if !(RS_STANDALONE)
+ #include "os/os.h"
+ #include "resserv/rs_access_map.h"
++#include "nv-tb-egpu.h"  // crash-safety guard; see docs/lever-catalog.md
+ #endif
+ 
+ typedef enum
+@@ -841,7 +842,13 @@ clientFreeResource_IMPL
+     _refRemoveAllDependencies(pResourceRef);
+ 
+     status = serverFreeResourceRpcUnderLock(pServer, pParams);
+-    NV_ASSERT((status == NV_OK) || (status == NV_ERR_GPU_IN_FULLCHIP_RESET));
++    // Crash-safety guard; see docs/lever-catalog.md. Cleanup-path
++    // tolerates GPU_IS_LOST since teardown is host-side bookkeeping.
++    if (status == NV_ERR_GPU_IS_LOST) {
++        TB_EGPU_LOG_ONCE(LEVEL_ERROR,
++            "tb_egpu: clientFreeResource cleanup RPC returned GPU_IS_LOST, gracefully ignoring\n");
++    }
++    NV_ASSERT_OR_GPU_LOST(status);
+ 
+     // NV_PRINTF(LEVEL_INFO, "hClient %x: Freeing hResource: %x\n",
+     //          pClient->hClient, pResourceRef->hResource);
+diff --git a/src/nvidia/src/libraries/resserv/src/rs_server.c b/src/nvidia/src/libraries/resserv/src/rs_server.c
+index 1e61974..0eb3dfc 100644
+--- a/src/nvidia/src/libraries/resserv/src/rs_server.c
++++ b/src/nvidia/src/libraries/resserv/src/rs_server.c
+@@ -32,6 +32,7 @@
+ 
+ #if !RS_STANDALONE
+ #include "os/os.h"
++#include "nv-tb-egpu.h"  // crash-safety guard; see docs/lever-catalog.md
+ #endif
+ 
+ // Describes types of clients to find when getting client entries
+@@ -256,7 +257,13 @@ NV_STATUS serverFreeResourceTreeUnderLock(RsServer *pServer, RS_RES_FREE_PARAMS
+             goto done;
+ 
+         status = clientFreeResource(pResourceRef->pClient, pServer, pFreeParams);
+-        NV_ASSERT((status == NV_OK) || (status == NV_ERR_GPU_IN_FULLCHIP_RESET));
++        // Crash-safety guard; see docs/lever-catalog.md. Cleanup-path
++        // tolerates GPU_IS_LOST since teardown is host-side bookkeeping.
++        if (status == NV_ERR_GPU_IS_LOST) {
++            TB_EGPU_LOG_ONCE(LEVEL_ERROR,
++                "tb_egpu: serverFreeResourceTreeUnderLock: clientFreeResource returned GPU_IS_LOST, gracefully ignoring\n");
++        }
++        NV_ASSERT_OR_GPU_LOST(status);
+ 
+         serverResLock_Epilogue(pServer, LOCK_ACCESS_WRITE, pLockInfo, &releaseFlags);
+     }
+-- 
+2.54.0
+

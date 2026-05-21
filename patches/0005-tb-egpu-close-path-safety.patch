@@ -1,0 +1,691 @@
+From: nvidia-driver-injector <noreply@example.invalid>
+Date: 2026-05-12
+Subject: [PATCH 0005/0007] tb-egpu: close-path observability (cluster P4)
+
+Consolidates legacy 0029 (RM-side close-path DIAG) and 0030 (UVM-side
+close-path DIAG) into one close-path observability cluster.
+
+What this cluster IS: the markers + state snapshot infrastructure for
+the close-path bug class (docs/architecture.md Problem 2 + Problem 4).
+The bug class is currently mitigated observationally (per memory
+project_close_path_mitigated_2026_05_08 — close-path-probe.sh n=3
+proven), not by a code fix. These markers are how we know the
+mitigation stays in place under future stack changes. Passive
+instrumentation only (ioremap+ioread32 + PCI config-space reads).
+
+What this cluster is NOT: the recovery state machine (P2), the
+qwatchdog (P3), or the recovery-state DIAG hookups (P6, Kconfig-gated).
+The err_handlers callbacks from legacy 0029 (mmio_enabled +
+cor_error_detected) already landed in P2 as part of the err_handlers
+struct registration.
+
+Inventory items applied (per docs/patch-refactor-inventory.md "### P4"):
+
+- Renames:
+    tb_egpu_lever_m_close_path_diag   -> tb_egpu_close_diag
+    tb_egpu_lever_m_diag_dump_pdev    -> tb_egpu_close_diag_pdev
+    aorus_uvm_close_path_diag         -> tb_egpu_uvm_close_diag_*
+                                         (split into 5 site-named
+                                          helpers per inventory's
+                                          "extract atomic patterns")
+    aorus_uvm_get_gpu_pdev            -> tb_egpu_get_gpu_pdev
+                                         (now lives in nvidia.ko and
+                                          is EXPORT_SYMBOL_GPL — the
+                                          legacy "extern in uvm.c"
+                                          pattern is gone)
+    aorus_uvm_fd_count                -> tb_egpu_uvm_fd_count
+    log prefix "AORUS Lever M-recover [CLOSE]" / "AORUS UVM [CLOSE]"
+                                      -> "tb_egpu [CLOSE]" / "tb_egpu UVM [CLOSE]"
+    log prefix "AORUS Lever M-recover [UVM-DIAG]"
+                                      -> "tb_egpu [UVM-DIAG]"
+
+- Hardcoded BDF eliminated. Legacy 0030 hardcoded the GPU pdev lookup
+  to pci_get_domain_bus_and_slot(0, 0x04, PCI_DEVFN(0,0)). Replaced
+  with tb_egpu_get_gpu_pdev() — an EXPORT_SYMBOL_GPL helper in
+  nvidia.ko that walks nv_linux_devices under the global lock and
+  returns the first NVIDIA pdev (refcount incremented; caller
+  pci_dev_puts). Generalises to any PCI topology; single-GPU project
+  scope preserved.
+
+- void* type-erasure removed. Legacy 0030 declared the AER trigger
+  helper as taking void *out in uvm.c (to avoid pulling the snapshot
+  struct definition into nvidia-uvm). Refactor: UVM forward-declares
+  struct tb_egpu_qwd_aer_snapshot as opaque and passes the typed
+  pointer through. NULL is the legitimate value at every UVM call
+  site (no per-call snapshot persistence on the UVM side).
+
+- atomic_inc/read/dec patterns extracted into 5 site-named one-shot
+  helpers (one per UVM lifecycle point). uvm.c call sites are now
+  pure single-line calls — no inline atomic logic to repeat.
+
+- New file pair for UVM-side helpers. Legacy 0030 inlined a 60+ line
+  block of project code into uvm.c. Refactor moves it to
+  kernel-open/nvidia-uvm/nv-tb-egpu-uvm.{c,h}. uvm.c's touch is now
+  exactly: 1 include + 8 single-line call sites. Better cohesion;
+  smaller blast radius into the vendor file.
+
+- EXPORT_SYMBOL audit. UVM is a separate .ko (nvidia-uvm.ko), so the
+  cross-module symbols are EXPORT_SYMBOL_GPL (not EXPORT_SYMBOL):
+    tb_egpu_dump_aer_trigger_event  (added — P2 left this internal-
+                                     only; P4 needs it cross-module)
+    tb_egpu_get_gpu_pdev            (new — pdev lookup helper)
+    tb_egpu_close_diag_pdev         (new — pdev-based state capture)
+  tb_egpu_close_diag (RM-side) is NOT exported — internal to nvidia.ko.
+
+- Reuse of P2's WPR2 helper. tb_egpu_close_diag_pdev calls
+  tb_egpu_recover_read_wpr2 (file-static in nv-tb-egpu-recover.c) for
+  the WPR2 portion of its state capture, instead of open-coding
+  ioremap+ioread32+iounmap a fourth time.
+
+Cross-cluster dependencies:
+
+- P4 declares tb_egpu_close_diag (RM-side) standalone — it captures
+  full state via tb_egpu_close_diag_pdev (its own pdev-based variant),
+  NOT via P6's recover_diag_dump. This sidesteps the P6 dependency
+  that the legacy structure would have implied: P4 lands fully
+  functional without P6.
+
+- P4 promotes P2's tb_egpu_dump_aer_trigger_event to
+  EXPORT_SYMBOL_GPL. P2's commit message said "internal to nvidia.ko"
+  which was true at P2's apply time; P4 extends the visibility because
+  nvidia-uvm.ko now consumes the symbol. Both states are self-consistent
+  at their respective apply times.
+
+Five UVM call sites (uvm.c):
+
+  uvm-open-entry        end of uvm_open success path; pre-increment
+                        fd_count==0 ⇒ first-after-LAST-CLOSE
+  uvm-release-entry     top of uvm_release before any teardown
+  uvm-pre-destroy       VA_SPACE branch only, just before
+                        uvm_va_space_destroy
+  uvm-post-destroy      VA_SPACE branch only, just after
+                        uvm_va_space_destroy
+  uvm-release-exit      end of uvm_release; post-decrement
+                        fd_count==0 ⇒ canonical LAST-CLOSE
+
+Four RM-side call sites (nv.c):
+
+  close-entry           top of nvidia_close_callback after nvl check
+  pre-stop              just before nv_close_device under ldata_lock
+  post-shutdown         inside nv_stop_device after teardown
+  close-exit            end of nvidia_close_callback
+
+Files touched:
+  kernel-open/nvidia/nv-tb-egpu-recover.c          +154
+    (EXPORT_SYMBOL_GPL on existing dump_aer_trigger_event,
+     three new functions: get_gpu_pdev, close_diag_pdev, close_diag)
+  kernel-open/nvidia/nv-tb-egpu-recover.h          +45/-2 (decls + doc)
+  kernel-open/nvidia/nv.c                          +45  (4 call sites)
+  kernel-open/nvidia-uvm/nv-tb-egpu-uvm.c          new  (129 lines)
+  kernel-open/nvidia-uvm/nv-tb-egpu-uvm.h          new  (35 lines)
+  kernel-open/nvidia-uvm/uvm.c                     +16  (include + 5 call sites)
+  kernel-open/nvidia-uvm/nvidia-uvm-sources.Kbuild +1   (source entry)
+
+Validation: git apply --check vs vanilla 595.71.05 with P1+P5+P3+P2
+stacked OK; container build (refactor-rc1) OK.
+
+Userspace + close-path-probe.sh references the legacy log prefixes —
+updates scoped to Phase 4.
+
+---
+ kernel-open/nvidia-uvm/nv-tb-egpu-uvm.c       | 129 +++++++++++++++
+ kernel-open/nvidia-uvm/nv-tb-egpu-uvm.h       |  35 ++++
+ .../nvidia-uvm/nvidia-uvm-sources.Kbuild      |   1 +
+ kernel-open/nvidia-uvm/uvm.c                  |  16 ++
+ kernel-open/nvidia/nv-tb-egpu-recover.c       | 154 ++++++++++++++++++
+ kernel-open/nvidia/nv-tb-egpu-recover.h       |  45 ++++-
+ kernel-open/nvidia/nv.c                       |  45 +++++
+ 7 files changed, 423 insertions(+), 2 deletions(-)
+ create mode 100644 kernel-open/nvidia-uvm/nv-tb-egpu-uvm.c
+ create mode 100644 kernel-open/nvidia-uvm/nv-tb-egpu-uvm.h
+
+diff --git a/kernel-open/nvidia-uvm/nv-tb-egpu-uvm.c b/kernel-open/nvidia-uvm/nv-tb-egpu-uvm.c
+new file mode 100644
+index 0000000..c3437cb
+--- /dev/null
++++ b/kernel-open/nvidia-uvm/nv-tb-egpu-uvm.c
+@@ -0,0 +1,129 @@
++/*
++ * SPDX-FileCopyrightText: nvidia-driver-injector contributors
++ * SPDX-License-Identifier: MIT
++ *
++ * nv-tb-egpu-uvm.c — UVM close-path observability (cluster P4).
++ *
++ * Companion to the RM-side close-path DIAG in nv-tb-egpu-recover.c.
++ * Five lifecycle sites tracked here so we can answer "is the UVM
++ * close-path bug class (docs/architecture.md Problem 4) still
++ * load-bearing on the current driver stack?" with empirical evidence:
++ *
++ *   - uvm-open-entry      at end of uvm_open on the success path;
++ *                          pre-increment fd_count==0 ⇒ first-after-
++ *                          LAST-CLOSE (the canonical post-recovery open)
++ *   - uvm-release-entry   at top of uvm_release before any teardown
++ *   - uvm-pre-destroy     VA_SPACE branch only, just before
++ *                          uvm_va_space_destroy (the destabilising work)
++ *   - uvm-post-destroy    VA_SPACE branch only, just after
++ *                          uvm_va_space_destroy
++ *   - uvm-release-exit    end of uvm_release; post-decrement fd_count==0
++ *                          ⇒ canonical LAST-CLOSE
++ *
++ * On a last-close transition (the open that brings count up from 0 OR
++ * the release that brings it back to 0), this captures full DIAG + AER
++ * state via the nvidia.ko-exported helpers. Otherwise emits only the
++ * one-line marker — cheap when persistenced or another consumer still
++ * holds an fd.
++ *
++ * Passive-only instrumentation (ioremap+ioread32 inside
++ * tb_egpu_close_diag_pdev, PCI config-space reads inside
++ * tb_egpu_dump_aer_trigger_event). Verified non-perturbing 2026-05-08
++ * (per memory project_close_path_mitigated_2026_05_08).
++ *
++ * pdev lookup: tb_egpu_get_gpu_pdev walks nv_linux_devices inside
++ * nvidia.ko and returns the first NVIDIA pdev with refcount
++ * incremented. Replaces the legacy hardcoded
++ * pci_get_domain_bus_and_slot(0, 0x04, PCI_DEVFN(0,0)) — generalises
++ * to any PCI topology, single-GPU assumption preserved (the project's
++ * scope per memory project_aorus_egpu_setup).
++ */
++
++#include "nv-tb-egpu-uvm.h"
++
++#include <linux/atomic.h>
++#include <linux/pci.h>
++#include <linux/printk.h>
++
++/*
++ * Forward declarations of nvidia.ko-exported symbols. We can't include
++ * the nvidia/ tree's nv-tb-egpu-recover.h directly because the UVM
++ * Kbuild only adds -I$(src)/nvidia-uvm to the include path. The
++ * snapshot struct is forward-declared as an opaque pointer — UVM
++ * never inspects its contents, only passes the address through.
++ */
++struct tb_egpu_qwd_aer_snapshot;
++extern struct pci_dev *tb_egpu_get_gpu_pdev(void);
++extern void tb_egpu_close_diag_pdev(struct pci_dev *pdev, const char *site);
++extern void tb_egpu_dump_aer_trigger_event(struct pci_dev *gpu_pdev,
++                                           const char *trigger,
++                                           struct tb_egpu_qwd_aer_snapshot *out);
++
++/*
++ * UVM /dev/nvidia-uvm fd refcount. Incremented in uvm_open success
++ * path, decremented in uvm_release exit path. The kernel guarantees
++ * release matches a prior successful open, so mismatched counts are
++ * impossible by construction.
++ */
++static atomic_t tb_egpu_uvm_fd_count = ATOMIC_INIT(0);
++
++/* Shared body — one marker line, and on last-close also a full state
++ * capture via the cross-module helpers. Centralised so the per-site
++ * helpers below stay one-liners. */
++static void tb_egpu_uvm_emit(const char *site, int fd_count, bool is_last_close)
++{
++    struct pci_dev *pdev;
++
++    pr_info("tb_egpu UVM [CLOSE]: site=%-18s fd_count=%d%s\n",
++            site, fd_count, is_last_close ? " (LAST-CLOSE)" : "");
++
++    if (!is_last_close)
++        return;
++
++    pdev = tb_egpu_get_gpu_pdev();
++    if (!pdev) {
++        pr_info("tb_egpu UVM [CLOSE]: site=%s — no NVIDIA pdev bound; skipping DIAG\n",
++                site);
++        return;
++    }
++    tb_egpu_close_diag_pdev(pdev, site);
++    tb_egpu_dump_aer_trigger_event(pdev, site, NULL);
++    pci_dev_put(pdev);
++}
++
++void tb_egpu_uvm_close_diag_at_open(void)
++{
++    int prev = atomic_inc_return(&tb_egpu_uvm_fd_count) - 1;
++    /*
++     * Increment only on the success path (uvm_open calls us after the
++     * NV_OK return is committed). pre-increment count==0 means this
++     * open is the first after a LAST-CLOSE — capture full state.
++     */
++    tb_egpu_uvm_emit("uvm-open-entry", prev + 1, prev == 0);
++}
++
++void tb_egpu_uvm_close_diag_at_release_entry(void)
++{
++    int pre = atomic_read(&tb_egpu_uvm_fd_count);
++    /* Pre-decrement read — if count==1, this release will be LAST-CLOSE. */
++    tb_egpu_uvm_emit("uvm-release-entry", pre, pre == 1);
++}
++
++void tb_egpu_uvm_close_diag_at_pre_destroy(void)
++{
++    int pre = atomic_read(&tb_egpu_uvm_fd_count);
++    tb_egpu_uvm_emit("uvm-pre-destroy", pre, pre == 1);
++}
++
++void tb_egpu_uvm_close_diag_at_post_destroy(void)
++{
++    int pre = atomic_read(&tb_egpu_uvm_fd_count);
++    tb_egpu_uvm_emit("uvm-post-destroy", pre, pre == 1);
++}
++
++void tb_egpu_uvm_close_diag_at_release_exit(void)
++{
++    int post = atomic_dec_return(&tb_egpu_uvm_fd_count);
++    /* Post-decrement count==0 is the canonical LAST-CLOSE state. */
++    tb_egpu_uvm_emit("uvm-release-exit", post, post == 0);
++}
+diff --git a/kernel-open/nvidia-uvm/nv-tb-egpu-uvm.h b/kernel-open/nvidia-uvm/nv-tb-egpu-uvm.h
+new file mode 100644
+index 0000000..006b470
+--- /dev/null
++++ b/kernel-open/nvidia-uvm/nv-tb-egpu-uvm.h
+@@ -0,0 +1,35 @@
++/*
++ * SPDX-FileCopyrightText: nvidia-driver-injector contributors
++ * SPDX-License-Identifier: MIT
++ *
++ * nv-tb-egpu-uvm.h — UVM close-path observability (cluster P4).
++ *
++ * Public interface for uvm.c. The helpers below increment/read/decrement
++ * a UVM-internal fd refcount and emit one-line [CLOSE] markers at five
++ * UVM lifecycle sites. On last-close transitions (the open that brings
++ * the fd count up from 0 OR the release that brings it back to 0),
++ * additionally captures full DIAG + AER state via the nvidia.ko-exported
++ * helpers tb_egpu_close_diag_pdev and tb_egpu_dump_aer_trigger_event.
++ *
++ * Companion to the RM-side close-path DIAG in nv-tb-egpu-recover.c. The
++ * fd-count tracking is UVM-local because UVM has its own /dev/nvidia-uvm
++ * lifecycle that does NOT participate in nvl->usage_count.
++ *
++ * See nv-tb-egpu-uvm.c for the implementation notes.
++ */
++
++#ifndef _NV_TB_EGPU_UVM_H_
++#define _NV_TB_EGPU_UVM_H_
++
++/*
++ * Five helpers — one per UVM lifecycle site. Each encapsulates its
++ * own atomic operation on the internal fd_count, so the uvm.c call
++ * sites are pure single-line calls (no inline atomic logic to repeat).
++ */
++void tb_egpu_uvm_close_diag_at_open(void);                /* uvm-open-entry      */
++void tb_egpu_uvm_close_diag_at_release_entry(void);       /* uvm-release-entry   */
++void tb_egpu_uvm_close_diag_at_pre_destroy(void);         /* uvm-pre-destroy     */
++void tb_egpu_uvm_close_diag_at_post_destroy(void);        /* uvm-post-destroy    */
++void tb_egpu_uvm_close_diag_at_release_exit(void);        /* uvm-release-exit    */
++
++#endif /* _NV_TB_EGPU_UVM_H_ */
+diff --git a/kernel-open/nvidia-uvm/nvidia-uvm-sources.Kbuild b/kernel-open/nvidia-uvm/nvidia-uvm-sources.Kbuild
+index fd4d5c2..f2f85ed 100644
+--- a/kernel-open/nvidia-uvm/nvidia-uvm-sources.Kbuild
++++ b/kernel-open/nvidia-uvm/nvidia-uvm-sources.Kbuild
+@@ -3,6 +3,7 @@ NVIDIA_UVM_SOURCES_CXX ?=
+ 
+ NVIDIA_UVM_SOURCES += nvidia-uvm/uvm_common.c
+ NVIDIA_UVM_SOURCES += nvidia-uvm/uvm_linux.c
++NVIDIA_UVM_SOURCES += nvidia-uvm/nv-tb-egpu-uvm.c
+ NVIDIA_UVM_SOURCES += nvidia-uvm/nvstatus.c
+ NVIDIA_UVM_SOURCES += nvidia-uvm/nvCpuUuid.c
+ NVIDIA_UVM_SOURCES += nvidia-uvm/nv-kthread-q.c
+diff --git a/kernel-open/nvidia-uvm/uvm.c b/kernel-open/nvidia-uvm/uvm.c
+index 70d1451..da0957d 100644
+--- a/kernel-open/nvidia-uvm/uvm.c
++++ b/kernel-open/nvidia-uvm/uvm.c
+@@ -34,6 +34,7 @@
+ #include "uvm_tools.h"
+ #include "uvm_common.h"
+ #include "uvm_fd_type.h"
++#include "nv-tb-egpu-uvm.h"  /* tb_egpu UVM close-path observability (cluster P4) */
+ #include "uvm_linux_ioctl.h"
+ #include "uvm_hmm.h"
+ #include "uvm_mem.h"
+@@ -175,6 +176,9 @@ static int uvm_open(struct inode *inode, struct file *filp)
+     filp->private_data = NULL;
+     filp->f_mapping = mapping;
+ 
++    /* tb_egpu close-path observability (cluster P4): uvm-open-entry. */
++    tb_egpu_uvm_close_diag_at_open();
++
+     return NV_OK;
+ }
+ 
+@@ -252,13 +256,22 @@ static int uvm_release(struct inode *inode, struct file *filp)
+     void *ptr;
+     uvm_fd_type_t fd_type = uvm_fd_type(filp, &ptr);
+ 
++    /* tb_egpu close-path observability (cluster P4): uvm-release-entry. */
++    tb_egpu_uvm_close_diag_at_release_entry();
++
+     switch (fd_type) {
+         case UVM_FD_UNINITIALIZED:
+             uvm_kvfree(filp->f_mapping);
+             break;
+ 
+         case UVM_FD_VA_SPACE:
++            /* tb_egpu (cluster P4): pre-destroy — state before the
++             * destabilising uvm_va_space_destroy. */
++            tb_egpu_uvm_close_diag_at_pre_destroy();
+             uvm_release_va_space(filp, (uvm_va_space_t *)ptr);
++            /* tb_egpu (cluster P4): post-destroy — diff vs pre-destroy
++             * reveals the close-path's hardware/firmware footprint. */
++            tb_egpu_uvm_close_diag_at_post_destroy();
+             break;
+ 
+         case UVM_FD_MM:
+@@ -273,6 +286,9 @@ static int uvm_release(struct inode *inode, struct file *filp)
+             UVM_ASSERT_MSG(0, "Unexpected fd type: %d\n", fd_type);
+     }
+ 
++    /* tb_egpu close-path observability (cluster P4): uvm-release-exit. */
++    tb_egpu_uvm_close_diag_at_release_exit();
++
+     return 0;
+ }
+ 
+diff --git a/kernel-open/nvidia/nv-tb-egpu-recover.c b/kernel-open/nvidia/nv-tb-egpu-recover.c
+index d2f9e4b..f0a1984 100644
+--- a/kernel-open/nvidia/nv-tb-egpu-recover.c
++++ b/kernel-open/nvidia/nv-tb-egpu-recover.c
+@@ -402,6 +402,7 @@ void tb_egpu_dump_aer_trigger_event(struct pci_dev *gpu_pdev,
+     }
+     (void)gpu_aer_pos; (void)br_aer_pos; (void)root_aer_pos;
+ }
++EXPORT_SYMBOL_GPL(tb_egpu_dump_aer_trigger_event);
+ 
+ /* -----------------------------------------------------------------------
+  * Gate function — single source of truth for the recovery schedule
+@@ -1072,3 +1073,156 @@ void tb_egpu_recover_stop(nv_linux_state_t *nvl)
+     kfree(st);
+     nvl->recover = NULL;
+ }
++
++/* =======================================================================
++ * Close-path observability surface (cluster P4).
++ *
++ * Companion to the open-side DIAG infrastructure. Provides:
++ *   - tb_egpu_get_gpu_pdev: cross-module pdev lookup (UVM uses it)
++ *   - tb_egpu_close_diag_pdev: pdev-based passive state capture
++ *   - tb_egpu_close_diag: RM-side close-path marker + last-close dump
++ *
++ * The pdev-based variant exists so nvidia-uvm.ko (which has no
++ * nv_linux_state_t access) can capture the same hardware/firmware
++ * state at UVM close sites. All three are EXPORT_SYMBOL_GPL.
++ *
++ * Passive instrumentation only — ioremap+ioread32 + PCI config-space
++ * reads. No DMA, no register writes.
++ * =======================================================================
++ */
++
++struct pci_dev *tb_egpu_get_gpu_pdev(void)
++{
++    struct pci_dev   *out = NULL;
++    nv_linux_state_t *nvl;
++
++    LOCK_NV_LINUX_DEVICES();
++    for (nvl = nv_linux_devices; nvl != NULL; nvl = nvl->next)
++    {
++        if (nvl->pci_dev)
++        {
++            out = pci_dev_get(nvl->pci_dev);
++            break;
++        }
++    }
++    UNLOCK_NV_LINUX_DEVICES();
++    return out;
++}
++EXPORT_SYMBOL_GPL(tb_egpu_get_gpu_pdev);
++
++void tb_egpu_close_diag_pdev(struct pci_dev *pdev, const char *site)
++{
++    struct pci_dev *parent;
++    u64           bar0_phys;
++    u32           pmc_boot_0 = 0xdeadbeefu;
++    u32           wpr2_raw   = 0xdeadbeefu;
++    int           wpr2_rc;
++    void __iomem *map_pmc;
++    bool          pmc_ok = false;
++    u16 gpu_lnksta = 0xffff, br_lnksta = 0xffff;
++    u32 gpu_aer_unc = 0, gpu_aer_cor = 0;
++    u32 br_aer_unc = 0, br_aer_cor = 0;
++    int gpu_aer_pos = 0, br_aer_pos = 0;
++
++    if (!pdev)
++    {
++        nv_printf(NV_DBG_ERRORS,
++            "tb_egpu [UVM-DIAG]: site=%s pdev=NULL — cannot read\n",
++            site);
++        return;
++    }
++
++    bar0_phys = pci_resource_start(pdev, 0);
++    if (bar0_phys == 0)
++    {
++        nv_printf(NV_DBG_ERRORS,
++            "tb_egpu [UVM-DIAG]: site=%s bar0=0 — skipping\n", site);
++        return;
++    }
++
++    /* PMC_BOOT_0 (BAR0 offset 0). */
++    map_pmc = ioremap(bar0_phys, PAGE_SIZE);
++    if (map_pmc)
++    {
++        pmc_boot_0 = ioread32(map_pmc);
++        iounmap(map_pmc);
++        pmc_ok = true;
++    }
++
++    /* WPR2 via the shared helper extracted in P2. */
++    wpr2_rc = tb_egpu_recover_read_wpr2(bar0_phys, &wpr2_raw);
++
++    /* LnkSta + AER on GPU + bridge (passive config-space reads). */
++    parent = pci_upstream_bridge(pdev);
++    (void)pcie_capability_read_word(pdev, PCI_EXP_LNKSTA, &gpu_lnksta);
++    gpu_aer_pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_ERR);
++    if (gpu_aer_pos)
++    {
++        (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_UNCOR_STATUS, &gpu_aer_unc);
++        (void)pci_read_config_dword(pdev, gpu_aer_pos + PCI_ERR_COR_STATUS,   &gpu_aer_cor);
++    }
++    if (parent)
++    {
++        (void)pcie_capability_read_word(parent, PCI_EXP_LNKSTA, &br_lnksta);
++        br_aer_pos = pci_find_ext_capability(parent, PCI_EXT_CAP_ID_ERR);
++        if (br_aer_pos)
++        {
++            (void)pci_read_config_dword(parent, br_aer_pos + PCI_ERR_UNCOR_STATUS, &br_aer_unc);
++            (void)pci_read_config_dword(parent, br_aer_pos + PCI_ERR_COR_STATUS,   &br_aer_cor);
++        }
++    }
++
++    nv_printf(NV_DBG_ERRORS,
++        "tb_egpu [UVM-DIAG]: site=%-18s pdev=%s bar0=0x%llx "
++        "PMC_BOOT_0=%s%08x WPR2=%s%08x WPR2_up=%s parent=%s "
++        "GPU_LnkSta=0x%04x(Speed=%u Width=x%u Active=%c) "
++        "Br_LnkSta=0x%04x(Speed=%u Width=x%u Active=%c) "
++        "GPU_AER_Unc=0x%08x Cor=0x%08x Br_AER_Unc=0x%08x Cor=0x%08x\n",
++        site, pci_name(pdev),
++        (unsigned long long)bar0_phys,
++        pmc_ok ? "0x" : "MAPFAIL:", pmc_boot_0,
++        (wpr2_rc == 0) ? "0x" : "MAPFAIL:", wpr2_raw,
++        ((wpr2_raw & TB_EGPU_RECOVER_WPR2_VAL_MASK) != 0) ? "YES" : "no",
++        parent ? pci_name(parent) : "NULL",
++        gpu_lnksta,
++        (gpu_lnksta & PCI_EXP_LNKSTA_CLS),
++        (gpu_lnksta & PCI_EXP_LNKSTA_NLW) >> 4,
++        (gpu_lnksta & PCI_EXP_LNKSTA_DLLLA) ? 'Y' : 'N',
++        br_lnksta,
++        (br_lnksta & PCI_EXP_LNKSTA_CLS),
++        (br_lnksta & PCI_EXP_LNKSTA_NLW) >> 4,
++        (br_lnksta & PCI_EXP_LNKSTA_DLLLA) ? 'Y' : 'N',
++        gpu_aer_unc, gpu_aer_cor, br_aer_unc, br_aer_cor);
++
++    (void)gpu_aer_pos; (void)br_aer_pos;
++}
++EXPORT_SYMBOL_GPL(tb_egpu_close_diag_pdev);
++
++void tb_egpu_close_diag(nv_linux_state_t *nvl,
++                        const char *site,
++                        long usage_count,
++                        bool is_last_close)
++{
++    nv_state_t *nv;
++
++    if (!nvl)
++        return;
++
++    nv = NV_STATE_PTR(nvl);
++
++    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++        "tb_egpu [CLOSE]: site=%-15s usage_count=%ld%s\n",
++        site, usage_count, is_last_close ? " (LAST-CLOSE)" : "");
++
++    if (is_last_close && nvl->pci_dev)
++    {
++        /*
++         * Full state capture via the pdev-based variant — same passive
++         * capture both the RM-side and UVM-side close paths use. Diff
++         * across open->close->reopen tells us what the close path
++         * mutates in hardware/firmware state that breaks the next open.
++         */
++        tb_egpu_close_diag_pdev(nvl->pci_dev, site);
++        tb_egpu_dump_aer_trigger_event(nvl->pci_dev, site, NULL);
++    }
++}
+diff --git a/kernel-open/nvidia/nv-tb-egpu-recover.h b/kernel-open/nvidia/nv-tb-egpu-recover.h
+index d84cd90..bf025ac 100644
+--- a/kernel-open/nvidia/nv-tb-egpu-recover.h
++++ b/kernel-open/nvidia/nv-tb-egpu-recover.h
+@@ -245,11 +245,52 @@ enum tb_egpu_recover_gate tb_egpu_recover_pre_schedule_gates(
+  *   - nv_pci_error_detected and nv_pci_mmio_enabled / nv_pci_cor_error_detected
+  *     callbacks, with out=NULL (no per-callback snapshot persistence)
+  *
+- * Internal-only — declared here for kernel-open consumers; not exported
+- * across module boundaries.
++ * Exported via EXPORT_SYMBOL_GPL so nvidia-uvm.ko can capture the same
++ * AER snapshot at UVM close-path sites (cluster P4). Other in-tree
++ * consumers (Q-watchdog, err_handlers) call it without an export.
+  */
+ void tb_egpu_dump_aer_trigger_event(struct pci_dev *gpu_pdev,
+                                     const char *trigger,
+                                     struct tb_egpu_qwd_aer_snapshot *out);
+ 
++/*
++ * Close-path observability surface (cluster P4).
++ *
++ * Companion to the open-side DIAG infrastructure (probe-end /
++ * startdev-entry / pre-rmInit / post-rmInit-{OK,FAIL}). Captures state
++ * diff across the open -> work -> close -> reopen lifecycle so the
++ * close-path bug class (docs/architecture.md Problem 2 + Problem 4)
++ * can be diagnosed empirically. Mitigation is currently observational
++ * — these markers are how we know the bug class stays mitigated under
++ * stack changes.
++ *
++ * tb_egpu_close_diag — RM-side marker.
++ *   site         short site label (e.g. "close-entry", "post-shutdown")
++ *   usage_count  caller's snapshot of nvl->usage_count at the site
++ *   is_last_close  caller-determined; true triggers full pdev-based
++ *                  DIAG + AER snapshot via tb_egpu_close_diag_pdev.
++ *                  False emits only the one-line marker.
++ *
++ * tb_egpu_close_diag_pdev — pdev-based passive state capture.
++ *   Reads PMC_BOOT_0 + WPR2 + LnkSta + AER (GPU + bridge) via
++ *   ioremap+ioread32 + PCI config-space reads only. No DMA, no
++ *   register writes. Called from tb_egpu_close_diag on last-close and
++ *   from the UVM-side close-path helpers (which use it cross-module).
++ *
++ * tb_egpu_get_gpu_pdev — exported lookup helper for cross-module
++ *   callers (UVM specifically). Walks nv_linux_devices under the
++ *   global lock and returns the first NVIDIA pdev with refcount
++ *   incremented (caller MUST pci_dev_put). Returns NULL if no
++ *   nvidia.ko-managed device is bound.
++ *
++ * Passive instrumentation pattern verified non-perturbing 2026-05-08
++ * (per memory project_close_path_mitigated_2026_05_08).
++ */
++void tb_egpu_close_diag(nv_linux_state_t *nvl,
++                        const char *site,
++                        long usage_count,
++                        bool is_last_close);
++void tb_egpu_close_diag_pdev(struct pci_dev *pdev, const char *site);
++struct pci_dev *tb_egpu_get_gpu_pdev(void);
++
+ #endif /* _NV_TB_EGPU_RECOVER_H_ */
+diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
+index 2c646af..63a515e 100644
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -2108,6 +2108,14 @@ void nv_stop_device(nv_state_t *nv, nvidia_stack_t *sp)
+             nv_acpi_unregister_notifier(nvl);
+             nv_shutdown_adapter(sp, nv, nvl);
+         }
++        /*
++         * tb_egpu close-path observability (cluster P4): post-shutdown
++         * site. usage_count is 0 here (nv_stop_device is only entered
++         * once it reaches 0). Captures GSP/firmware state immediately
++         * after the destabilising teardown sequence — the most
++         * diagnostic of the four close-path sites.
++         */
++        tb_egpu_close_diag(nvl, "post-shutdown", 0L, true);
+     }
+ 
+     if (!(nv->flags & NV_FLAG_PERSISTENT_SW_STATE))
+@@ -2195,6 +2203,18 @@ nvidia_close_callback(
+ 
+     nv = NV_STATE_PTR(nvl);
+ 
++    /*
++     * tb_egpu close-path observability (cluster P4): close-entry site.
++     * Captures pre-close state. is_last_close=true triggers full DIAG +
++     * AER snapshot only when this close will drive usage_count to 0
++     * (i.e. count==1 before any decrement). Otherwise just the
++     * one-line marker.
++     */
++    {
++        long _tb_uc = atomic64_read(&nvl->usage_count);
++        tb_egpu_close_diag(nvl, "close-entry", _tb_uc, _tb_uc == 1);
++    }
++
+     rm_cleanup_file_private(sp, nv, &nvlfp->nvfp);
+ 
+     down(&nvl->mmap_lock);
+@@ -2202,12 +2222,37 @@ nvidia_close_callback(
+     up(&nvl->mmap_lock);
+ 
+     down(&nvl->ldata_lock);
++
++    /*
++     * tb_egpu close-path observability (cluster P4): pre-stop site.
++     * Captures state immediately before nv_close_device runs. If this
++     * is the last close, nv_close_device will call nv_stop_device
++     * which runs the destabilising teardown — diff against
++     * post-shutdown reveals what teardown mutates.
++     */
++    {
++        long _tb_uc = atomic64_read(&nvl->usage_count);
++        tb_egpu_close_diag(nvl, "pre-stop", _tb_uc, _tb_uc == 1);
++    }
++
+     nv_close_device(nv, sp);
+ 
+     bRemove = (!NV_IS_DEVICE_IN_SURPRISE_REMOVAL(nv)) &&
+               (atomic64_read(&nvl->usage_count) == 0) &&
+               rm_get_device_remove_flag(sp, nv->gpu_id);
+ 
++    /*
++     * tb_egpu close-path observability (cluster P4): close-exit site.
++     * Captures post-teardown state. usage_count==0 here on the
++     * last-close path means nv_stop_device just ran. Diff this against
++     * the next open's startdev-entry/pre-rmInit to pinpoint what the
++     * close path leaves in a state that breaks the next open.
++     */
++    {
++        long _tb_uc = atomic64_read(&nvl->usage_count);
++        tb_egpu_close_diag(nvl, "close-exit", _tb_uc, _tb_uc == 0);
++    }
++
+     nv_free_file_private(nvlfp);
+ 
+     /*
+-- 
+2.54.0
+
