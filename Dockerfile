@@ -71,8 +71,18 @@ RUN git clone --depth 1 -b ${NVIDIA_OPEN_TAG} \
 # We ship the version-matched binary so there is no NVML interface skew
 # between the userspace tool and the in-kernel driver.
 #
+# We ALSO carry the GSP firmware blobs (gsp_ga10x.bin + gsp_tu10x.bin) from
+# the same .run into /opt/nvidia-firmware/. The kernel's request_firmware()
+# reads GSP firmware from the *host* /lib/firmware at device init — so unlike
+# nvidia-smi/libnvidia-ml (which stay in the container), the firmware must
+# physically reach the host. If the host ever loses it (e.g. an nvidia RPM
+# that owned /lib/firmware/nvidia is removed — see the 2026-05-22
+# nvidia-kmod-common incident), the entrypoint re-supplies it from this
+# baked-in copy. The image is then the single durable source for the
+# patched .ko, nvidia-smi, libnvidia-ml AND GSP firmware.
+#
 # Strip out everything we don't need (kernel module source, libcuda, GL
-# libraries, etc.) — image footprint adds ~5-10 MB net.
+# libraries, etc.) — nvidia-smi+NVML add ~5-10 MB, GSP firmware ~103 MB.
 RUN curl -fsSL -o /tmp/nvidia.run \
         https://us.download.nvidia.com/XFree86/Linux-x86_64/${NVIDIA_OPEN_TAG}/NVIDIA-Linux-x86_64-${NVIDIA_OPEN_TAG}.run && \
     chmod +x /tmp/nvidia.run && \
@@ -81,6 +91,10 @@ RUN curl -fsSL -o /tmp/nvidia.run \
     install -m 0644 /tmp/nv-extract/libnvidia-ml.so.${NVIDIA_OPEN_TAG} /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.${NVIDIA_OPEN_TAG} && \
     ln -sf libnvidia-ml.so.${NVIDIA_OPEN_TAG} /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1 && \
     ldconfig && \
+    install -d /opt/nvidia-firmware && \
+    install -m 0644 /tmp/nv-extract/firmware/gsp_ga10x.bin \
+                    /tmp/nv-extract/firmware/gsp_tu10x.bin \
+                    /opt/nvidia-firmware/ && \
     rm -rf /tmp/nvidia.run /tmp/nv-extract
 
 # Fetch upstream NVIDIA open driver source at image-build time.
