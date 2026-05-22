@@ -8,7 +8,8 @@ introduces.
 
 For the refactor mechanics (commits, line counts, cross-cluster touches),
 see `docs/patch-refactor-status.md`. For the forensic design analysis,
-see `docs/patch-refactor-inventory.md` (810 lines).
+see `docs/patch-refactor-inventory.md` (810 lines). For how each cluster
+maps to the upstream **C/E/A** patch geometry, see `docs/upstream-plan.md`.
 
 ---
 
@@ -69,11 +70,12 @@ Subsequent `nvidia-smi` invocations report "No devices were found" until reboot.
 - Constants: `TB_EGPU_GPU_LOST_RETRIES`, `TB_EGPU_GPU_LOST_DELAY_US`, `TB_EGPU_DEAD_BUS_U32/U16/U8`
 - Inline helper: `tb_egpu_check_dead_bus(OBJGPU *)`
 
-### Upstream candidacy
+### Upstream geometry
 
-**HIGH** — bug #979 is upstream-acknowledged; the fix is well-scoped and
-doesn't depend on any project-private symbols. Most upstream-ready of the
-seven clusters.
+**Carves to `C3` + `C5`** (Core — upstream-bound). The
+retry-before-declaring-lost sub-theme → `C3`, the bug-#979 headline fix; the
+don't-crash-on-an-already-lost-GPU guards plus the `os_pci_*_disconnected`
+bridge → `C5`. Canonical spec: `docs/upstream-plan.md`.
 
 ### Related memory
 
@@ -116,10 +118,12 @@ PCIe link issues that should drive recovery are invisible to err_handlers.
 - Public API: `int tb_egpu_aer_clear_uncor_mask(struct pci_dev *)`
 - New files: `kernel-open/nvidia/nv-tb-egpu-aer.{c,h}`
 
-### Upstream candidacy
+### Upstream geometry
 
-**MEDIUM-HIGH** — small, self-contained, and the Windows closed driver
-does this same clear. Reasonable as a standalone upstream PR.
+**Carves to `C2`** (Core — upstream-bound), narrowed to the internal-error
+mask bits (`PCI_ERR_UNC_INTN` + `PCI_ERR_COR_INTERNAL`) — the project's
+actual bug; the Windows closed driver does the same clear. Canonical spec:
+`docs/upstream-plan.md`.
 
 ### Related memory
 
@@ -168,10 +172,12 @@ Q-watchdog wakes up such freezes within `IntervalMs * 1.5` of failure.
 - Sysfs (per-device): `tb_egpu_qwd_cycles`, `tb_egpu_qwd_detections`, `tb_egpu_qwd_last_detection_jiffies`, `tb_egpu_qwd_last_pmc_boot_0`, `tb_egpu_qwd_last_aer_summary`
 - New files: `kernel-open/nvidia/nv-tb-egpu-qwd.{c,h}`
 
-### Upstream candidacy
+### Upstream geometry
 
-**LOW** — Thunderbolt-eGPU-specific. Not relevant on internal GPUs
-where DMA-path wedges are vanishingly rare. Stays project-local.
+**Addon `A1`** — project-local, never a PR. A perpetual poll is a workaround
+for Mode B, a failure upstream has not root-caused; workarounds get retired
+when the root cause is fixed, not promoted upstream. Canonical spec:
+`docs/upstream-plan.md`.
 
 ### Related memory
 
@@ -229,15 +235,13 @@ WPR2_ADDR_HI=0x07f4a000 (stuck; cold boot value)
 - Uevent envvar: `TB_EGPU_GPU_STATE=READY|RECOVERING|PERMANENT_FAIL`
 - New files: `kernel-open/nvidia/nv-tb-egpu-recover.{c,h}`
 
-### Upstream candidacy
+### Upstream geometry
 
-**MEDIUM** — registering `pci_error_handlers` on the open driver is
-strictly upstream-improving (the open driver currently NULL-pads the
-struct), but the AORUS-specific recovery state machine is too
-opinionated for upstream. Possible upstream split: ship just the
-`nv_pci_err_handlers` registration + a thin default that returns
-`PCI_ERS_RESULT_DISCONNECT` everywhere; keep the recovery state
-machine project-local.
+**Carves to `C4` + `A2`.** The `pci_error_handlers` registration with a
+state-aware `error_detected` → `C4` (Core — upstream-bound; the open driver
+currently NULL-pads the struct). The recovery state machine + H1/H2/H3 gate
+policy → Addon `A2` (project-local — opinionated recovery for the project's
+failure taxonomy). Canonical spec: `docs/upstream-plan.md`.
 
 ### Related memory
 
@@ -290,9 +294,10 @@ re-init of the same process tree.
 - Exported helpers (EXPORT_SYMBOL_GPL): `tb_egpu_get_gpu_pdev`, `tb_egpu_close_diag_pdev`, `tb_egpu_dump_aer_trigger_event` (promoted from P2's internal-only)
 - Log prefixes: `tb_egpu [CLOSE]`, `tb_egpu UVM [CLOSE]`, `tb_egpu [UVM-DIAG]`
 
-### Upstream candidacy
+### Upstream geometry
 
-**LOW** — pure observational instrumentation, project-specific bug class.
+**Addon `A3`** — project-local observational instrumentation for a
+project-specific bug class. Never a PR.
 
 ### Related memory
 
@@ -346,9 +351,9 @@ diff, the mechanism would have stayed hypothetical.
 - Function: `tb_egpu_diag_dump(nvl, site)`
 - Re-uses 4 P2 helpers (`read_wpr2`, `walk_to_root_port`, `read_dpc_state`, `read_aer_full`) — P6 promotes them from file-static to module-internal linkage
 
-### Upstream candidacy
+### Upstream geometry
 
-**LOW** — pure project-private diagnostic. Probably stripped if any P1/P2/P5 piece goes upstream.
+**Addon `A4`** — project-local DIAG surface. Never a PR.
 
 ### Related memory
 
@@ -390,11 +395,12 @@ Override at build time:
 make CONFIG_NV_TB_EGPU_DIAG=y modules
 ```
 
-### Upstream candidacy
+### Upstream geometry
 
-**HIGH** for the version.mk-as-truth fix (purely a Kbuild cleanup;
-independent of the eGPU work). **N/A** for the CONFIG_NV_TB_EGPU_DIAG
-toggle (project-private).
+**Carves to `C1` + `A5`.** The Kbuild/version.mk-as-truth mechanism → `C1`
+(Core — upstream-bound; pure build hygiene, no eGPU coupling). The
+`NVIDIA_VERSION` *value* + the `CONFIG_NV_TB_EGPU*` toggles → Addon `A5`
+(project metadata). Canonical spec: `docs/upstream-plan.md`.
 
 ---
 
@@ -443,20 +449,32 @@ toggle (project-private).
 
 ---
 
-## Upstream-readiness summary
+## Upstream geometry — C/E/A
 
-If any of these go upstream as standalone NVIDIA/open-gpu-kernel-modules
-PRs, in priority order:
+The carve sorts these seven clusters into the C/E/A geometry (full spec and
+rationale: `docs/upstream-plan.md`):
 
-1. **P1** — bug #979 fix. Well-scoped, no project dependencies, addresses a real upstream bug.
-2. **P7 (version.mk part only)** — Kbuild/version.mk-as-truth. Pure cleanup; no eGPU coupling.
-3. **P5** — AER UncMask clear. Small, self-contained, matches Windows driver behaviour.
-4. **P2 (err_handlers struct registration only)** — strictly upstream-improving (open driver currently NULL-pads); the recovery state machine itself stays project-local.
+| This cluster | Carves to | Layer |
+|---|---|---|
+| P1 — crash-safety | `C3` retry + `C5` crash-safety | Core — upstream-bound |
+| P5 — AER UncMask | `C2` | Core — upstream-bound |
+| P2 — err-handlers + recovery | `C4` err-handlers / `A2` recovery | C4 upstream, A2 Addon |
+| P7 — build metadata | `C1` Kbuild mechanism / `A5` value + toggles | C1 upstream, A5 Addon |
+| P3 — Q-watchdog | `A1` | Addon — project-local |
+| P4 — close-path | `A3` | Addon — project-local |
+| P6 — DIAG | `A4` | Addon — project-local |
 
-**Stays project-local indefinitely**: P3 (qwd kthread, TB-specific), P4 (close-path observability), P6 (DIAG), P2's recovery state machine.
+`E1` (modernise eGPU detection) has no cluster source — it modernises vanilla
+NVIDIA `RmCheckForExternalGpu`. The upstream-bound set is **`C1`–`C5` + `E1`**;
+the Addon layer (`A1`–`A5`) never becomes a PR.
 
-Decision per `feedback_no_premature_upstream_filing.md`: do not file
-until production-validated. Phase 3 soak is the gate.
+The watchdog and recovery (`A1`/`A2`) were earlier slated as upstream
+`E2`/`E3`; they were reclassified as Addon (2026-05-22) — workarounds for
+failure modes upstream has not root-caused get retired, not upstreamed.
+
+Decision per `feedback_no_premature_upstream_filing.md`: pushing a branch to
+the fork is not a submission; do not open an upstream PR until
+production-validated. Phase 3 soak is the gate.
 
 ---
 
@@ -464,5 +482,5 @@ until production-validated. Phase 3 soak is the gate.
 
 - `docs/patch-refactor-status.md` — refactor mechanics (commits, line counts, cross-cluster touches), current phase
 - `docs/patch-refactor-inventory.md` — Phase 1 forensics (810 lines)
-- `docs/lever-catalog.md` — reliability levers, including those that became these patches
+- `docs/upstream-plan.md` — the C/E/A upstream geometry and the Phase 3 plan
 - Memory: `MEMORY.md` indexes the empirical observations and locked decisions
