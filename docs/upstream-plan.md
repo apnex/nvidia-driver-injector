@@ -95,27 +95,40 @@ U-number (see [Submission order](#submission-order)).
 - **Review risk:** minimal; self-evidently correct. Good trust-builder.
 - **Candidacy:** HIGH.
 
-### U2 — Clear the AER Uncorrectable Mask at probe
+### U2 — Clear the AER internal-error mask bits at probe
 
 - **Source:** cluster P5 (`patches/0002`).
-- **Change:** at probe, clear `PCI_ERR_UNCOR_MASK` on the GPU so it does not
-  mask its own uncorrectable PCIe errors. Gated on `pci_find_ext_capability`
-  so it is a no-op on devices without an AER ext-cap.
-- **Benefit to all:** a GPU that masks its own uncorrectable errors demotes
-  them to "advisory correctable", blinding the kernel AER subsystem for every
-  user — it hides real link faults, not just eGPU ones. **NVIDIA's own Windows
-  closed driver performs this same clear** — a direct upstream-parity argument.
+- **Change:** at probe, clear the *internal-error* mask bits — `PCI_ERR_UNC_INTN`
+  (Uncorrectable Mask) + `PCI_ERR_COR_INTERNAL` (Correctable Mask) — so the GPU
+  stops masking its own internal PCIe errors and demoting them to "advisory
+  correctable", which blinds the kernel AER subsystem to real link faults.
+  Gated on `pci_find_ext_capability` — a no-op on devices without an AER ext-cap.
+- **Kernel-7.0 finding — narrowed + hand-rolled.** Kernel 7.0 added
+  `pci_aer_unmask_internal_errors()` (`drivers/pci/pcie/aer.c`) — the surgical
+  version doing exactly those two bits. The project's bug was precisely the
+  Internal Error bit (`UncMsk=0x00400000`), so **U2 narrows to it**; P5's
+  whole-`PCI_ERR_UNCOR_MASK` clear was over-broad. U2 **cannot call** the kernel
+  function — it is `EXPORT_SYMBOL_FOR_MODULES(…, "cxl_core")`, not linkable by
+  `nvidia.ko`. Widening that export is a separate *Linux-kernel* PR the PCI
+  maintainers would likely decline (they restricted it deliberately — "internal
+  errors are too device-specific to enable generally"). So U2 hand-rolls the two
+  register writes; the kernel function is the canonical *reference for scope*,
+  not a callee.
+- **Framing:** the kernel's "device-specific" stance reframes U2 honestly as a
+  *device-specific* unmask — a call the device's own driver is entitled to make
+  — rather than a pure benefit-all change. NVIDIA's Windows closed driver does
+  the same clear.
 - **De-brand:** drop the `NVreg_TbEgpuAerUncMaskClear` module param entirely —
-  no user-facing toggle. The clear is **unconditional**, matching NVIDIA's
-  Windows driver (decided 2026-05-22). The `pci_find_ext_capability` guard is
-  not an opt-out — it just makes the clear a correct no-op on devices with no
-  AER ext-cap.
-- **Scope boundary:** just the UncMask clear — no err_handler wiring (that is U4).
-- **Telemetry:** one `pci_info` at probe noting the AER UncMask was cleared —
-  the audit trail for the resulting change in error visibility.
-- **Review risk:** low–moderate. Reviewers may ask "why was it masked"; the
-  demotion mechanism (`docs/patches.md` P5) and the Windows-parity point answer
-  it.
+  no user-facing toggle; the clear is **unconditional**, matching the Windows
+  driver (decided 2026-05-22). The `pci_find_ext_capability` guard is not an
+  opt-out — just a correct no-op where there is no AER ext-cap.
+- **Scope boundary:** just the internal-error mask bits — no err_handler wiring
+  (that is U4).
+- **Telemetry:** one `pci_info` at probe noting the internal-error mask bits
+  were cleared — the audit trail for the change in error visibility.
+- **Review risk:** low. Narrowing to the two canonical bits (matching the
+  kernel's `pci_aer_unmask_internal_errors`) plus the Windows-parity point make
+  it a well-grounded PR.
 - **Candidacy:** MEDIUM-HIGH.
 
 ### U3 — Retry a transient bus read before declaring the GPU permanently lost
