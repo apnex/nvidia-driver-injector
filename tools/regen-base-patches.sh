@@ -31,6 +31,7 @@ done
 
 manifest="$repo_root/patches/manifest"
 base_dir="$repo_root/patches/base"
+[ -f "$manifest" ] || { echo "regen: no manifest at $manifest" >&2; exit 1; }
 mkdir -p "$base_dir"
 
 tag_sha="$(git -C "$fork" rev-parse --verify "refs/tags/$tag^{commit}" 2>/dev/null)" \
