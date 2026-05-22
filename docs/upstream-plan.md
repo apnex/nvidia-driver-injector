@@ -9,14 +9,14 @@ Phase 3 of the patch work: identify and submit the subset of this project's
 patches that belongs in NVIDIA's upstream `open-gpu-kernel-modules`, for the
 benefit of every open-driver user — not just Thunderbolt eGPU users.
 
-This document is the *target set* and the per-PR spec — **8 target PRs**: 5
-core-path (`U1`–`U5`) + 3 eGPU-path (`E1`–`E3`), carved from the project's 7
-`tb_egpu_*` clusters. (`U3` may split into 2 if review prefers → up to 9.) The
+This document is the *target set* and the per-PR spec — **7 target PRs**: 4
+core-path (`U1`–`U4`) + 3 eGPU-path (`E1`–`E3`), carved from the project's 7
+`tb_egpu_*` clusters. (`U3` may split into 2 if review prefers → up to 8.) The
 remainder of the 7 clusters stays project-local and never becomes a PR.
 
 **This doc also defines the project's target patch geometry.** The same
 classification that sorts code for upstream re-architects the project's own
-driver — a **base layer** (the would-be-upstream set `U1`–`U5` + `E1`–`E3`,
+driver — a **base layer** (the would-be-upstream set `U1`–`U4` + `E1`–`E3`,
 clean and de-brandable) plus a thin **additive layer** of genuinely
 project-local code (configurable recovery policy, kill-switch, the
 `TB_EGPU_GPU_STATE` uevent, P4/P6 observability) on top. The production driver
@@ -35,7 +35,7 @@ belongs*. The rule, in priority order:
    open-driver user — or *can be generalised* to — it belongs in the driver's
    core logic, not behind any eGPU gate. "It was discovered through eGPU work"
    is not a reason to scope it to eGPU. Push to core wherever possible. This is
-   the `U1`–`U5` core-path set.
+   the `U1`–`U4` core-path set.
 
 2. **The eGPU code path — the exception, kept minimal.** Only code that is
    *intrinsically* eGPU-specific — cannot be generalised without harming the
@@ -68,12 +68,11 @@ on the rare, meaningful events, at kernel-appropriate levels (`pci_info` /
 event). This is the same instrument-so-you-can-prove-what-happened discipline
 used during the investigation, calibrated down to *operational* level — it is
 explicitly **not** the heavy `[DIAG]` surface (P4/P6), which stays
-project-local. Patches whose value is otherwise invisible — `U3` (a transient
-silently recovered) and `U5` (a GPU silently revived) — **must** log; that
-telemetry is mandatory, not optional. Each PR below carries a **Telemetry**
-line.
+project-local. The patch whose value is otherwise invisible — `U3` (a transient
+silently recovered) — **must** log; that telemetry is mandatory, not optional.
+Each PR below carries a **Telemetry** line.
 
-## Core-path set — U1–U5
+## Core-path set — U1–U4
 
 The transport-agnostic changes: each benefits every open-driver user and goes
 in the driver's **core** logic, behind no eGPU gate. Submission order =
@@ -188,59 +187,42 @@ U-number (see [Submission order](#submission-order)).
   this; the open driver is the outlier.
 - **De-brand:** the callbacks must be *thin and generic* — return the correct
   `pci_ers_result_t`, carry no project state.
-- **Scope boundary:** U4 is *scaffolding only* — the `pci_error_handlers`
-  registration plus state-aware `error_detected` and minimal `mmio_enabled` /
-  `slot_reset` / `resume`. It is a complete, shippable, correct unit on its
-  own: the kernel can reach the driver, non-fatal errors recover, fatal errors
-  honestly disconnect. The *real* `slot_reset` that revives the GPU is **U5**
-  (core, separate PR, requires U4). The eGPU-specific *self-triggered* recovery
-  is `E3`. The operational policy — H1/H2/H3 gates, kill-switch file,
-  `TB_EGPU_GPU_STATE` uevent — is project-local and never upstreamed.
+- **Scope boundary:** U4 is the err_handlers registration plus the four
+  callbacks — state-aware `error_detected` and minimal `mmio_enabled` /
+  `slot_reset` / `resume`. It is the **complete, final** general contribution:
+  the kernel can reach the driver, non-fatal errors recover, fatal errors
+  honestly disconnect. There is no U5 — a "real `slot_reset`" that revives a
+  *running* GPU does not cleanly exist (see [U5 — dropped](#u5--dropped-2026-05-22)).
+  `error_detected` stays at `DISCONNECT` on fatal. The eGPU-specific
+  reset-and-retry recovery is `E3`; the operational policy — H1/H2/H3 gates,
+  kill-switch file, `TB_EGPU_GPU_STATE` uevent — is project-local.
 - **Telemetry:** each callback logs its decision and the channel state (e.g.
   "error_detected: frozen → DISCONNECT"). Rare events — one line each is
   correct, not noise.
 - **Review risk:** moderate. The callback behaviour is settled (state-aware
-  `error_detected`, above). Submit after U1–U3; U5 then builds on it.
+  `error_detected`, above). Submit last, after U1–U3.
 - **Candidacy:** MEDIUM (registration is strictly upstream-improving; the
   policy half deliberately withheld).
 
-### U5 — Real slot_reset: revive the GPU after a kernel slot reset
+### U5 — dropped (2026-05-22)
 
-- **Source:** cluster P2 (`patches/0004`), the reset-and-re-init *mechanism*
-  (not the triggering policy).
-- **Requires U4.** U5 is meaningless without the err_handlers scaffolding —
-  `slot_reset` is only ever reached because U4 registered the struct. Reviewed
-  and merged after U4, never standalone.
-- **Change:** two coupled parts. (1) A **standalone, context-free GPU re-init
-  routine** — given a hardware-reset GPU it revives it (GSP reload, BAR remap,
-  adapter re-init), with no knowledge of *why* the reset happened — and the
-  `slot_reset` callback as a thin caller of it. Factoring it as a routine
-  (rather than inlining it in `slot_reset`) is deliberate: E3 reuses the same
-  routine for the AER-less self-triggered path. (2) Flip `error_detected`'s
-  fatal case from `DISCONNECT` → `NEED_RESET`, so the kernel now drives a fatal
-  error into the new `slot_reset` path instead of giving up.
-- **Benefit to all:** `slot_reset` is a pure error-recovery-path event
-  callback — invoked *only* by the kernel after it has reset a slot following
-  an AER/DPC error, never on any normal-operation path (not polled, not on the
-  hot path, zero always-on cost). It is the correct completion of the
-  error-handler contract U4 opts into: any GPU that ever takes a slot reset
-  (datacenter fabrics, risers, PCIe switches, eGPU) is revived rather than left
-  dead. Every mature in-tree PCIe driver implements a real `slot_reset`.
-- **De-brand:** the re-init routine is generic — the same operation regardless
-  of why the slot was reset. No project state, no eGPU branching.
-- **Scope boundary:** the reset-and-re-init *mechanism* only. The
-  eGPU-specific *self-triggered* invocation — recovering from an
-  `rm_init_adapter` failure that raised no kernel AER event — is `E3`, not U5.
-  `E3` reuses U5's re-init routine but supplies its own trigger.
-- **Telemetry (mandatory):** log `slot_reset` entry and outcome — revive
-  succeeded or failed. The outcome is U5's justification; without it the revive
-  succeeds or fails invisibly.
-- **Review risk:** highest of the core set. Correctly reviving a
-  hardware-reset Blackwell GPU is real, subtle engineering (GSP, WPR2, BAR
-  state, timing) — which is exactly why it is split out from U4's mechanical
-  scaffolding and gets its own focused review. Submit last.
-- **Candidacy:** MEDIUM — the mechanism is general and correct, but it is the
-  most involved core PR; expect deep review.
+U5 was specified as "a real `slot_reset` that re-initialises the GPU." Carving
+it revealed the spec did not match reality. P2's `slot_reset` is a *bus
+verification* — `ioremap` BAR0, read `PMC_BOOT_0`, return `RECOVERED` if the
+bus is back or `DISCONNECT` if still `0xffffffff` — **not** a re-init routine.
+That is not a P2 oversight: the open driver has **no capability to revive a
+*running* GPU** (one with live clients / contexts / allocations) after a
+hardware reset — the live state is physically destroyed by the reset. There is
+no "context-free re-init routine" to extract.
+
+The recovery that genuinely works is *reset + retry the init path* for a
+boot-time `rm_init_adapter` failure (no live clients yet) — and that is `E3`,
+not a general `slot_reset`. So the core set ends at **U4**: registering
+`pci_error_handlers` with a state-aware `error_detected` (non-fatal →
+`CAN_RECOVER`, fatal → `DISCONNECT`) is the honest, complete general
+contribution. `error_detected` stays at `DISCONNECT` on fatal — there is no U5
+to flip it to `NEED_RESET`. The eGPU-specific reset-and-retry recovery lives
+entirely in `E3`.
 
 ## eGPU-path set — E1–E3
 
@@ -309,18 +291,23 @@ with NVIDIA, and it depends on `E1` landing first.
 ### E3 — eGPU-gated self-triggered recovery (from cluster P2)
 
 - **Source:** cluster P2 (`patches/0004`), the self-triggered recovery slice —
-  not the err_handlers registration (`U4`) and not the re-init routine (`U5`).
-- **Requires U5 and E1.** E3 reuses U5's context-free re-init routine; it gates
-  on `is_external_gpu` (set correctly by E1).
+  not the err_handlers registration (`U4`).
+- **Requires E1** — for the `is_external_gpu` gate. Otherwise self-contained:
+  E3 *is* the whole recovery mechanism (there is no U5 — see
+  [U5 — dropped](#u5--dropped-2026-05-22)).
 - **The gap it fills:** on a TB-tunnelled GPU the failures that need recovery
   often raise *no kernel AER event* — so the kernel never runs its recovery
-  sequence and U5's `slot_reset` is never invoked. E3 is the self-trigger for
-  exactly those AER-less cases.
+  sequence at all, and the `pci_error_handlers` (`U4`) are never invoked. E3 is
+  the self-trigger for exactly those AER-less cases.
 - **Two triggers:** (a) a probe-time `rm_init_adapter` failure (WPR2-stuck);
   (b) E2's runtime watchdog detection. Both mean "no AER fired — self-trigger."
-- **Action:** on a trigger, E3 performs the parent-bridge bus reset itself (the
-  step the kernel would otherwise do — Layer 2), then invokes U5's re-init
-  routine (Layer 1) to revive the GPU.
+- **Action:** on a trigger, E3 performs a parent-bridge `pci_reset_bus()` and
+  re-runs the driver's adapter init. This works because the failures E3
+  recovers from are pre-client: a boot-time `rm_init_adapter` failure has no
+  live GPU state to lose, so reset + retry-init brings the GPU up cleanly. A
+  runtime Mode B loss recovers the GPU to a *fresh* state (no host reboot) —
+  the in-flight workload's GPU state is gone, which is fundamental to any
+  hardware reset, not an E3 limitation.
 - **Storm-guard (hardcoded, not configurable):** a fixed cap (~3 attempts),
   modest fixed spacing between attempts, counter reset on a successful
   recovery, give up after the cap (the GPU stays disconnected — E2/U3 already
@@ -360,7 +347,7 @@ The `U` / `E` entries above are the *target spec*, not existing patches. The
 project's code is the seven `tb_egpu_*` clusters (P1–P7). Phase 3's first and
 largest task is the **carving design pass**: for each PR, extract its slice from
 the source cluster, decide the exact split (how P1's code divides into `U3` plus
-the crash-safety follow-on; how P2 divides across `U4` / `U5` / `E3`), de-brand
+the crash-safety follow-on; how P2 divides across `U4` / `E3`), de-brand
 it, re-express it with neutral names, and add the patch's telemetry. Only then
 does the per-PR readiness checklist (see [Gate](#gate)) — rebase, compile+load
 test, project-local separation — apply. The carving is design work, not a
@@ -368,18 +355,15 @@ mechanical extraction; it is where the plan meets the code.
 
 ## Submission order
 
-Submitted in trust-building order — the set is independent except **U5, which
-requires U4**:
+Submitted in trust-building order — independent PRs:
 
 1. **U1** — trivial, zero-risk build cleanup. Easy first "yes".
 2. **U2** — small, self-contained, Windows-parity argument.
 3. **U3** — the headline #979 fix; higher visibility, more review.
-4. **U4** — err_handlers scaffolding; submit once the prior three have built
-   credibility.
-5. **U5** — the real `slot_reset`. Requires U4 — submit after it, never
-   standalone; the most involved core PR, so last.
+4. **U4** — err_handlers scaffolding; the honest end of the core set, submitted
+   once the prior three have built credibility.
 
-Framed together, the five say: *make the open driver survive a transient PCIe
+Framed together, the four say: *make the open driver survive a transient PCIe
 error the way every other in-tree PCIe driver already does.* None of them
 mentions Thunderbolt — that is the test each one passes.
 
@@ -402,7 +386,7 @@ The gate is **two-tier** — the PRs do not all carry the same risk:
   path; it cannot regress stability. E1 is a small, low-risk detection swap.
   Gate: a `make modules` compile test. No behavioural soak — these can file as
   soon as Phase 3 opens.
-- **Soaked tier — U2–U5.** These change runtime PCIe-error behaviour. Gate: a
+- **Soaked tier — U2–U4.** These change runtime PCIe-error behaviour. Gate: a
   defined soak on the live F44 / kernel-7.0 stack **under real workload**,
   green throughout. Milestone: vLLM back as the daily compute path, **≥ 14
   days** of genuine workload, all criteria held —
@@ -420,7 +404,7 @@ Per-PR readiness checklist, before any submission:
 - [ ] de-branded per the per-PR notes above
 - [ ] telemetry added per the patch's **Telemetry** line
 - [ ] a real `make modules` compile + load test (an `apply --check` alone is not validation)
-- [ ] the project-local half cleanly separated out (especially U4 / U5 / E3)
+- [ ] the project-local half cleanly separated out (especially U4 / E3)
 - [ ] PR description drafted, referencing issue #979 where relevant (U3 especially)
 
 ## Provenance
