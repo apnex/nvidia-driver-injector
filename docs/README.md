@@ -18,12 +18,13 @@ go deeper.
 |---|---|
 | [bridge-link-cap-mechanism.md](bridge-link-cap-mechanism.md) | Why the PCIe bridge link-speed cap (Lever H17) is needed, and how it's applied `Before=docker.service`. |
 
-## Internal — patch-refactor history
+## Internal — refactor history & upstream plan
 
-These record how 29 legacy patches were consolidated into the 7 clusters. Useful
-if you're working on the patches themselves; skip them otherwise.
+Refactor history and the forward plan. Useful if you're working on the patches
+themselves; skip them otherwise.
 
 | Doc | Content |
 |---|---|
+| [upstream-plan.md](upstream-plan.md) | Phase 3 plan — the 8 target upstream PRs (`U1`–`U5` core, `E1`–`E3` eGPU-path), the placement principle, and what stays project-local. |
 | [patch-refactor-status.md](patch-refactor-status.md) | Phase-by-phase status of the P1–P7 refactor. |
 | [patch-refactor-inventory.md](patch-refactor-inventory.md) | Phase 1 forensic inventory — the per-legacy-patch analysis the clustering was derived from. |
