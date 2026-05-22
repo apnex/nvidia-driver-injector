@@ -103,18 +103,21 @@ RUN git clone --depth 1 -b ${NVIDIA_OPEN_TAG} \
         https://github.com/NVIDIA/open-gpu-kernel-modules.git \
         nvidia-open-gpu-kernel-modules
 
-# Vendor project patches.
+# Vendor project patches + the composition tools.
 COPY patches/ /src/patches/
+COPY tools/   /src/tools/
 
-# Validate patches apply cleanly at image-build time (early failure beats
-# discovering the problem on every pod start).
+# Compose and apply the patch set at image-build time. compose-patchset.sh
+# verifies patches/ against patches/manifest and emits the ordered apply
+# list; drift fails the image build, not the pod start.
 RUN cd /src/nvidia-open-gpu-kernel-modules && \
-    for p in $(ls /src/patches/*.patch | sort); do \
-        echo "checking $p"; \
-        git apply --check "$p" || { echo "PATCH CHECK FAILED: $p"; exit 1; } ; \
-        git apply "$p"; \
-    done && \
-    echo "all patches applied cleanly to ${NVIDIA_OPEN_TAG} source"
+    /src/tools/compose-patchset.sh --patches-dir /src/patches > /tmp/apply-list && \
+    while read -r p; do \
+        [ -n "$p" ] || continue; \
+        echo "applying ${p##*/}"; \
+        git apply --check "$p" && git apply "$p" || exit 1; \
+    done < /tmp/apply-list && \
+    echo "composed patch set applied cleanly to ${NVIDIA_OPEN_TAG} source"
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
