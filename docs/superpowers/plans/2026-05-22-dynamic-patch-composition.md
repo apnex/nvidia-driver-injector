@@ -359,6 +359,14 @@ printf '  C1-a  base  -  fork:c1\n  C1-a  base  -  fork:c2\n' > "$d/manifest"
 assert_exit 1 "duplicate id fails lint" "$COMPOSE" --patches-dir "$d"
 rm -rf "$d"
 
+# Case 7: empty / comments-only manifest -> exit 0, empty apply list
+d="$(mk)"
+printf '# only a comment\n' > "$d/manifest"
+out="$("$COMPOSE" --patches-dir "$d" 2>/dev/null)"; rc=$?
+assert_eq "$rc" "0" "empty manifest composes cleanly"
+assert_eq "$out" "" "empty manifest yields an empty apply list"
+rm -rf "$d"
+
 finish_tests
 ```
 
@@ -407,6 +415,7 @@ err() { echo "compose-patchset: $*" >&2; errors=$((errors + 1)); }
 apply_list=""
 listed=""
 while read -r id layer up src; do
+    [ -z "$id" ] && continue
     file="$patches_dir/$layer/$id.patch"
     listed="$listed $layer/$id.patch"
     if [ "$up" = "-" ]; then
@@ -450,7 +459,7 @@ cd /root/nvidia-driver-injector
 chmod +x tools/compose-patchset.sh
 bash tests/test-compose.sh
 ```
-Expected: `6 run, 0 failed`.
+Expected: `8 run, 0 failed`.
 
 - [ ] **Step 5: Commit**
 
