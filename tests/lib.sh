@@ -20,13 +20,15 @@ assert_eq() {  # actual expected message
 assert_exit() {  # expected-code message -- command...
     local expected="$1" msg="$2"; shift 2
     _tests_run=$((_tests_run + 1))
-    "$@" >/dev/null 2>&1
+    local stderr_out
+    stderr_out=$( "$@" 2>&1 >/dev/null )
     local got=$?
     if [ "$got" -eq "$expected" ]; then
         printf '  ok   %s\n' "$msg"
     else
         _tests_failed=$((_tests_failed + 1))
         printf '  FAIL %s (exit %s, expected %s)\n' "$msg" "$got" "$expected"
+        [ -n "$stderr_out" ] && printf '       stderr: %s\n' "$stderr_out"
     fi
 }
 
