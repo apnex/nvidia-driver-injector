@@ -142,7 +142,7 @@ sudo ./scripts/apply.sh           # use --no-act first to dry-run
   #     pci=resource_alignment=35@<auto-detected bridge bdf>, etc.)
   #   - dnf/apt install kernel-devel-$(uname -r) if missing
   #   - install /etc/modprobe.d/nvidia-driver-injector.conf with production
-  #     NVreg options (LeverMRecoverEnable=1, DeviceFileMode=0660, ...)
+  #     NVreg options (NVreg_TbEgpuRecoverEnable=1, DeviceFileMode=0660, ...)
   #   - install + enable nvidia-driver-injector-bridge-link-cap.service
   #     ordered Before=docker.service
   #   - install /etc/udev/rules.d/79-nvidia-driver-injector.rules
@@ -257,7 +257,7 @@ Gap 8 is a perm-drift edge case worth chasing in a future session.
 
 Things that look related but live elsewhere:
 
-- **Lever M-recover, Q-watchdog, H17 cap-as-quirk, close-path mitigations**
+- **Recovery state machine, Q-watchdog, H17 cap-as-quirk, close-path mitigations**
   — those are kernel-module patches.
   They live in `patches/` and ship as part of the image build.
   Their **defaults** are wrong without modprobe.d (gap #1 above);

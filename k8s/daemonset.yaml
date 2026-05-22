@@ -6,14 +6,14 @@
 # This loads the patched nvidia.ko into each matching node's host kernel.
 # Pairs naturally with NVIDIA's device-plugin DaemonSet (separate); together
 # they replace the GPU Operator's Driver+Toolkit pair for hardware that needs
-# our specific 30-patch series.
+# our specific 7-patch series.
 #
 # Node selection:
 #   nodes must have label `apnex.com.au/aorus-egpu=true` to opt in. Set with:
 #     kubectl label node <NODE> apnex.com.au/aorus-egpu=true
 #
 # Prerequisites on each selected node:
-#   - kernel cmdline tuned per the aorus-5090-egpu host-bring-up
+#   - kernel cmdline tuned per this repo's scripts/apply.sh
 #     (iommu=off, thunderbolt.host_reset=false, pci=resource_alignment=...)
 #   - kernel-devel installed (host /lib/modules/<kver>/build populated)
 #   - eGPU enumerated; bridge-link-cap LnkCtl2 cap applied
@@ -54,7 +54,7 @@ spec:
       hostNetwork: true
       containers:
         - name: driver
-          image: apnex/nvidia-driver-injector:595.71.05-aorus.12
+          image: apnex/nvidia-driver-injector:595.71.05-aorus.13
           imagePullPolicy: IfNotPresent
           # Privileged — must load kernel modules + write PCI sysfs.
           # This is the same security posture as NVIDIA's own driver pods.

@@ -7,16 +7,16 @@
 #
 # Image-build time:
 #   - Fetches NVIDIA/open-gpu-kernel-modules at the pinned tag
-#   - Vendors the project patches (29 patches, applied at runtime build)
+#   - Vendors + applies the project patches (7 clusters) — patch drift fails
+#     the image build, not the pod start
 #
 # Runtime (per pod start):
 #   1. Detect host kernel ($(uname -r) — pod sees host's kernel via /proc)
-#   2. Apply patches against the upstream tree
-#   3. Build modules against /lib/modules/$(uname -r)/build (host bind-mount)
-#   4. Load modules into host kernel via insmod (host's /lib/modules
+#   2. Build modules against /lib/modules/$(uname -r)/build (host bind-mount)
+#   3. Load modules into the host kernel via modprobe (host's /lib/modules
 #      bind-mounted writable)
-#   5. Run nvidia-modprobe -u -c 0 to materialise UVM device files
-#   6. Sleep infinity as a "container of intent"
+#   4. Run nvidia-modprobe -u -c 0 to materialise UVM device files
+#   5. Sleep infinity as a "container of intent"
 #
 # See README.md for the run command + bind-mount requirements.
 

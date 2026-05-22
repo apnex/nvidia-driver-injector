@@ -110,7 +110,7 @@ Does:
 | 1 | Set kernel cmdline via `grubby` | `iommu=off`, `thunderbolt.host_reset=false`, `pci=resource_alignment=35@<auto-detected bridge BDF>`, etc. |
 | 2 | Install `kernel-devel` for `$(uname -r)` | `dnf` or `apt`-aware; skipped if already present |
 | 3 | Create `gpu` UNIX group if absent | Used as the `/dev/nvidia*` access group |
-| 4 | Install `/etc/modprobe.d/nvidia-driver-injector.conf` | Production NVreg options inc. `LeverMRecoverEnable=1`, `DeviceFileMode=0660` |
+| 4 | Install `/etc/modprobe.d/nvidia-driver-injector.conf` | Production NVreg options inc. `NVreg_TbEgpuRecoverEnable=1`, `DeviceFileMode=0660` |
 | 5 | Install `nvidia-driver-injector-bridge-link-cap` binary + `.service` | Systemd unit `Before=docker.service`; enabled |
 | 6 | Install udev rules | `79-nvidia-driver-injector.rules` (`/dev/nvidia*` group perms) + `80-nvidia-driver-injector-disable-audio.rules` (unbind eGPU HDMI audio function — compute-only posture) |
 | 7 | Disable Vulkan / EGL / OpenCL ICDs | Compute-only posture (rename → `*.nvidia-driver-injector-disabled`) |

@@ -12,7 +12,7 @@
 #   2. Set kernel cmdline via grubby (asks before reboot).
 #   3. Verify kernel-devel is installed for $(uname -r).
 #   4. Install /etc/modprobe.d/nvidia-driver-injector.conf
-#      (production NVreg options including LeverMRecoverEnable=1).
+#      (production NVreg options including NVreg_TbEgpuRecoverEnable=1).
 #   5. Install + enable
 #      /etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service
 #      (runs Before=docker.service to apply Lever H17 cap).

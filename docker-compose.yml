@@ -17,7 +17,7 @@
 #   - kernel cmdline tuning (iommu=off, host_reset=false, etc.)
 #   - kernel-devel installed for $(uname -r)
 #   - /etc/modprobe.d/nvidia-driver-injector.conf installed (production
-#     NVreg options including LeverMRecoverEnable=1)
+#     NVreg options including NVreg_TbEgpuRecoverEnable=1)
 #   - nvidia-driver-injector-bridge-link-cap.service enabled
 #     (runs Before=docker.service to apply Lever H17 cap)
 #   - eGPU connected and authorised over Thunderbolt
@@ -30,7 +30,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: apnex/nvidia-driver-injector:refactor-rc1
+    image: apnex/nvidia-driver-injector:595.71.05-aorus.13
     container_name: nvidia-driver-injector
     privileged: true
     pid: host
@@ -45,7 +45,7 @@ services:
       # /dev for char-device creation (nvidia-modprobe -u -c 0)
       - /dev:/dev
       # Host modprobe.d — read-only, lets the container's modprobe
-      # apply production NVreg options (LeverMRecoverEnable=1, etc.).
+      # apply production NVreg options (NVreg_TbEgpuRecoverEnable=1, etc.).
       # WITHOUT this mount, the entrypoint falls back to insmod with
       # no options and the recovery state machine is OFF (Gap #1 in
       # docs/architecture.md). Layer 1 apply.sh installs the

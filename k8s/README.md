@@ -17,7 +17,7 @@ kubectl apply -f daemonset.yaml
 kubectl logs -n kube-system -l app.kubernetes.io/name=nvidia-driver-injector -f
 
 # 4. Verify on the node
-ssh <node> 'cat /sys/module/nvidia/version'   # should print 595.71.05-aorus.12
+ssh <node> 'cat /sys/module/nvidia/version'   # should print 595.71.05-aorus.13
 ```
 
 ## What this DaemonSet replaces
@@ -51,26 +51,22 @@ it would need to be a separate one or pre-cluster-join setup):
 - `kernel-devel` matching the running kernel
   (i.e. `/lib/modules/$(uname -r)/build` exists)
 - udev rules to gate `/dev/nvidia*` permissions
-  (see `aorus-5090-egpu` repo's `etc/udev/rules.d/`)
-- `aorus-egpu-bridge-link-cap` Lever H17 LnkCtl2 cap applied at boot
-  (host-side service or equivalent)
+  (this repo ships them under `scripts/host-files/etc/udev/rules.d/`)
+- the bridge LnkCtl2 cap (Lever H17) applied at boot
+  (this repo's `nvidia-driver-injector-bridge-link-cap.service`)
 
-The companion repo
-[`apnex/aorus-5090-egpu`](https://github.com/apnex/aorus-5090-egpu)
-provides the host-bring-up tooling for these prerequisites
-on a single host;
-adapt for cluster nodes via your config-management tool of choice
-(Ansible / Talos machine config / cloud-init).
+This repo's `scripts/apply.sh` performs the full host bring-up on a single
+host; for cluster nodes, replicate what it does via your config-management
+tool of choice (Ansible / Talos machine config / cloud-init).
 
 ## What's NOT in this DaemonSet
 
 Deliberate scope limits:
 
-- **Userspace stack** —
-  `aorus-egpu-compute-load-nvidia.service`, `aorus-egpu-bridge-link-cap.service`,
-  `nvidia-persistenced.service`, etc.
-  Stay on the host;
-  see the companion repo.
+- **Layer 1 host bring-up** —
+  kernel cmdline, `modprobe.d`, the bridge-link-cap service, udev rules.
+  These are node prerequisites (see above);
+  `scripts/apply.sh` does them on a single host.
 - **Container Toolkit** —
   use NVIDIA's upstream image (independent of this driver).
 - **Device Plugin** —

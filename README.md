@@ -1,35 +1,33 @@
 # nvidia-driver-injector
 
-A containerised kernel-injector for the **patched NVIDIA open kernel module**
-([`595.71.05-aorus.12`](https://github.com/apnex/aorus-5090-egpu)) that
-mitigates the silent host-freeze bug at
+A containerised kernel-injector for a **patched build of the NVIDIA open kernel
+module** (`595.71.05-aorus.13`) that mitigates the silent host-freeze bug at
 [NVIDIA/open-gpu-kernel-modules#979](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/979)
-and adds in-driver Mode B detection (Lever Q-watchdog) + recovery state machine
-(Lever M-recover).
+— a Thunderbolt-attached Blackwell GPU (e.g. RTX 5090) hard-locking the host
+under CUDA load. The patches add in-driver crash-safety, a PCIe-error recovery
+state machine, and a Q-watchdog that detects the GPU falling off the bus.
 Deployable via Docker on a single host or as a DaemonSet in Kubernetes.
 
-**Status:** MVP, 2026-05-09.
-Tested on Fedora 43 + 6.19.14-200.fc43.x86_64.
-Single-image, distro-neutral approach (Approach B — host bind-mounts
-`/lib/modules` for the kernel build dir).
+**Status:** in production use. Tested on Fedora 43–44, kernels 6.19–7.0.
+Single-image, distro-neutral approach — the image builds the module against the
+host's own `/lib/modules/$(uname -r)/build`, so it works on any distro that has
+kernel headers installed.
 
 ## What it does
 
-A privileged container that runs these steps on each pod start (matching the
-responsibilities historically owned by `aorus-egpu-compute-load-nvidia.service`
-on the host):
+A privileged container that runs these steps on each pod start:
 
 1. **PCI gate** — verify the eGPU is enumerated; exit cleanly if not.
 2. **driver_override clear** — if the host had a teardown applied (e.g.
    `aorus-5090-egpu`'s `remove.sh` sets a sentinel to block auto-bind), clear it
-   so nvidia can bind on insmod.
+   so nvidia can bind when the module loads.
    Skipped when override is empty or already `nvidia`.
 3. **BAR1 verify** — confirm BAR1 = 32 GiB; refuse to load if smaller (catches
    missing kernel cmdline tuning).
 4. **Build** — compile the patched module against the host's running kernel
    using `/lib/modules/$(uname -r)/build` bind-mounted from the host.
-5. **Load** — `insmod nvidia.ko` + `insmod nvidia-uvm.ko` directly into the host
-   kernel.
+5. **Load** — load the patched `nvidia.ko` + `nvidia-uvm.ko` into the host
+   kernel via `modprobe`, so the production `modprobe.d` NVreg options apply.
 6. **UVM device files** — `nvidia-modprobe -u -c 0` materialises
    `/dev/nvidia-uvm-tools`.
 
@@ -69,19 +67,19 @@ component-ownership table,
 install / uninstall / reboot-survival workflows,
 and the gap-status table tracking the current implementation against the target.
 
-> **Different geometry from
-> [`apnex/aorus-5090-egpu`](https://github.com/apnex/aorus-5090-egpu).**
-> That repo deploys the same patched driver via host systemd services
-> (no container).
-> Pick **one** of the two patterns —
-> they are not meant to coexist on the same host.
+> **`apnex/aorus-5090-egpu` is the frozen predecessor.**
+> That repo solves the same bug with host systemd services instead of a
+> container. It is no longer actively developed — this repo is the current
+> path — but remains a valid non-containerised alternative.
+> The two are alternative geometries: pick **one**, they are not meant to
+> coexist on the same host.
 
 ## Component ownership
 
 | Concern | Layer | Owner |
 |---|---|---|
 | Kernel cmdline (`iommu=off`, etc.) | 1 | `scripts/apply.sh` (auto-detects bridge BDF for `pci=resource_alignment`) |
-| `/etc/modprobe.d/nvidia-driver-injector.conf` (blacklists + NVreg options including LeverMRecoverEnable=1) | 1 | `scripts/apply.sh` |
+| `/etc/modprobe.d/nvidia-driver-injector.conf` (blacklists + NVreg options including NVreg_TbEgpuRecoverEnable=1) | 1 | `scripts/apply.sh` |
 | Lever H17 LnkCtl2 cap (`nvidia-driver-injector-bridge-link-cap.service`, ordered `Before=docker.service`) | 1 | `scripts/apply.sh` |
 | `/etc/udev/rules.d/79-nvidia-driver-injector.rules` (`/dev/nvidia*` group) | 1 | `scripts/apply.sh` |
 | `/etc/udev/rules.d/80-nvidia-driver-injector-disable-audio.rules` (unbind HDMI audio function) | 1 | `scripts/apply.sh` |
@@ -97,9 +95,9 @@ and the gap-status table tracking the current implementation against the target.
 ## Prerequisites
 
 The container needs three things in place on the host before it can build and
-load a working driver.
-The companion repo's `apply.sh` does all of these and more — this section lists
-the minimum the injector container itself depends on.
+load a working driver. `sudo ./scripts/apply.sh` (Layer 1) sets all of them up
+for you — this section documents what they are, and how to do them by hand if
+you prefer.
 
 ### 1. Kernel cmdline tuning
 
@@ -117,10 +115,17 @@ sudo grubby --update-kernel=ALL --args=\
 sudo reboot
 ```
 
-The `pci=resource_alignment` BDF (`0000:03:00.0` here) is the bridge directly
-above the GPU and may differ on your hardware — find it with `lspci -tnn` or
-`readlink /sys/bus/pci/devices/<gpu_bdf>/..`.
-See the companion repo's docs for what each flag does and how to adapt the BDF.
+**Your PCI addresses will differ.** The examples here use this project's
+reference hardware — GPU at `0000:04:00.0`, the bridge directly above it at
+`0000:03:00.0`. Find yours with:
+
+```bash
+gpu_bdf=$(lspci -Dnn | awk '/NVIDIA.*(VGA|3D)/ {print $1; exit}')
+bridge_bdf=$(basename "$(readlink -f /sys/bus/pci/devices/$gpu_bdf/..)")
+echo "GPU $gpu_bdf  ·  bridge $bridge_bdf"
+```
+
+`scripts/apply.sh` auto-detects both — you only need this for a hand install.
 
 ### 2. kernel-devel matching the running kernel
 
@@ -138,18 +143,20 @@ exist.
 
 ### 3. udev rules + access group (optional, for non-root use)
 
-Compute workloads typically run as a non-root user; copy the udev rule from the
-companion repo to permission `/dev/nvidia*` for an access group:
+Compute workloads typically run as a non-root user. This repo ships a udev rule
+that permissions `/dev/nvidia*` for a `gpu` access group:
 
 ```bash
 sudo groupadd -r gpu 2>/dev/null || true
-sudo curl -fLo /etc/udev/rules.d/79-aorus-egpu-nvidia-permissions.rules \
-  https://raw.githubusercontent.com/apnex/aorus-5090-egpu/main/etc/udev/rules.d/79-aorus-egpu-nvidia-permissions.rules
+sudo install -m 0644 \
+  scripts/host-files/etc/udev/rules.d/79-nvidia-driver-injector.rules \
+  /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo usermod -aG gpu "$USER"   # log out + back in for this to take effect
 ```
 
-If your workloads run as root, skip this step.
+`scripts/apply.sh` installs this for you. If your workloads run as root, skip
+this step.
 
 ## Quick start — single-host Docker
 
@@ -182,7 +189,7 @@ After successful load:
 
 ```bash
 nvidia-smi -L                            # GPU 0: NVIDIA GeForce RTX 5090
-cat /sys/module/nvidia/version           # 595.71.05-aorus.12
+cat /sys/module/nvidia/version           # 595.71.05-aorus.13
 ```
 
 To stop:
@@ -225,7 +232,7 @@ grep -E "^nvidia " /proc/modules
 
 # 2. Patched build (-aorus.<n> suffix is the project marker)
 cat /sys/module/nvidia/version
-# 595.71.05-aorus.12
+# 595.71.05-aorus.13
 
 # 3. GPU bound to nvidia
 ls -la /sys/bus/pci/devices/0000:04:00.0/driver
@@ -245,8 +252,7 @@ nvidia-smi --query-gpu=name,driver_version,pcie.link.gen.current,pcie.link.width
 ```
 
 If all five pass, the patched module is loaded and bound, and the in-driver
-Lever M-recover (recovery state machine) plus Q-watchdog (Mode B detection) are
-armed.
+recovery state machine plus Q-watchdog (Mode B detection) are armed.
 
 ## Quick start — Kubernetes
 
@@ -258,16 +264,16 @@ kubectl logs -n kube-system -l app.kubernetes.io/name=nvidia-driver-injector -f
 
 See [`k8s/README.md`](k8s/README.md) for full k8s notes including:
 
-- Companion deployments (NVIDIA Device Plugin, Container Toolkit)
+- Adjacent deployments (NVIDIA Device Plugin, Container Toolkit)
 - Node prerequisites
 - Cleanup procedure
 
 ## Image variants
 
-Currently a single `apnex/nvidia-driver-injector:595.71.05-aorus.12` image on
-Docker Hub (planned).
-The image works on any Linux distro that has `kernel-devel` installed (Ubuntu,
-Fedora, RHEL family, Debian).
+Build the image locally with `docker compose build` — no pre-built image is
+published yet.
+The image works on any Linux distro that has `kernel-devel` / `linux-headers`
+installed (Ubuntu, Fedora, RHEL family, Debian).
 For container-optimised OSes that lack `kernel-devel` (Talos, Bottlerocket,
 CoreOS), a multi-image precompiled-per-kernel variant would be a future
 addition.
@@ -285,8 +291,9 @@ NVRM: No NVIDIA devices probed.
 
 **Cause:** `driver_override` is set on the GPU's PCI device, which blocks
 auto-bind even when `nvidia.ko`'s `pci_register_driver` runs at insmod time.
-The companion repo's `remove.sh` deliberately sets `driver_override =
-aorus_egpu_manual` to gate auto-bind while the host stack is uninstalled.
+A teardown script — this repo's `scripts/remove.sh`, or a prior
+`aorus-5090-egpu` install — deliberately sets `driver_override` to gate
+auto-bind while the host stack is uninstalled.
 
 **Fix:** the entrypoint clears any non-`nvidia` override automatically since
 commit `fe2dcc5` — upgrade your image.
@@ -362,31 +369,35 @@ unless-stopped` workload that picks up the GPU when it appears.
 | Input | Source | When |
 |---|---|---|
 | NVIDIA upstream | https://github.com/NVIDIA/open-gpu-kernel-modules tag `595.71.05` | Fetched at image-build time via `git clone --depth 1` |
-| Project patches | Vendored at `patches/` (29 active) | Image-build time |
+| Project patches | Vendored at `patches/` (7 clusters; legacy series kept under `patches/legacy/`) | Image-build time |
 | Host kernel + headers | `/lib/modules/$(uname -r)/build` on the host | Bind-mounted at runtime |
 
-The `Dockerfile` validates that all 29 patches apply cleanly to the upstream tag
+The `Dockerfile` validates that all 7 patches apply cleanly to the upstream tag
 at image-build time — patch drift fails the image build, not the pod start.
 
 ## Why this exists
 
-The eGPU stack at
-[`apnex/aorus-5090-egpu`](https://github.com/apnex/aorus-5090-egpu) runs a
-30-patch fork of the NVIDIA open driver to fix the documented host-freeze bug on
-Thunderbolt-attached Blackwell GPUs.
-Running that fork in Kubernetes requires either:
+NVIDIA's open kernel module, unmodified, commits a Thunderbolt-attached
+Blackwell GPU to a permanent lost state on a single transient PCIe read — and
+the resulting failure cascade hard-locks the host. This is the bug tracked at
+[NVIDIA/open-gpu-kernel-modules#979](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/979),
+reproduced by multiple people on RTX 5080 / 5090 / RTX PRO 6000 eGPUs. The
+patched build here (7 clusters — crash-safety, a PCIe-error recovery state
+machine, a bus-loss watchdog, AER tuning) mitigates it.
 
-1. Manually installing the patched driver on each GPU node (DKMS or one-shot
-   install), then babysitting kernel upgrades, OR
-2. **This image**:
-   declarative DaemonSet that owns the driver lifecycle.
+Shipping the patched driver as a container makes the driver lifecycle
+declarative: the image builds + loads the module against whatever kernel the
+host is running, so a kernel upgrade doesn't mean a hand rebuild.
 
-The injector pattern (privileged container builds + loads kernel module) is
-identical to NVIDIA's own [GPU Operator](https://github.com/NVIDIA/gpu-operator)
-Driver DaemonSet — this is the same architecture, sized for our specific patched
-build.
+The pattern (privileged container builds + loads a kernel module) is the same
+one NVIDIA's own [GPU Operator](https://github.com/NVIDIA/gpu-operator) Driver
+DaemonSet uses.
+
+The earlier `apnex/aorus-5090-egpu` repo solved the same bug with host systemd
+services instead of a container; it is now frozen. This repo is the current
+path.
 
 ## License
 
 GPL-2.0 (matches the NVIDIA open driver's GPL-2.0 leg of its dual MIT/GPL-2.0
-license, plus the GPL-2.0 of the companion `aorus-5090-egpu` repo).
+license).

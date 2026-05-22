@@ -84,7 +84,7 @@ DEVICE_ID="0x2b85"        # RTX 5090
 #   Gen4+bit5 from boot →  host freeze on workload (2026-05-10 22:00)
 #
 # Gen3+bit5 is the empirically validated PASS at full bandwidth on
-# the current stack (Lever M-recover armed, iommu=off, Q-watchdog
+# the current stack (recovery state machine armed, iommu=off, Q-watchdog
 # kthread).
 #
 # Override via CAP_TARGET_SPEED env:
