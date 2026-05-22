@@ -174,10 +174,12 @@ Q-watchdog wakes up such freezes within `IntervalMs * 1.5` of failure.
 
 ### Upstream geometry
 
-**Addon `A1`** — project-local, never a PR. A perpetual poll is a workaround
-for Mode B, a failure upstream has not root-caused; workarounds get retired
-when the root cause is fixed, not promoted upstream. Canonical spec:
-`docs/upstream-plan.md`.
+**Addon `A2`** (`bus-loss-watchdog`) — project-local, never a PR. A perpetual
+poll is a workaround for Mode B, a failure upstream has not root-caused;
+workarounds get retired when the root cause is fixed, not promoted upstream.
+Consumes the foundation primitives carved as `A1` from cluster P2. Canonical
+specs: `docs/upstream-plan.md` and
+`docs/superpowers/specs/2026-05-22-addon-recarve-design.md`.
 
 ### Related memory
 
@@ -237,11 +239,17 @@ WPR2_ADDR_HI=0x07f4a000 (stuck; cold boot value)
 
 ### Upstream geometry
 
-**Carves to `C4` + `A2`.** The `pci_error_handlers` registration with a
-state-aware `error_detected` → `C4` (Core — upstream-bound; the open driver
-currently NULL-pads the struct). The recovery state machine + H1/H2/H3 gate
-policy → Addon `A2` (project-local — opinionated recovery for the project's
-failure taxonomy). Canonical spec: `docs/upstream-plan.md`.
+**Carves to `C4` + `A1` + `A3`** — a three-way split. The `pci_error_handlers`
+registration with a state-aware `error_detected` → `C4` (Core —
+upstream-bound; the open driver currently NULL-pads the struct). The shared
+PCIe/AER/WPR2 register-read primitives (`read_wpr2`, `walk_to_root_port`,
+`read_dpc_state`, `read_aer_full`, `dump_aer_trigger_event`) → foundation
+Addon `A1` (`pcie-primitives`) — a new module consumed by `A2`/`A3`/`A4`. The
+recovery state machine + H1/H2/H3 gate policy → Addon `A3` (`recovery`,
+project-local — opinionated recovery for the project's failure taxonomy);
+fills `C4`'s stub callbacks with real bodies. Canonical specs:
+`docs/upstream-plan.md` and
+`docs/superpowers/specs/2026-05-22-addon-recarve-design.md`.
 
 ### Related memory
 
@@ -296,8 +304,11 @@ re-init of the same process tree.
 
 ### Upstream geometry
 
-**Addon `A3`** — project-local observational instrumentation for a
-project-specific bug class. Never a PR.
+**Addon `A4`** (`close-path-telemetry`) — project-local, re-scoped to nominal
+event-triggered telemetry on the meaningful last-close transition (rather than
+P4's broader observational surface). Consumes `A1`'s primitives. Never a PR.
+Canonical specs: `docs/upstream-plan.md` and
+`docs/superpowers/specs/2026-05-22-addon-recarve-design.md`.
 
 ### Related memory
 
@@ -353,7 +364,14 @@ diff, the mechanism would have stayed hypothetical.
 
 ### Upstream geometry
 
-**Addon `A4`** — project-local DIAG surface. Never a PR.
+**Dissolved — not carved.** The concentrated `[DIAG]` surface is replaced by
+per-patch nominal telemetry the `C`/`E`/`A` patches each carry; a centralised
+investigation-grade dump is redundant once every runtime patch logs its own
+operational events. `patches/legacy/0006` is preserved as the documented
+resurrection source if an investigation reopens; the `CONFIG_NV_TB_EGPU_DIAG`
+toggle (which existed only to gate this surface) is removed from `A5`.
+Canonical spec:
+`docs/superpowers/specs/2026-05-22-addon-recarve-design.md`.
 
 ### Related memory
 
@@ -399,8 +417,11 @@ make CONFIG_NV_TB_EGPU_DIAG=y modules
 
 **Carves to `C1` + `A5`.** The Kbuild/version.mk-as-truth mechanism → `C1`
 (Core — upstream-bound; pure build hygiene, no eGPU coupling). The
-`NVIDIA_VERSION` *value* + the `CONFIG_NV_TB_EGPU*` toggles → Addon `A5`
-(project metadata). Canonical spec: `docs/upstream-plan.md`.
+`NVIDIA_VERSION` *value* + the `CONFIG_NV_TB_EGPU` master toggle → Addon `A5`
+(project metadata) — **minus** the `CONFIG_NV_TB_EGPU_DIAG` toggle, which is
+gone with the dissolved DIAG surface (cluster P6). Canonical specs:
+`docs/upstream-plan.md` and
+`docs/superpowers/specs/2026-05-22-addon-recarve-design.md`.
 
 ---
 
@@ -452,23 +473,25 @@ make CONFIG_NV_TB_EGPU_DIAG=y modules
 ## Upstream geometry — C/E/A
 
 The carve sorts these seven clusters into the C/E/A geometry (full spec and
-rationale: `docs/upstream-plan.md`):
+rationale: `docs/upstream-plan.md`; addon-layer carve spec:
+`docs/superpowers/specs/2026-05-22-addon-recarve-design.md`):
 
 | This cluster | Carves to | Layer |
 |---|---|---|
 | P1 — crash-safety | `C3` retry + `C5` crash-safety | Core — upstream-bound |
 | P5 — AER UncMask | `C2` | Core — upstream-bound |
-| P2 — err-handlers + recovery | `C4` err-handlers / `A2` recovery | C4 upstream, A2 Addon |
-| P7 — build metadata | `C1` Kbuild mechanism / `A5` value + toggles | C1 upstream, A5 Addon |
-| P3 — Q-watchdog | `A1` | Addon — project-local |
-| P4 — close-path | `A3` | Addon — project-local |
-| P6 — DIAG | `A4` | Addon — project-local |
+| P2 — err-handlers + recovery | `C4` err-handlers / `A1` primitives / `A3` recovery | C4 upstream, A1+A3 Addon |
+| P7 — build metadata | `C1` Kbuild mechanism / `A5` value + toggles (minus DIAG toggle) | C1 upstream, A5 Addon |
+| P3 — Q-watchdog | `A2` `bus-loss-watchdog` | Addon — project-local |
+| P4 — close-path | `A4` `close-path-telemetry` (re-scoped to nominal) | Addon — project-local |
+| P6 — DIAG | **dissolved** — `legacy/0006` preserved as resurrection source | n/a |
 
 `E1` (modernise eGPU detection) has no cluster source — it modernises vanilla
 NVIDIA `RmCheckForExternalGpu`. The upstream-bound set is **`C1`–`C5` + `E1`**;
-the Addon layer (`A1`–`A5`) never becomes a PR.
+the Addon layer (`A1`–`A5` — foundation, watchdog, recovery, close-path,
+version) never becomes a PR.
 
-The watchdog and recovery (`A1`/`A2`) were earlier slated as upstream
+The watchdog and recovery (`A2`/`A3`) were earlier slated as upstream
 `E2`/`E3`; they were reclassified as Addon (2026-05-22) — workarounds for
 failure modes upstream has not root-caused get retired, not upstreamed.
 

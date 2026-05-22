@@ -1,8 +1,11 @@
 # Production migration — Step 3
 
-**Status:** not started — drafted 2026-05-22. The plan for moving the
+**Status:** in progress — drafted 2026-05-22. The plan for moving the
 injector's production driver onto the C/E/A geometry. Phase-3 steps 1–2 (carve
-the base set; adopt C/E/A in the docs) are done; this doc is **Step 3**.
+the base set; adopt C/E/A in the docs) are done; this doc is **Step 3**. The
+dynamic-patch-composition mechanism and the addon re-carve are implemented
+(see the design specs under `docs/superpowers/specs/`); sequence step 4 onward
+(image rebuild, soak, cutover) remains.
 
 ## Goal
 
@@ -36,34 +39,54 @@ project's permanent floor.
    against its parent → `C1.patch` … `C5.patch`, `E1.patch`. These are
    de-branded and upstream-shaped.
 
-2. **Re-carve the additive layer `A1`–`A5`** from `P1`–`P7`. `A` = each
-   P-cluster *minus* the slice already extracted into C/E (see the
-   cluster → C/E/A map in `upstream-plan.md`):
-   - `A1` ← `P3` (Q-watchdog) — wholly additive.
-   - `A2` ← `P2` minus the `pci_error_handlers` registration (→ `C4`): the
-     recovery state machine + the H1/H2/H3 gate policy.
-   - `A3` ← `P4` (close-path observability) — wholly additive.
-   - `A4` ← `P6` (DIAG telemetry) — wholly additive.
-   - `A5` ← `P7` minus the Kbuild/version.mk mechanism (→ `C1`): the
-     `NVIDIA_VERSION` value + the `CONFIG_NV_TB_EGPU*` toggles.
-   - `P1` → wholly `C3`+`C5`; `P5` → wholly `C2` — no `A` residue from those.
+2. **Re-carve the additive layer `A1`–`A5`** from `P1`–`P7`. Authoritative
+   design:
+   [`docs/superpowers/specs/2026-05-22-addon-recarve-design.md`](superpowers/specs/2026-05-22-addon-recarve-design.md).
+   The addon is carved as a fork branch stack on top of `C5` (foundation
+   `A1` extracted out of cluster P2; cluster P6 dissolved):
+   - `A1` ← P2's shared register-read primitives (`read_wpr2`,
+     `walk_to_root_port`, `read_dpc_state`, `read_aer_full`,
+     `dump_aer_trigger_event`) — **new** foundation module
+     (`nv-tb-egpu-pcie.{c,h}`), consumed by `A2`/`A3`/`A4`.
+   - `A2` ← P3 (Q-watchdog, renamed `bus-loss-watchdog`).
+   - `A3` ← P2 minus the `pci_error_handlers` registration (→ `C4`) and minus
+     the foundation primitives (→ `A1`): the recovery state machine + the
+     H1/H2/H3 gate policy; fills `C4`'s stub callbacks with real bodies.
+   - `A4` ← P4 (close-path), re-scoped to nominal event-triggered telemetry
+     (renamed `close-path-telemetry`).
+   - `A5` ← P7 minus the Kbuild/version.mk mechanism (→ `C1`) and minus the
+     `CONFIG_NV_TB_EGPU_DIAG` toggle: the `NVIDIA_VERSION` value + the
+     `CONFIG_NV_TB_EGPU` master toggle.
+   - `P1` → wholly `C3`+`C5`; `P5` → wholly `C2`; `P6` → **dissolved** (the
+     concentrated `[DIAG]` surface is replaced by per-patch nominal telemetry
+     across `C`/`E`/`A`; `patches/legacy/0006` preserved as resurrection
+     source) — no `A` residue from any of those.
 
 3. **Reconcile base ↔ additive composition.** The base C/E patches are
    *de-branded*; the A patches stay *branded* (`tb_egpu_*`). Applying C/E
    **then** A onto vanilla `595.71.05` must produce a clean tree and a clean
    `make modules`. Dependencies the A re-carve MUST honour:
-   - `A1`/`A2` mark the GPU disconnected via `os_pci_set_disconnected` — that
-     bridge now lives in `C5`, not in A. A1/A2 must **call the C5 bridge**, not
+   - `A2`/`A3` mark the GPU disconnected via `os_pci_set_disconnected` — that
+     bridge now lives in `C5`, not in A. A2/A3 must **call the C5 bridge**, not
      carry their own copy.
    - `C5` introduces `inc/kernel/gpu/nv-gpu-lost.h` (dead-bus constants,
      log-once macro); A code touching the same paths uses the C5 header, not a
      branded duplicate.
-   - This is real carve/design work, not a mechanical split — budget it as the
-     main effort of Step 3.
+   - `A3`'s `nv-pci.c` hunk must *replace* `C4`'s four stub callback bodies and
+     add `cor_error_detected` — not re-add the `pci_error_handlers` struct
+     (which `C4` already registers).
+   - `A2`/`A3`/`A4` each consume `A1`'s foundation primitives — they must not
+     each carry their own copy of `read_wpr2` / `walk_to_root_port` /
+     `read_aer_full` / `dump_aer_trigger_event` / `read_dpc_state`.
+   - This is real carve/design work, not a mechanical split — see the addon
+     re-carve design for the operational detail.
 
-4. **Restructure `patches/`.** Replace `0001-0007` with the new set —
-   `C1`…`C5`, `E1`, `A1`…`A5` — applied base-then-additive. Keep
-   `patches/legacy/` until the soak proves the new set.
+4. **Restructure `patches/`.** Replace `0001-0007` with the manifest-driven
+   `patches/base/` + `patches/addon/` layout — `C1`…`C5` + `E1` in `base/`,
+   `A1`…`A5` in `addon/`, applied base-then-addon in manifest row order. Keep
+   `patches/legacy/` until the soak proves the new set. (Implemented per
+   `docs/superpowers/specs/2026-05-22-dynamic-patch-composition-design.md` +
+   `docs/superpowers/specs/2026-05-22-addon-recarve-design.md`.)
 
 5. **Rebuild the container image.** New patch set; bump `NVIDIA_VERSION`
    (→ `595.71.05-aorus.14`); container build + GSP-firmware step unchanged.
@@ -80,21 +103,32 @@ project's permanent floor.
 
 ## Open design questions — decide during Step 3
 
-- **Base delivery mechanism.** Apply the C/E patches as `format-patch` files in
-  `patches/`, or track the fork as a pinned submodule / ref? `format-patch`
-  files keep the injector self-contained; a submodule keeps the base
-  authoritative on the fork. Decide before step 4.
-- **The A re-carve (step 3)** is the hard part — `A1`/`A2` must be re-expressed
-  against the de-branded `C5` bridge + `nv-gpu-lost.h` rather than their
-  branded `P2`/`P3` originals.
-- **Apply-order interaction.** `C5`'s guards and `A1`/`A2`'s watchdog/recovery
-  touch overlapping paths (`osDevReadReg*`, the disconnect state); verify the
-  composed result reproduces today's `aorus.13` runtime behaviour before
-  cutover.
+- **Base delivery mechanism.** *Resolved* (2026-05-22) by the dynamic-patch
+  composition design — manifest-driven `patches/base/` + `patches/addon/`,
+  both regen-generated from the fork stack. See
+  `docs/superpowers/specs/2026-05-22-dynamic-patch-composition-design.md`.
+- **The A re-carve (step 3).** *Resolved* (2026-05-22) by the addon-recarve
+  design — see
+  `docs/superpowers/specs/2026-05-22-addon-recarve-design.md`. A foundation
+  patch (`A1`) was extracted out of cluster P2 so `A2`/`A3`/`A4` share one
+  copy of the PCIe primitives; cluster P6 dissolved (the `[DIAG]` surface is
+  replaced by per-patch nominal telemetry). The carve is implemented; tasks 1–12
+  of the recarve plan are complete.
+- **Apply-order interaction.** `C5`'s guards and `A2`/`A3`'s watchdog/recovery
+  touch overlapping paths (`osDevReadReg*`, the disconnect state); the
+  behavioural-equivalence verification step in the addon-recarve design
+  (task 12, complete) covers this — every diff vs the `aorus.13` source tree
+  falls into an explainable bucket.
 
 ## Resumption note
 
 Steps 1–2 are complete and durable: the base set is six branches on the fork
 (above); the C/E/A geometry, the cluster map and the Gate are in
 `upstream-plan.md`; `patches.md` maps each P-cluster to its C/E/A destination.
-Step 3 begins at sequence step 1 above. Nothing in Step 3 has started.
+The dynamic patch composition mechanism is merged to `main` and the addon
+re-carve (Sequence steps 1–3 above) is implemented per
+`docs/superpowers/specs/2026-05-22-addon-recarve-design.md` — `patches/base/`
+and `patches/addon/` are populated, the composed `C+E+A` driver compiles, and
+behavioural equivalence vs `aorus.13` is verified. Sequence step 4 onward
+(`patches/` restructure formalised, image rebuild, soak, cutover) is the
+remaining work.

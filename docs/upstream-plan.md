@@ -84,10 +84,12 @@ on the rare, meaningful events, at kernel-appropriate levels (`pci_info` /
 `dev_warn` on errors and recoveries; at most one `dev_info` for a per-probe
 event). This is the same instrument-so-you-can-prove-what-happened discipline
 used during the investigation, calibrated down to *operational* level — it is
-explicitly **not** the heavy `[DIAG]` surface, which stays in the Addon layer.
-The patch whose value is otherwise invisible — `C3` (a transient silently
-recovered) — **must** log; that telemetry is mandatory, not optional. Each PR
-below carries a **Telemetry** line.
+explicitly **not** the heavy `[DIAG]` surface, which has been dissolved (see
+[Addon layer — A](#addon-layer--a)); every runtime patch now carries its own
+nominal telemetry duty. The patch whose value is otherwise invisible — `C3`
+(a transient silently recovered) — **must** log; that telemetry is mandatory,
+not optional. Each `C`/`E` PR below carries a **Telemetry** line, as do the
+runtime addon patches.
 
 ## Core set — C1–C5
 
@@ -104,8 +106,8 @@ C-number (see [Submission order](#submission-order)).
   between `Kbuild` and `version.mk`, so `modinfo` can report a stale version.
   Single-source-of-truth fixes it. Zero coupling to eGPU or PCIe behaviour.
 - **De-brand:** none needed — already generic.
-- **Scope boundary:** the `NVIDIA_VERSION` *value* and the `CONFIG_NV_TB_EGPU*`
-  toggles are NOT part of this — they are Addon (`A5`).
+- **Scope boundary:** the `NVIDIA_VERSION` *value* and the `CONFIG_NV_TB_EGPU`
+  master toggle are NOT part of this — they are Addon (`A5`).
 - **Telemetry:** none — no runtime path. `modinfo` showing the correct version
   is the proof-of-correctness.
 - **Review risk:** minimal; self-evidently correct. Good trust-builder.
@@ -209,7 +211,7 @@ C-number (see [Submission order](#submission-order)).
   callbacks. It is the **complete, final** general contribution: the kernel can
   reach the driver, non-fatal errors recover, fatal errors honestly disconnect.
   There is no "real `slot_reset`" PR (see [Considered and dropped](#considered-and-dropped-a-real-slot_reset)).
-  The eGPU-specific reset-and-retry recovery is Addon `A2`; the operational
+  The eGPU-specific reset-and-retry recovery is Addon `A3`; the operational
   policy is Addon.
 - **Telemetry:** each callback logs its decision and the channel state.
 - **Review risk:** moderate. Submit last among C1–C4.
@@ -259,7 +261,7 @@ the reset. There is no "context-free re-init routine" to extract.
 
 The recovery that genuinely works is *reset + retry the init path* for a
 boot-time `rm_init_adapter` failure (no live clients yet) — and that is the
-Addon `A2` recovery, not a general `slot_reset`. So the core error-handler
+Addon `A3` recovery, not a general `slot_reset`. So the core error-handler
 story ends at **C4**: a state-aware `error_detected` that honestly
 `DISCONNECT`s on fatal is the complete general contribution.
 
@@ -298,18 +300,25 @@ genuine correctness fix. Currently one member.
   which kernel marker fired.
 - **Benefit to all eGPU users:** correct classification on modern hardware, no
   manual registry override. Prerequisite for the Addon watchdog/recovery
-  (`A1`/`A2` gate on `is_external_gpu`).
+  (`A2`/`A3` gate on `is_external_gpu`).
 - **Branch:** `e1-egpu-detection` (carved, built, pushed to fork).
 
 ## Addon layer — A
 
 Project-local. **Never upstreamed, in any form** — this project carries it.
 The `A` items are *not* PR candidates; they stay branded (`tb_egpu_*`) and live
-in the injector's `patches/` set.
+in the injector's `patches/addon/` set, carved as a fork branch stack on top of
+the base layer. Canonical carve spec:
+[`docs/superpowers/specs/2026-05-22-addon-recarve-design.md`](superpowers/specs/2026-05-22-addon-recarve-design.md).
+
+The addon set is a **foundation** (`A1`) plus four feature patches
+(`A2`–`A5`) — five members. The set is permanent: it shrinks only if a defect
+is upstream-rootcaused, at which point its addon goes away — it does not get
+promoted upstream.
 
 ### Why the watchdog and recovery are Addon, not eGPU-path PRs
 
-`A1` (watchdog) and `A2` (recovery) were earlier drafted as upstream `E2`/`E3`.
+`A2` (watchdog) and `A3` (recovery) were earlier drafted as upstream `E2`/`E3`.
 They are reclassified as Addon (decided 2026-05-22), for three reasons:
 
 1. **They are workarounds for un-owned root causes.** The watchdog detects
@@ -319,9 +328,9 @@ They are reclassified as Addon (decided 2026-05-22), for three reasons:
    *"root-cause it"*, not *"merge the band-aid"*. Issue #979 has had **no
    NVIDIA response in five months** and the community fix PR was closed
    unmerged — speculative workaround PRs would simply rot.
-2. **Workarounds get retired, not upstreamed.** `A1`/`A2` exist because the
+2. **Workarounds get retired, not upstreamed.** `A2`/`A3` exist because the
    real defects (Mode B; the TB/PCIe gaps) are unfixed. The fork "becomes
-   unnecessary" when those *root causes* are fixed — at which point `A1`/`A2`
+   unnecessary" when those *root causes* are fixed — at which point `A2`/`A3`
    are *deleted*, not promoted upstream. Upstreaming a workaround merely exports
    the project's maintenance burden to a maintainer who has not accepted the
    bug.
@@ -334,47 +343,90 @@ unarguable fixes than by padding it with speculative items; one eyebrow-raising
 PR taints reviewer trust in the whole series. Mode B is already in front of
 NVIDIA via the issue #979 forensics and outreach — a PR is not needed for that.
 
-### A1 — Bus-loss watchdog
+### A1 — PCIe primitives (foundation)
 
-- **Source:** cluster P3 (`patches/0003`).
+- **Source:** cluster P2 (`patches/legacy/0004`), the shared register-read
+  primitives slice — carved out as foundation so `A2`/`A3`/`A4` consume one
+  copy rather than each carrying its own.
+- **What:** the shared PCIe/AER/WPR2 register-read substrate — `read_wpr2`,
+  `walk_to_root_port`, `read_dpc_state`, `read_aer_full`,
+  `dump_aer_trigger_event`. Lives in a new
+  `kernel-open/nvidia/nv-tb-egpu-pcie.{c,h}` module plus a single
+  `nvidia-sources.Kbuild` line. Pure code-motion out of `nv-tb-egpu-recover.c`
+  — no behaviour change.
+- **Why Addon:** a primitive library for the addon layer's PCIe-state
+  introspection; its callers are addon by definition.
+- **Telemetry:** none — a primitive library; its callers log.
+
+### A2 — Bus-loss watchdog
+
+- **Source:** cluster P3 (`patches/legacy/0003`).
 - **What:** a per-eGPU kthread polling `NV_PMC_BOOT_0` at a fixed 200 ms (5 Hz);
   on `0xFFFFFFFF` (dead-bus signature) it marks the GPU disconnected via
   `os_pci_set_disconnected` (the `C5` bridge) so the crash-safety guards and
   err_handlers react, and logs. Carries the rich five-file `tb_egpu_qwd_*`
-  sysfs detection-state surface. Gated on `is_external_gpu`.
+  sysfs detection-state surface. Gated on `is_external_gpu`. Consumes `A1`'s
+  primitives.
 - **Why Addon:** a detector for Mode B, an un-root-caused failure — see above.
+- **Telemetry:** log on detection only — no per-poll (5 Hz) logging; the
+  `tb_egpu_qwd_*` sysfs counters carry the cycle accounting.
 
-### A2 — Self-triggered recovery + recovery policy
+### A3 — Self-triggered recovery + recovery policy
 
-- **Source:** cluster P2 (`patches/0004`), the self-triggered recovery slice
-  (not the err_handlers registration, which is `C4`).
+- **Source:** cluster P2 (`patches/legacy/0004`), the self-triggered recovery
+  slice (not the `pci_error_handlers` registration — that is `C4` — and not
+  the shared primitives — those are `A1`).
 - **What:** on a trigger — a probe-time `rm_init_adapter` failure (WPR2-stuck),
-  or A1's watchdog detection — perform a parent-bridge `pci_reset_bus()` and
+  or A2's watchdog detection — perform a parent-bridge `pci_reset_bus()` and
   re-run the driver's adapter init, behind a storm-guard. Carries the
   *configurable* H1/H2/H3 gates, the kill-switch file
   (`/var/lib/tb-egpu/recover-killswitch`), and the `TB_EGPU_GPU_STATE` uevent.
+  Fills `C4`'s `pci_error_handlers` stub callbacks with real bodies. Consumes
+  `A1`'s primitives.
 - **Why Addon:** recovery for the project's specific failure taxonomy; the
-  storm-guard values are project-tuned policy; depends on A1's trigger.
+  storm-guard values are project-tuned policy; depends on A2's trigger.
+- **Telemetry (mandatory):** log every fire, gate decision, and outcome — same
+  rationale as `C3`: a silent recovery can never be shown to have mattered.
+  `tb_egpu_recover_*` sysfs counters.
 - **Possible future follow-on:** the narrowest slice — "recover a *probe-time*
   `rm_init_adapter` failure by bridge-reset + retry-init" — is the least
   policy-laden, most general piece. *If* NVIDIA ever engages on #979 it could
   be offered as a core follow-on. Not carved now; noted only.
 
-### A3 — Close-path observability
+### A4 — Close-path telemetry
 
-- **Source:** cluster P4. Project-private instrumentation for a
-  project-specific bug class.
+- **Source:** cluster P4 (`patches/legacy/0005`), held to the nominal bar.
+- **What:** event-triggered nominal telemetry at close-path transitions —
+  markers at RM close callbacks (`nvidia_close_callback` / `nv_stop_device`)
+  and UVM open/release (`uvm_open` / `uvm_release`), with a last-close
+  marker plus a tight `PMC_BOOT_0`/WPR2/one-word verdict capture on the
+  meaningful transition. Re-scoped from P4's broader observational surface to
+  the nominal telemetry bar. Consumes `A1`'s primitives.
+- **Why Addon:** project-specific bug-class observability; no upstream value.
+- **Telemetry:** *is* telemetry — event-triggered only (one line on the
+  meaningful last-close transition); no per-call dumping. Audited against the
+  Observability audit in the carve design.
 
-### A4 — DIAG telemetry
+### Dissolved — old A4 / DIAG / cluster P6
 
-- **Source:** cluster P6. The heavy `[DIAG]` diagnostic surface — distinct from
-  the nominal telemetry the `C`/`E` patches carry.
+The concentrated `[DIAG]` diagnostic surface (formerly drafted as `A4`, source
+cluster P6, `patches/legacy/0006`) is **dissolved — not carried**. Its job is
+covered by the per-patch nominal telemetry the `C`/`E`/`A` patches each carry;
+a centralised, compiled-out, investigation-grade dump is redundant once every
+runtime patch logs its own operational events. `patches/legacy/0006` remains in
+`legacy/` as the documented resurrection source if an investigation reopens.
+The `CONFIG_NV_TB_EGPU_DIAG` toggle — which existed only to gate the dissolved
+surface — is removed from `A5`.
 
 ### A5 — Version value + build toggles
 
-- **Source:** cluster P7, the project half — the `NVIDIA_VERSION` *value*
-  (e.g. `595.71.05-aorus.NN`) and the `CONFIG_NV_TB_EGPU*` toggles. Project
-  metadata; the *mechanism* that consumes `NVIDIA_VERSION` is `C1`.
+- **Source:** cluster P7 (`patches/legacy/0007`), the project half — the
+  `NVIDIA_VERSION` *value* (e.g. `595.71.05-aorus.NN`) and the
+  `CONFIG_NV_TB_EGPU` master toggle (documentation-only today). Project
+  metadata; the *mechanism* that consumes `NVIDIA_VERSION` is `C1`. **Minus**
+  the `CONFIG_NV_TB_EGPU_DIAG` toggle, which is gone with the dissolved DIAG
+  surface.
+- **Telemetry:** none — build metadata.
 
 ### Belongs in a different upstream
 
@@ -393,13 +445,13 @@ geometry map:
 
 | Cluster | Becomes |
 |---|---|
-| P1 (`patches/0001`) gpu-lost-crash-safety | `C3` (retry) + `C5` (crash-safety) |
-| P5 (`patches/0002`) aer-uncmask-clear | `C2` |
-| P3 (`patches/0003`) qwatchdog | `A1` |
-| P2 (`patches/0004`) pcie-error-handlers-recover | `C4` (err_handlers) + `A2` (recovery) |
-| P4 (`patches/0005`) close-path-safety | `A3` |
-| P6 (`patches/0006`) diag-telemetry | `A4` |
-| P7 (`patches/0007`) version-mark-and-kbuild | `C1` (Kbuild mechanism) + `A5` (value + toggles) |
+| P1 (`patches/legacy/0001`) gpu-lost-crash-safety | `C3` (retry) + `C5` (crash-safety) |
+| P5 (`patches/legacy/0002`) aer-uncmask-clear | `C2` |
+| P3 (`patches/legacy/0003`) qwatchdog | `A2` |
+| P2 (`patches/legacy/0004`) pcie-error-handlers-recover | `C4` (err_handlers) + `A1` (foundation primitives) + `A3` (recovery) |
+| P4 (`patches/legacy/0005`) close-path-safety | `A4` (re-scoped to nominal telemetry) |
+| P6 (`patches/legacy/0006`) diag-telemetry | **dissolved** — not carved; `legacy/0006` preserved as resurrection source |
+| P7 (`patches/legacy/0007`) version-mark-and-kbuild | `C1` (Kbuild mechanism) + `A5` (value + toggles, minus the DIAG toggle) |
 | — | `E1` modernises vanilla `RmCheckForExternalGpu` — no cluster source |
 
 For each `C`/`E` PR: extract its slice from the source cluster, de-brand it,
@@ -408,9 +460,12 @@ readiness checklist ([Gate](#gate)). The carving is design work, not a
 mechanical extraction.
 
 **Carve status (2026-05-22):** the full upstream base set is carved, compiled,
-and pushed to the fork — `C1`–`C5` + `E1`. `A1`–`A5` remain as their `P*`
-clusters in `patches/`; their physical reorg to `A*`-named files is
-carve-execution work for the production migration.
+and pushed to the fork — `C1`–`C5` + `E1`. The addon set `A1`–`A5` is also
+carved as a fork branch stack on top of `C5` and exported into
+`patches/addon/` — see
+[`docs/superpowers/specs/2026-05-22-addon-recarve-design.md`](superpowers/specs/2026-05-22-addon-recarve-design.md).
+The legacy `P1`–`P7` clusters remain under `patches/legacy/` as the documented
+provenance source.
 
 ## Submission order
 
@@ -460,7 +515,7 @@ Per-PR readiness checklist, before any submission:
 - [ ] de-branded per the per-PR notes above
 - [ ] telemetry added per the patch's **Telemetry** line
 - [ ] a real `make modules` compile + load test (an `apply --check` alone is not validation)
-- [ ] the Addon half cleanly separated out (especially C4 vs A2)
+- [ ] the Addon half cleanly separated out (especially C4 vs A3)
 - [ ] PR description drafted, referencing issue #979 where relevant (C3 especially)
 
 ## Provenance
@@ -468,4 +523,6 @@ Per-PR readiness checklist, before any submission:
 Derived from `docs/patches.md` (per-cluster upstream-candidacy ratings) and the
 2026-05-22 issue-#979 follow-up review. The seven-cluster refactor itself is
 documented in `docs/patch-refactor-status.md`. The C/E/A geometry and the
-`A1`/`A2` (ex-`E2`/`E3`) reclassification were decided 2026-05-22.
+`A2`/`A3` (ex-`E2`/`E3`) reclassification were decided 2026-05-22. The addon
+layer's foundation extraction and the DIAG dissolution are in
+`docs/superpowers/specs/2026-05-22-addon-recarve-design.md`.
