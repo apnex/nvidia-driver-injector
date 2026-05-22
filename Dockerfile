@@ -117,7 +117,8 @@ RUN cd /src/nvidia-open-gpu-kernel-modules && \
         echo "applying ${p##*/}"; \
         git apply --check "$p" && git apply "$p" || exit 1; \
     done < /tmp/apply-list && \
-    echo "composed patch set applied cleanly to ${NVIDIA_OPEN_TAG} source"
+    echo "composed patch set applied cleanly to ${NVIDIA_OPEN_TAG} source" && \
+    rm -f /tmp/apply-list
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
