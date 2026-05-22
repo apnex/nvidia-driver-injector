@@ -501,7 +501,7 @@ fi
 # ============================================================================
 log "=========================================="
 log "  nvidia driver loaded successfully"
-log "  patches applied: $(ls /src/patches/*.patch | wc -l)"
+log "  patches applied: $(/src/tools/compose-patchset.sh --patches-dir /src/patches 2>/dev/null | wc -l)"
 log "  upstream tag:    ${NVIDIA_OPEN_TAG:-(image build-time pinned)}"
 log "=========================================="
 log "sleeping as container of intent — exit triggers restart policy"

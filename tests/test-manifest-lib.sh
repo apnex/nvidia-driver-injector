@@ -47,4 +47,19 @@ printf '  C1-a  base  -  fork:c1  EXTRA\n' > "$d/long"
 manifest_lint "$d/long" 2>/dev/null
 assert_eq "$?" "1" "manifest_lint rejects a row with too many fields"
 
+# manifest_lint rejects a base row whose source is not fork:<branch>
+printf '  C1-a  base  -  injector\n' > "$d/base-bad-src"
+manifest_lint "$d/base-bad-src" 2>/dev/null
+assert_eq "$?" "1" "manifest_lint rejects a base row with a non-fork source"
+
+# manifest_lint rejects an addon row whose source is not 'injector'
+printf '  A1-a  addon  -  fork:a1\n' > "$d/addon-bad-src"
+manifest_lint "$d/addon-bad-src" 2>/dev/null
+assert_eq "$?" "1" "manifest_lint rejects an addon row with a fork source"
+
+# manifest_lint accepts a well-formed addon row
+printf '  A1-a  addon  -  injector\n' > "$d/addon-ok"
+manifest_lint "$d/addon-ok" 2>/dev/null
+assert_eq "$?" "0" "manifest_lint accepts a well-formed addon row"
+
 finish_tests

@@ -7,8 +7,8 @@
 #
 # Image-build time:
 #   - Fetches NVIDIA/open-gpu-kernel-modules at the pinned tag
-#   - Vendors + applies the project patches (7 clusters) — patch drift fails
-#     the image build, not the pod start
+#   - Vendors + applies the composed patch set (patches/base + manifest) —
+#     patch drift fails the image build, not the pod start
 #
 # Runtime (per pod start):
 #   1. Detect host kernel ($(uname -r) — pod sees host's kernel via /proc)
@@ -115,7 +115,7 @@ RUN cd /src/nvidia-open-gpu-kernel-modules && \
     while read -r p; do \
         [ -n "$p" ] || continue; \
         echo "applying ${p##*/}"; \
-        git apply --check "$p" && git apply "$p" || exit 1; \
+        git apply --check "$p" && git apply "$p" || { echo "FAILED to apply $p (upstream-tag drift? run tools/regen-base-patches.sh)" >&2; exit 1; }; \
     done < /tmp/apply-list && \
     echo "composed patch set applied cleanly to ${NVIDIA_OPEN_TAG} source" && \
     rm -f /tmp/apply-list
