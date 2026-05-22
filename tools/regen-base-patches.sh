@@ -84,7 +84,7 @@ done <<EOF
 $(manifest_rows "$manifest")
 EOF
 
-echo "regen: generated $count base patch(es) into ${base_dir#$repo_root/}/"
+echo "regen: generated $count patch(es) (base + addon) into patches/"
 
 validate="$repo_root/tools/validate-patchset.sh"
 if [ -x "$validate" ]; then
