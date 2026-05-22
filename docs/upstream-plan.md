@@ -162,11 +162,12 @@ C-number (see [Submission order](#submission-order)).
 - **De-brand:** remove the `TB_EGPU_*` macros/header (`nv-tb-egpu.h`,
   `TB_EGPU_GPU_LOST_RETRIES`, etc.); express as generic crash-safety with
   neutral names.
-- **Scope boundary:** the project's P1 spans two sub-themes across 8 sites —
-  *retry-before-declaring-lost* (`osHandleGpuLost` + the `osDevReadReg*` read
-  sites) and *don't-crash-when-already-lost* (`rcdbAddRmGpuDump`,
-  `nvdDumpAllEngines`, two `rs_server` deletion paths). **C3 is the retry
-  sub-theme only** — the smallest reviewable unit that fully addresses #979.
+- **Scope boundary:** the project's P1 splits in two — *retry-before-declaring-lost*
+  (the `osHandleGpuLost` retry) and *don't-crash-when-already-lost* (the
+  dead-bus guards: the `osDevReadReg*` short-circuits, `rcdbAddRmGpuDump`,
+  `nvdDumpAllEngines`, the `rs_server` deletion paths, the GSP-RPC paths).
+  **C3 is the retry sub-theme only** — the smallest reviewable unit that fully
+  addresses #979; everything else is `C5`.
   The crash-safety sub-theme is carved separately as **`C5`** (a sibling PR, or
   folded into C3 if review asks). Do not submit all 8 sites at once — that lets
   the PR stall on the least-obvious site.
@@ -229,8 +230,9 @@ C-number (see [Submission order](#submission-order)).
   2. **The crash-safety guards.** Bound the call sites that, on the unpatched
      driver, panic or starve the GPU lock when invoked on an already-lost GPU —
      the crash-dump path (`rcdbAddRmGpuDump`, `nvdDumpAllEngines`), the
-     `rs_server` deletion paths, and the RPC / `osDevReadReg*` sites. Each guard
-     short-circuits cleanly when the device is disconnected. **Carve pending.**
+     `rs_server` deletion paths, the GSP-RPC paths, and the `osDevReadReg*`
+     dead-bus short-circuits. **Carved** on `c5-crash-safety`,
+     compile-validated.
 - **Benefit to all:** crash-safety is transport-agnostic — any GPU that becomes
   lost (signal integrity, thermal, a switch fault) can drive these cascades.
   The unpatched driver turns a lost GPU into a kernel panic or a multi-second
@@ -242,7 +244,7 @@ C-number (see [Submission order](#submission-order)).
 - **Telemetry:** `dev_warn` when a guard short-circuits a cascade on a lost GPU.
 - **Review risk:** moderate — several sites; submit after C3 has built credibility.
 - **Candidacy:** MEDIUM-HIGH (crash-safety is hard to argue against).
-- **Branch:** `c5-crash-safety` (bridge committed; guard-site carve pending).
+- **Branch:** `c5-crash-safety` (bridge + crash-safety guards carved, compiled, pushed).
 
 ### Considered and dropped — a real slot_reset
 
@@ -405,9 +407,10 @@ re-express with neutral names, add the patch's telemetry, then run the per-PR
 readiness checklist ([Gate](#gate)). The carving is design work, not a
 mechanical extraction.
 
-**Carve status (2026-05-22):** `C1`–`C4` carved + compiled + pushed; `E1`
-carved + compiled + pushed; `C5` bridge carved + compiled + pushed, guard-site
-carve pending. `A1`–`A5` remain as their `P*` clusters in `patches/`.
+**Carve status (2026-05-22):** the full upstream base set is carved, compiled,
+and pushed to the fork — `C1`–`C5` + `E1`. `A1`–`A5` remain as their `P*`
+clusters in `patches/`; their physical reorg to `A*`-named files is
+carve-execution work for the production migration.
 
 ## Submission order
 
