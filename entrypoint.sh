@@ -315,6 +315,24 @@ if [[ -n "$fw_version" ]]; then
        GSP load will fail with -ENOENT until this symlink exists."
         fi
     fi
+
+    # (c) gate — verify every GSP blob this image ships resolves through
+    #     $fw_link before the module loads. The kernel's request_firmware()
+    #     reads nvidia/$fw_version/<blob> at device init; a missing blob or
+    #     broken symlink there surfaces only as a cryptic "Direct firmware
+    #     load ... failed with error -2" followed by RmInitAdapter failure
+    #     — and the module load itself still "succeeds", so the GPU is left
+    #     silently dead. Fail loudly here instead, naming the real cause.
+    for fw in gsp_ga10x.bin gsp_tu10x.bin; do
+        [[ -s "$fw_stash/$fw" ]] || continue   # not carried in this image
+        if [[ ! -s "$fw_link/$fw" ]]; then
+            fail "GSP firmware not in place: ${fw_link}/${fw} does not resolve.
+       The kernel will request nvidia/${fw_version}/${fw} at device init and
+       fail with -ENOENT. Verify /lib/firmware is bind-mounted rw and that
+       step (a) above re-supplied the blob from ${fw_stash}."
+        fi
+    done
+    log "firmware gate ✓ — ${fw_version} GSP blobs resolve under ${fw_link}"
 fi
 # ----------------------------------------------------------------------------
 
