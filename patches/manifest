@@ -15,3 +15,8 @@
   C4-err-handlers-scaffold   base   -              fork:c4-err-handlers-scaffold
   E1-egpu-detection          base   -              fork:e1-egpu-detection
   C5-crash-safety            base   -              fork:c5-crash-safety
+  A1-pcie-primitives         addon  -              fork:a1-pcie-primitives
+  A2-bus-loss-watchdog       addon  -              fork:a2-bus-loss-watchdog
+  A3-recovery                addon  -              fork:a3-recovery
+  A4-close-path-telemetry    addon  -              fork:a4-close-path-telemetry
+  A5-version-and-toggles     addon  -              fork:a5-version-and-toggles
