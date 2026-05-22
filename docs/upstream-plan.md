@@ -14,6 +14,18 @@ core-path (`U1`–`U5`) + 3 eGPU-path (`E1`–`E3`), carved from the project's 7
 `tb_egpu_*` clusters. (`U3` may split into 2 if review prefers → up to 9.) The
 remainder of the 7 clusters stays project-local and never becomes a PR.
 
+**This doc also defines the project's target patch geometry.** The same
+classification that sorts code for upstream re-architects the project's own
+driver — a **base layer** (the would-be-upstream set `U1`–`U5` + `E1`–`E3`,
+clean and de-brandable) plus a thin **additive layer** of genuinely
+project-local code (configurable recovery policy, kill-switch, the
+`TB_EGPU_GPU_STATE` uevent, P4/P6 observability) on top. The production driver
+is *base + additive*; the carving design pass (Execution, below) migrates
+today's 7-cluster geometry into it. The fork then reads "stock driver + known
+deltas" and shrinks monotonically as base PRs land upstream — its floor is the
+additive layer alone. (The kernel-cmdline / bridge-cap host setup is a separate
+Layer-1 concern, not patch geometry.)
+
 ## Placement principle
 
 Every piece of the project's patch set is sorted by *where it correctly
