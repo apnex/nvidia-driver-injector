@@ -9,7 +9,7 @@ dynamic-patch-composition mechanism and the addon re-carve are implemented
 
 ## Goal
 
-Today the production driver is the flat seven-cluster set `patches/0001-0007`
+Today the production driver is the flat seven-cluster set `patches/legacy/0001-0007`
 (`P1`–`P7`), version `595.71.05-aorus.13`. Step 3 restructures it into the
 C/E/A geometry defined in [`upstream-plan.md`](upstream-plan.md):
 
@@ -28,7 +28,7 @@ project's permanent floor.
   `c1-kbuild-version-mk`, `c2-aer-internal-unmask`, `c3-gpu-lost-retry`,
   `c4-err-handlers-scaffold`, `c5-crash-safety` (2 commits: bridge + guards),
   `e1-egpu-detection`.
-- **Injector `patches/0001-0007`** — today's `P1`–`P7` clusters: the pre-carve
+- **Injector `patches/legacy/0001-0007`** — today's `P1`–`P7` clusters: the pre-carve
   set, and the source for the additive layer.
 - **[`upstream-plan.md`](upstream-plan.md)** — the C/E/A geometry, the
   cluster → C/E/A map (Execution section), and the Gate (soak criteria).
@@ -112,8 +112,8 @@ project's permanent floor.
   `docs/superpowers/specs/2026-05-22-addon-recarve-design.md`. A foundation
   patch (`A1`) was extracted out of cluster P2 so `A2`/`A3`/`A4` share one
   copy of the PCIe primitives; cluster P6 dissolved (the `[DIAG]` surface is
-  replaced by per-patch nominal telemetry). The carve is implemented; tasks 1–12
-  of the recarve plan are complete.
+  replaced by per-patch nominal telemetry). The addon re-carve plan is fully
+  implemented.
 - **Apply-order interaction.** `C5`'s guards and `A2`/`A3`'s watchdog/recovery
   touch overlapping paths (`osDevReadReg*`, the disconnect state); the
   behavioural-equivalence verification step in the addon-recarve design
