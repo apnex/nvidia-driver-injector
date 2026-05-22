@@ -3,7 +3,7 @@
 #   id  layer  upstreamed_in  source
 # '#' comments and blank lines are ignored.  Row order = apply order.
 # '-' is the empty value for upstreamed_in (still needed).
-# source is 'fork:<branch>' for base rows, 'injector' for addon rows.
+# source is 'fork:<branch>' for all rows.
 
 # Print the data rows of a manifest file, in order, comments/blanks removed.
 manifest_rows() {
@@ -23,11 +23,9 @@ manifest_lint() {
             base|addon) ;;
             *) echo "manifest: row '$id': bad layer '$layer' (want base|addon)" >&2; rc=1 ;;
         esac
-        case "$layer:$src" in
-            base:fork:*)    ;;
-            addon:injector) ;;
-            base:*)  echo "manifest: row '$id': base row needs a fork:<branch> source, got '$src'" >&2; rc=1 ;;
-            addon:*) echo "manifest: row '$id': addon row needs source 'injector', got '$src'" >&2; rc=1 ;;
+        case "$src" in
+            fork:*) ;;
+            *) echo "manifest: row '$id': source must be fork:<branch>, got '$src'" >&2; rc=1 ;;
         esac
         case " $seen " in
             *" $id "*) echo "manifest: duplicate id '$id'" >&2; rc=1 ;;
