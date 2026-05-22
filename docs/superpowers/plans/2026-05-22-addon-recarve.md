@@ -211,10 +211,12 @@ All Phase 2 tasks work in the **fork repo** `/root/open-gpu-kernel-modules`. Eac
 **Compile-check procedure** (used by every Phase 2 task — `KVER` is the host kernel `7.0.9-204.fc44`):
 ```bash
 cd /root/open-gpu-kernel-modules
+git add -A                       # stage carve changes FIRST — protects new untracked source from the clean below
 make modules SYSSRC="/lib/modules/$(uname -r)/build" -j"$(nproc)" IGNORE_CC_MISMATCH=1 > /tmp/carve-build.log 2>&1 \
   && echo "COMPILE OK" || { echo "COMPILE FAILED"; tail -40 /tmp/carve-build.log; }
-git clean -fdx >/dev/null 2>&1   # drop build artifacts before checkout/commit
+git clean -fdx >/dev/null 2>&1   # drop build artifacts only — `git clean` removes untracked files, so staged carve files survive
 ```
+**Important:** the `git add -A` first line is mandatory. `git clean -fdx` deletes untracked files; without staging first it would delete freshly-created carve source files (`nv-tb-egpu-*.{c,h}`) that have not been committed yet.
 
 ## Task 3: Carve A1 — `pcie-primitives` foundation
 
