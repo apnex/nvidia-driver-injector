@@ -6,13 +6,14 @@
 
 # Print the data rows of a manifest file, in order, comments/blanks removed.
 manifest_rows() {
-    grep -vE '^[[:space:]]*(#|$)' "$1"
+    grep -vE '^[[:space:]]*(#|$)' "$1" || true
 }
 
 # Validate a manifest file. Prints errors to stderr; returns non-zero if invalid.
 manifest_lint() {
     local file="$1" rc=0 seen="" id layer up src extra n
     while read -r id layer up src extra; do
+        [ -z "$id" ] && continue
         n=$(printf '%s %s %s %s' "$id" "$layer" "$up" "$src" | wc -w)
         if [ -n "$extra" ] || [ "$n" -ne 4 ]; then
             echo "manifest: row '$id': expected 4 fields" >&2; rc=1; continue

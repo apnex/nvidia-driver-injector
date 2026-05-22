@@ -37,4 +37,14 @@ printf '  C1-a  base  -\n' > "$d/short"
 manifest_lint "$d/short" 2>/dev/null
 assert_eq "$?" "1" "manifest_lint rejects a row with too few fields"
 
+# manifest_lint accepts an empty / comments-only manifest (zero rows is valid)
+printf '# only a comment\n\n' > "$d/empty"
+manifest_lint "$d/empty" 2>/dev/null
+assert_eq "$?" "0" "manifest_lint accepts a comments-only manifest"
+
+# manifest_lint rejects a row with too many fields
+printf '  C1-a  base  -  fork:c1  EXTRA\n' > "$d/long"
+manifest_lint "$d/long" 2>/dev/null
+assert_eq "$?" "1" "manifest_lint rejects a row with too many fields"
+
 finish_tests
