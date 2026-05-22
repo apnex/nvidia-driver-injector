@@ -1,0 +1,8 @@
+# regen-base-patches.sh state -- generated 2026-05-22T10:25:09Z
+# base tag: 595.71.05 (51edebee79919b54f498c19a0be31982cd97646e)
+C1-kbuild-version-mk  c1-kbuild-version-mk  dce2a1148b0986205d74db7a10ebf9c6d01f83b7
+C2-aer-internal-unmask  c2-aer-internal-unmask  2cc240ef06fd740262a0c2532b043dd852258a83
+C3-gpu-lost-retry  c3-gpu-lost-retry  e069ffe0244d654a60cd155b9ca7c125e3882ee3
+C4-err-handlers-scaffold  c4-err-handlers-scaffold  2f3c4896010198c722bc1fb14745ff5e780d17e5
+E1-egpu-detection  e1-egpu-detection  2d43621b88eff6acb9a10f46ccb1fe7f40e91352
+C5-crash-safety  c5-crash-safety  8a67344f7a31b9a21e22fc516b03521922ceb2e2
