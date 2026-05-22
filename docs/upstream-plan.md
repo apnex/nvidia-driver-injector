@@ -99,7 +99,7 @@ C-number (see [Submission order](#submission-order)).
 
 ### C1 — Kbuild reads NVIDIA_VERSION from version.mk
 
-- **Source:** cluster P7 (`patches/0007`), the version.mk-as-truth half only.
+- **Source:** cluster P7 (`patches/legacy/0007`), the version.mk-as-truth half only.
 - **Change:** `kernel-open/Kbuild` does `include $(src)/../version.mk` and uses
   `$(NVIDIA_VERSION)` for `-DNV_VERSION_STRING`, instead of a hardcoded literal.
 - **Benefit to all:** pure build hygiene. Today the version literal can drift
@@ -116,7 +116,7 @@ C-number (see [Submission order](#submission-order)).
 
 ### C2 — Clear the AER internal-error mask bits at probe
 
-- **Source:** cluster P5 (`patches/0002`).
+- **Source:** cluster P5 (`patches/legacy/0002`).
 - **Change:** at probe, clear the *internal-error* mask bits — `PCI_ERR_UNC_INTN`
   (Uncorrectable Mask) + `PCI_ERR_COR_INTERNAL` (Correctable Mask) — so the GPU
   stops masking its own internal PCIe errors and demoting them to "advisory
@@ -151,7 +151,7 @@ C-number (see [Submission order](#submission-order)).
 
 ### C3 — Retry a transient bus read before declaring the GPU permanently lost
 
-- **Source:** cluster P1 (`patches/0001`), the retry sub-theme.
+- **Source:** cluster P1 (`patches/legacy/0001`), the retry sub-theme.
 - **Change:** before `osHandleGpuLost` commits `PDB_PROP_GPU_IS_LOST`, retry
   the dead-bus read a small bounded number of times (project value: 10× /
   100 µs ≈ 1 ms) — recover a transient, still declare a genuinely-dead GPU
@@ -184,7 +184,7 @@ C-number (see [Submission order](#submission-order)).
 
 ### C4 — Register pci_error_handlers — error-recovery scaffolding
 
-- **Source:** cluster P2 (`patches/0004`), the err_handlers registration only.
+- **Source:** cluster P2 (`patches/legacy/0004`), the err_handlers registration only.
 - **Change:** populate the `pci_error_handlers` struct in the driver's
   `struct pci_driver`. `error_detected` is **state-aware**:
   `pci_channel_io_normal` (non-fatal) → `PCI_ERS_RESULT_CAN_RECOVER` — a
@@ -220,7 +220,7 @@ C-number (see [Submission order](#submission-order)).
 
 ### C5 — Crash-safety: don't panic operating on an already-lost GPU
 
-- **Source:** cluster P1 (`patches/0001`), the *don't-crash-when-already-lost*
+- **Source:** cluster P1 (`patches/legacy/0001`), the *don't-crash-when-already-lost*
   sub-theme — the sibling of C3.
 - **Change, two parts:**
   1. **The os-pci disconnect bridge.** Two kernel-open helpers —

@@ -31,7 +31,7 @@ maps to the upstream **C/E/A** patch geometry, see `docs/upstream-plan.md`.
 
 ## P1 — GPU-lost crash-safety cascade
 
-**File**: `patches/0001-tb-egpu-gpu-lost-crash-safety.patch`
+**File**: `patches/legacy/0001-tb-egpu-gpu-lost-crash-safety.patch`
 **Cluster**: P1
 **Legacy patches consolidated**: 0001, 0002, 0003, 0004, 0006, 0008, 0010, 0011, 0012, 0013
 
@@ -86,7 +86,7 @@ bridge → `C5`. Canonical spec: `docs/upstream-plan.md`.
 
 ## P5 — AER UncMask clear at probe
 
-**File**: `patches/0002-tb-egpu-aer-uncmask-clear.patch`
+**File**: `patches/legacy/0002-tb-egpu-aer-uncmask-clear.patch`
 **Cluster**: P5
 **Legacy patches consolidated**: 0022
 
@@ -133,7 +133,7 @@ actual bug; the Windows closed driver does the same clear. Canonical spec:
 
 ## P3 — Q-watchdog Mode B detector
 
-**File**: `patches/0003-tb-egpu-qwatchdog.patch`
+**File**: `patches/legacy/0003-tb-egpu-qwatchdog.patch`
 **Cluster**: P3
 **Legacy patches consolidated**: 0014 (kthread), 0015 (basic sysfs), 0023 S3 portion (persistent detection state)
 
@@ -189,7 +189,7 @@ specs: `docs/upstream-plan.md` and
 
 ## P2 — PCIe error handlers + recovery state machine
 
-**File**: `patches/0004-tb-egpu-pcie-error-handlers-recover.patch`
+**File**: `patches/legacy/0004-tb-egpu-pcie-error-handlers-recover.patch`
 **Cluster**: P2
 **Legacy patches consolidated**: 0007 (err_handlers base), 0016 (recover scaffolding), 0017 (probe-time WPR2 detection), 0023 S1 portion (AER capture helper), 0024 (H1/H2/H3 hardening), 0026 (force_trigger sysfs), 0027 (slot_reset_resume dispatch), 0028 (attempt_count semantics), 0029 err_handlers parts (mmio_enabled + cor_error_detected)
 
@@ -262,7 +262,7 @@ fills `C4`'s stub callbacks with real bodies. Canonical specs:
 
 ## P4 — Close-path observability
 
-**File**: `patches/0005-tb-egpu-close-path-safety.patch`
+**File**: `patches/legacy/0005-tb-egpu-close-path-safety.patch`
 **Cluster**: P4
 **Legacy patches consolidated**: 0029 (RM-side close-path DIAG, minus err_handlers parts already in P2), 0030 (UVM-side close-path DIAG)
 
@@ -319,7 +319,7 @@ Canonical specs: `docs/upstream-plan.md` and
 
 ## P6 — DIAG telemetry surface
 
-**File**: `patches/0006-tb-egpu-diag-telemetry.patch`
+**File**: `patches/legacy/0006-tb-egpu-diag-telemetry.patch`
 **Cluster**: P6
 **Legacy patches consolidated**: 0018 (diag dump core), 0020 (LnkSta/AER extension), 0021 (Header Log + ASPM + LBMS), 0023 S2 portion (DIAG-AER2)
 **Legacy dropped**: 0009 (Lever P-probe — 18 investigation markers, none survived their original purpose)
@@ -382,7 +382,7 @@ Canonical spec:
 
 ## P7 — Build metadata + Kconfig wiring
 
-**File**: `patches/0007-tb-egpu-version-mark-and-kbuild.patch`
+**File**: `patches/legacy/0007-tb-egpu-version-mark-and-kbuild.patch`
 **Cluster**: P7
 **Legacy patches consolidated**: 0005 (version-string mark), 0025 (Kbuild reads version.mk)
 
