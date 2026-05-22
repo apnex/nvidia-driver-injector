@@ -19,6 +19,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 [ -n "$tag" ] || tag="$(awk -F= '/^ARG NVIDIA_OPEN_TAG=/{print $2}' "$repo_root/Dockerfile")"
+[ -n "$tag" ] || { echo "validate: could not determine target tag" >&2; exit 1; }
 
 ksrc="/lib/modules/$kver/build"
 [ -d "$ksrc" ]      || { echo "validate: kernel build dir $ksrc not found" >&2; exit 1; }
