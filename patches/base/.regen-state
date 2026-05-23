@@ -1,6 +1,6 @@
 # regen-base-patches.sh state -- generated 2026-05-22T22:40:27Z
 # base tag: 595.71.05 (51edebee79919b54f498c19a0be31982cd97646e)
-C1-kbuild-version-mk  c1-kbuild-version-mk  dce2a1148b0986205d74db7a10ebf9c6d01f83b7
+C1-kbuild-version-mk  c1-kbuild-version-mk  6d118726fb1aa31386e812ac9fcd535ca4e21bb2
 C2-aer-internal-unmask  c2-aer-internal-unmask  2cc240ef06fd740262a0c2532b043dd852258a83
 C3-gpu-lost-retry  c3-gpu-lost-retry  e069ffe0244d654a60cd155b9ca7c125e3882ee3
 C4-err-handlers-scaffold  c4-err-handlers-scaffold  2f3c4896010198c722bc1fb14745ff5e780d17e5
