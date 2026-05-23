@@ -28,7 +28,7 @@ spec](superpowers/specs/2026-05-22-patch-intent-schema-design.md).
 | `upstream-candidacy` | `high` \| `medium` \| `low` \| `n/a` | Likelihood of upstream acceptance. `n/a` is the **only** allowed value when `layer: addon`. |
 | `telemetry-tier` | `mandatory` \| `nominal` \| `none` | `mandatory` — silent behaviour invisible without logs (e.g. C3 retry, A3 recovery). `nominal` — standard prove-the-path-ran. `none` — no telemetry expected. |
 | `status` | `draft` \| `reviewed` \| `approved` | Workflow state. |
-| `related-patches` | YAML list of ids | Cross-references to other intent files. `[]` allowed. Every listed id must resolve to another `docs/patch-intents/<id>.md`. |
+| `related-patches` | YAML list of ids | Cross-references to other intent files. `[]` allowed. Every listed id must resolve to another `docs/patch-intents/<id>.md`. **Forward-only by design** — Rule 6 does not enforce bidirectional resolution; A `related-patches: [B]` does not require B's frontmatter to also list A. Reverse edges live in body prose via `[[<id>]]` wikilinks when meaningful. |
 
 ## Markdown sections — required, in this order
 

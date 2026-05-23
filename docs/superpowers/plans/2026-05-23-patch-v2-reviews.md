@@ -795,3 +795,23 @@ Remind the user of the natural successors:
 **Placeholder scan:** no TBDs or TODOs in the plan. The per-patch tasks intentionally leave specific delta content un-prescribed (because deltas surface during the review — that IS the review). Every other step has concrete commands and expected outputs.
 
 **Type/name consistency:** `<patch-id>`, `<layer>`, `<source-branch>`, `<related-patches>` bindings are consistent across the per-patch workflow and all 11 task headers. Path conventions (`docs/patch-intents/<id>.md`, `docs/patch-reviews/<id>.md`, `patches/<layer>/<id>.patch`) are uniform. Tool invocations (`tools/intent-lint.sh`, `tools/regen-base-patches.sh`, `tools/validate-patchset.sh`, `tools/render-patch-index.sh`) match the live filenames on `main`.
+
+---
+
+## Deferred follow-ups (sub-cycle 2 close-out)
+
+These items were surfaced during the cycle and consciously deferred. They are not blocking sub-cycle 2's done-gate but should be tracked across cycle boundaries.
+
+| Item | Origin | Disposition |
+|---|---|---|
+| **Rename `tb_egpu_recover_*` → `tb_egpu_pcie_*`** symbol prefix. 4 of 5 A1 helpers carry a legacy `_recover_` infix from the pre-recarve filename; helpers now live in `nv-tb-egpu-pcie.c` and serve A2/A3/A4 (only one of which is recovery). Atomic rename across A1+A2+A3+A4 fork branches required. | A1-D1 (`docs/patch-reviews/A1-pcie-primitives.md`) | Defer to a future naming-consistency mini-initiative. Cosmetic; zero must-fix urgency. |
+| **Hoist `tb_egpu_dump_aer_trigger_event` call site** from A3-patches-into-A2 to A2-owns-it. Current shape: A3 adds a one-line dump call into A2's `tb_egpu_qwd_thread` because A3 owns the consumer state machine. Alternative: A2 owns the call and writes into its own `qwd->last_aer` directly. | A2-D1 / A3-D3 | Defer. A3's review accepted the cross-TU patching shape as correct (consumer-owns-call). Revisit only if a future A2/A3 refactor surfaces a cleaner seam. |
+| **Detection counter semantics drift in A2.** The `detections` counter increments per dead-bus *cycle* within an episode rather than per *episode*. Documented vs. actual semantics mismatch is a diagnostic-surface clarity issue, not a correctness bug. Single-eGPU deployment makes wrap-at-INT_MAX (~13 years at 5 Hz) a non-concern. | A2-D2 (`docs/patch-reviews/A2-bus-loss-watchdog.md`) | Defer to a future operational-cleanup pass; check whether watchdog daemon consumers rely on current semantics first. |
+| **`tools/regen-base-patches.sh` timestamp churn.** The script writes `patches/base/.regen-state` with a fresh timestamp on every run even when no patch content changes. Per-patch implementers worked around by `git checkout -- patches/base/.regen-state` before commit. | Surfaced by C4 / E1 / multiple implementer reports | Fix candidate: content-hash gate on `.regen-state` write. Small follow-up; not blocking. |
+| **`tb_egpu_get_gpu_pdev` is single-pdev.** A4's userspace-facing helper assumes one eGPU; multi-eGPU deployment would need a per-fd pdev lookup, which is a UVM-side fd-table refactor outside A4's scope. | A4-D1 (`docs/patch-reviews/A4-close-path-telemetry.md`) | Defer pending hardware reality (project ships single-eGPU). Documented in intent. |
+| **UVM `fd_count` is module-global.** Same multi-eGPU boundary as A4-D1. | A4-D2 | Defer. |
+| **Schema-doc illustrative-anchor audit.** The vanilla-source anchor on line 56 was found wrong mid-cycle (commit `4307f3b`). Suggests other illustrative anchors in `docs/patch-intent-schema.md` deserve a spot-check before sub-cycle 3. | Final cross-branch review | Spot-check before sub-cycle 3 brainstorming begins. |
+
+## Reverse-edge `related-patches:` convention
+
+The schema's Rule 6 enforces **forward-only** cross-reference resolution: if A's frontmatter lists B, B's file must exist, but B's frontmatter is NOT required to list A. This is by design — reverse edges (where the related patch *is the consumer*, not the dependency) live in body prose via `[[<id>]]` wikilinks when meaningful. Captured in the schema doc's "Frontmatter" table after the cycle's cross-patch audit pass surfaced the asymmetry.
