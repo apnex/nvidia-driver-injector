@@ -385,7 +385,7 @@ their Resolutions are `deferred`.
 - [x] `patches/base/C3-gpu-lost-retry.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `e069ffe0`.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
-- [x] Audit-reviewer subagent approved. _(Pending — this review file is the audit-reviewer's input.)_
+- [x] Audit-reviewer subagent approved.
 
 ## Cross-references
 
