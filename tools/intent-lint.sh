@@ -95,6 +95,14 @@ for file in "${files[@]}"; do
     if [ "$layer_val" = "base" ] && [ "$cand_val" = "n/a" ]; then
         err "$file" "rule 5: base layer must have upstream-candidacy in {high,medium,low} (got 'n/a')"
     fi
+
+    # Rule 6: every related-patches id resolves to another intent file.
+    while read -r rel_id; do
+        [ -z "$rel_id" ] && continue
+        if [ ! -f "$intents_dir/$rel_id.md" ]; then
+            err "$file" "rule 6: related-patches entry '$rel_id' has no file at $intents_dir/$rel_id.md"
+        fi
+    done < <(intent_related_patches "$file")
 done
 
 [ "$errors" -eq 0 ] || exit 1
