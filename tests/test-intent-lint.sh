@@ -576,4 +576,63 @@ The driver SHALL stub.
 INTENT
 assert_exit 1 "top heading id mismatch fails lint" lint_fixture "$d"
 
+# Renderer test: 2 intents → docs/patch-index.md produced with 2 entries in manifest order.
+d="$(mk)"
+_intent_test_dirs+=("$d")
+write_valid_intent "$d"
+# Add a second valid intent for X2-good (the addon row in the default manifest).
+cat > "$d/docs/patch-intents/X2-good.md" <<'INTENT'
+---
+id: X2-good
+layer: addon
+source-branch: x2-good
+upstream-candidacy: n/a
+telemetry-tier: nominal
+status: draft
+related-patches: []
+---
+
+# X2-good — Second Valid Patch
+
+## Purpose
+
+A second test fixture demonstrating an addon-layer intent.
+
+## Requirements
+
+### Requirement: Stub
+
+The driver SHALL stub.
+
+#### Scenario: Stub
+- **GIVEN** stub
+- **WHEN** stub
+- **THEN** MUST stub
+
+## Scope boundary
+- Fixture only.
+## Telemetry contract
+| Event | Level | Format |
+|---|---|---|
+| e | `dev_warn` | `"e"` |
+## Provenance
+- **Source cluster:** P0 (fixture).
+- **Vanilla baseline:** stub.
+- **Fork branch:** `x2-good`.
+- **Upstream issue:** n/a.
+INTENT
+
+RENDER="$here/../tools/render-patch-index.sh"
+out="$d/docs/patch-index.md"
+"$RENDER" --manifest "$d/patches/manifest" --intents-dir "$d/docs/patch-intents" --out "$out"
+# Two data rows expected (X1-good base then X2-good addon).
+got_count="$(grep -cE '^\| \[X[12]-good\]' "$out" || true)"
+assert_eq "$got_count" "2" "renderer emits 2 entries"
+# Check manifest order: X1 before X2.
+first="$(grep -E '^\| \[X[12]-good\]' "$out" | head -1)"
+case "$first" in
+    "| [X1-good]"*) assert_eq "ok" "ok" "renderer preserves manifest order" ;;
+    *) assert_eq "X1-first" "$first" "renderer preserves manifest order" ;;
+esac
+
 finish_tests
