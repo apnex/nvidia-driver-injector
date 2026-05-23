@@ -103,6 +103,15 @@ for file in "${files[@]}"; do
             err "$file" "rule 6: related-patches entry '$rel_id' has no file at $intents_dir/$rel_id.md"
         fi
     done < <(intent_related_patches "$file")
+
+    # Rule 7: required ## sections appear in the exact order:
+    #   Purpose, Requirements, Scope boundary, Telemetry contract, Provenance.
+    expected_sections="Purpose Requirements Scope boundary Telemetry contract Provenance"
+    actual_sections="$(intent_sections "$file" | tr '\n' '|')"
+    expected_pattern='Purpose|Requirements|Scope boundary|Telemetry contract|Provenance|'
+    if [ "$actual_sections" != "$expected_pattern" ]; then
+        err "$file" "rule 7: ## sections must be exactly (in order): $expected_sections; got: $(echo "$actual_sections" | tr '|' ',')"
+    fi
 done
 
 [ "$errors" -eq 0 ] || exit 1
