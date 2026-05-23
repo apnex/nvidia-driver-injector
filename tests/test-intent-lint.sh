@@ -635,4 +635,56 @@ case "$first" in
     *) assert_eq "X1-first" "$first" "renderer preserves manifest order" ;;
 esac
 
+# Renderer test: pipe characters in Purpose are escaped for Markdown table safety.
+d="$(mk)"
+_intent_test_dirs+=("$d")
+cat > "$d/docs/patch-intents/X1-good.md" <<'INTENT'
+---
+id: X1-good
+layer: base
+source-branch: x1-good
+upstream-candidacy: high
+telemetry-tier: nominal
+status: draft
+related-patches: []
+---
+
+# X1-good — Pipes in Purpose
+
+## Purpose
+
+A summary with | embedded | pipe characters.
+
+## Requirements
+
+### Requirement: Stub
+
+The driver SHALL stub.
+
+#### Scenario: Stub
+- **GIVEN** stub
+- **WHEN** stub
+- **THEN** MUST stub
+
+## Scope boundary
+- Stub.
+## Telemetry contract
+| Event | Level | Format |
+|---|---|---|
+| e | `dev_warn` | `"e"` |
+## Provenance
+- **Source cluster:** stub.
+- **Vanilla baseline:** stub.
+- **Fork branch:** `x1-good`.
+- **Upstream issue:** n/a.
+INTENT
+
+# X2-good is unfilled in the manifest; the renderer will emit a "(intent file missing)"
+# row for it, which is fine and does not interfere with the X1-good escape check.
+out="$d/docs/patch-index.md"
+"$RENDER" --manifest "$d/patches/manifest" --intents-dir "$d/docs/patch-intents" --out "$out"
+# Look for the literal escape sequence \| in the rendered X1-good row.
+got_escape="$(grep -E '^\| \[X1-good\].*\\\|' "$out" | wc -l)"
+assert_eq "$got_escape" "1" "renderer escapes | in Purpose summary"
+
 finish_tests

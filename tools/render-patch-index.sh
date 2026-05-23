@@ -35,6 +35,11 @@ purpose_summary() {
     ' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
+# Escape pipe characters for safe embedding in a Markdown table cell.
+_escape_pipes() {
+    printf '%s' "${1//|/\\|}"
+}
+
 # Header.
 {
     echo "# Patch index"
@@ -52,10 +57,10 @@ grep -vE '^[[:space:]]*(#|$)' "$manifest" | while read -r mid layer up src; do
         printf '| %s | %s | — | — | — | (intent file missing) |\n' "$mid" "$layer" >> "$out"
         continue
     fi
-    cand="$(intent_field "$intent" upstream-candidacy)"
-    tel="$(intent_field "$intent" telemetry-tier)"
-    status="$(intent_field "$intent" status)"
-    summary="$(purpose_summary "$intent")"
+    cand="$(_escape_pipes "$(intent_field "$intent" upstream-candidacy)")"
+    tel="$(_escape_pipes "$(intent_field "$intent" telemetry-tier)")"
+    status="$(_escape_pipes "$(intent_field "$intent" status)")"
+    summary="$(_escape_pipes "$(purpose_summary "$intent")")"
     # Relative link from docs/patch-index.md to docs/patch-intents/<id>.md
     printf '| [%s](patch-intents/%s.md) | %s | %s | %s | %s | %s |\n' \
         "$mid" "$mid" "$layer" "$cand" "$tel" "$status" "$summary" >> "$out"
