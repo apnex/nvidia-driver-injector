@@ -454,4 +454,48 @@ Stub.
 INTENT
 assert_exit 1 "no Requirement blocks fails lint" lint_fixture "$d"
 
+# Case: a Requirement block contains no UPPERCASE RFC 2119 keyword.
+d="$(mk)"
+_intent_test_dirs+=("$d")
+cat > "$d/docs/patch-intents/X1-good.md" <<'INTENT'
+---
+id: X1-good
+layer: base
+source-branch: x1-good
+upstream-candidacy: high
+telemetry-tier: nominal
+status: draft
+related-patches: []
+---
+
+# X1-good — No RFC 2119
+
+## Purpose
+Stub.
+
+## Requirements
+
+### Requirement: Descriptive but not normative
+
+The driver should probably handle the case (lowercase, not normative).
+
+#### Scenario: Stub
+- **GIVEN** stub
+- **WHEN** stub
+- **THEN** stub happens
+
+## Scope boundary
+- Stub.
+## Telemetry contract
+| Event | Level | Format |
+|---|---|---|
+| e | `dev_warn` | `"e"` |
+## Provenance
+- **Source cluster:** stub.
+- **Vanilla baseline:** stub.
+- **Fork branch:** stub.
+- **Upstream issue:** n/a.
+INTENT
+assert_exit 1 "Requirement without RFC 2119 fails lint" lint_fixture "$d"
+
 finish_tests

@@ -118,6 +118,15 @@ for file in "${files[@]}"; do
     if [ "${req_count:-0}" -eq 0 ]; then
         err "$file" "rule 8: ## Requirements has no ### Requirement: block"
     fi
+
+    # Rule 9: each Requirement block contains >= 1 UPPERCASE RFC 2119 keyword.
+    while read -r req_name; do
+        [ -z "$req_name" ] && continue
+        body="$(intent_requirement_body "$file" "$req_name")"
+        if ! echo "$body" | grep -qE "\\b($INTENT_RFC2119)\\b"; then
+            err "$file" "rule 9: Requirement '$req_name' has no UPPERCASE RFC 2119 keyword"
+        fi
+    done < <(intent_requirements "$file")
 done
 
 [ "$errors" -eq 0 ] || exit 1
