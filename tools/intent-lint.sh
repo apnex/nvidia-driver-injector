@@ -45,8 +45,18 @@ err() { echo "intent-lint: $1: $2" >&2; errors=$((errors + 1)); }
 
 for file in "${files[@]}"; do
     [ -f "$file" ] || { err "$file" "file does not exist"; continue; }
-    # Rules will be added by subsequent tasks.
-    :
+
+    # Rule 1: frontmatter is well-formed AND has all 7 required fields.
+    if ! intent_has_frontmatter "$file"; then
+        err "$file" "rule 1: missing or unclosed frontmatter (need opening and closing --- on their own lines, opener at line 1)"
+        continue
+    fi
+    for field in id layer source-branch upstream-candidacy telemetry-tier status related-patches; do
+        val="$(intent_field "$file" "$field")"
+        if [ -z "$val" ]; then
+            err "$file" "rule 1: frontmatter missing required field '$field'"
+        fi
+    done
 done
 
 [ "$errors" -eq 0 ] || exit 1
