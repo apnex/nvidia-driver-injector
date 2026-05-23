@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Tests for tools/intent-lint.sh.
+#
+# Each test case creates a temporary directory with:
+#   <tmp>/patches/manifest                  — fixture manifest
+#   <tmp>/docs/patch-intents/<id>.md        — fixture intent(s)
+# Then invokes intent-lint with --manifest and --intents-dir pointed at it.
+
+set -u
+here="$(cd "$(dirname "$0")" && pwd)"
+. "$here/lib.sh"
+
+INTENT_LINT="$here/../tools/intent-lint.sh"
+
+# mk: create a temp fixture root with a default manifest containing X1-good (base) and X2-good (addon).
+mk() {
+    local d; d="$(mktemp -d)"
+    mkdir -p "$d/patches" "$d/docs/patch-intents"
+    cat > "$d/patches/manifest" <<'M'
+# id        layer  upstreamed_in  source
+  X1-good   base   -              fork:x1-good
+  X2-good   addon  -              fork:x2-good
+M
+    echo "$d"
+}
+
+# write_valid_intent: write a fully lint-conformant intent for X1-good into the fixture dir.
+write_valid_intent() {
+    local dir="$1"
+    cat > "$dir/docs/patch-intents/X1-good.md" <<'INTENT'
+---
+id: X1-good
+layer: base
+source-branch: x1-good
+upstream-candidacy: high
+telemetry-tier: nominal
+status: draft
+related-patches: []
+---
+
+# X1-good — Example Valid Patch
+
+## Purpose
+
+A test fixture demonstrating a fully lint-conformant intent file.
+
+## Requirements
+
+### Requirement: Example normative requirement
+
+The driver SHALL emit a log line whenever the example event fires.
+
+#### Scenario: The event fires
+- **GIVEN** the relevant precondition holds
+- **WHEN** the event occurs
+- **THEN** the driver MUST emit the log line
+
+## Scope boundary
+
+- This is a test fixture; it does not correspond to any real patch.
+
+## Telemetry contract
+
+| Event | Level | Format |
+|---|---|---|
+| example | `dev_warn` | `"example event fired"` |
+
+## Provenance
+
+- **Source cluster:** P0 (fixture; not real).
+- **Vanilla baseline:** `kernel-open/example.c:example_fn`.
+- **Fork branch:** `x1-good`.
+- **Upstream issue:** n/a.
+INTENT
+}
+
+# Lint helper: invokes intent-lint against a fixture dir.
+lint_fixture() {
+    local dir="$1"
+    "$INTENT_LINT" --manifest "$dir/patches/manifest" --intents-dir "$dir/docs/patch-intents"
+}
+
+# Case 0: valid-case fixture passes lint.
+d="$(mk)"
+write_valid_intent "$d"
+assert_exit 0 "valid intent passes lint" lint_fixture "$d"
+rm -rf "$d"
+
+finish_tests

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# intent-lint.sh — validate patch-intent files against the schema.
+#
+# Usage: intent-lint.sh [--manifest FILE] [--intents-dir DIR] [file...]
+#   Defaults: --manifest patches/manifest (repo-relative)
+#             --intents-dir docs/patch-intents
+#   With no file arguments, lints every <intents-dir>/*.md except _template.md.
+#   With explicit file arguments, lints exactly those.
+#
+# Exits 0 on success, 1 on validation failure, 2 on bad invocation.
+set -u
+
+here="$(cd "$(dirname "$0")" && pwd)"
+. "$here/lib/intent.sh"
+
+repo_root="$(cd "$here/.." && pwd)"
+manifest="$repo_root/patches/manifest"
+intents_dir="$repo_root/docs/patch-intents"
+explicit_files=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --manifest)    manifest="$2"; shift 2 ;;
+        --intents-dir) intents_dir="$2"; shift 2 ;;
+        -*) echo "intent-lint: unknown flag '$1'" >&2; exit 2 ;;
+        *) explicit_files+=("$1"); shift ;;
+    esac
+done
+
+# Build the file list.
+files=()
+if [ "${#explicit_files[@]}" -gt 0 ]; then
+    files=("${explicit_files[@]}")
+else
+    [ -d "$intents_dir" ] || { echo "intent-lint: intents dir not found: $intents_dir" >&2; exit 1; }
+    for f in "$intents_dir"/*.md; do
+        [ -e "$f" ] || continue
+        [ "$(basename "$f")" = "_template.md" ] && continue
+        files+=("$f")
+    done
+fi
+
+errors=0
+err() { echo "intent-lint: $1: $2" >&2; errors=$((errors + 1)); }
+
+for file in "${files[@]}"; do
+    [ -f "$file" ] || { err "$file" "file does not exist"; continue; }
+    # Rules will be added by subsequent tasks.
+    :
+done
+
+[ "$errors" -eq 0 ] || exit 1
+exit 0
