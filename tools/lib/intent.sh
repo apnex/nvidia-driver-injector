@@ -28,12 +28,20 @@ intent_has_frontmatter() {
     ' "$1"
 }
 
-# Print a single frontmatter field's value (trimmed; empty if missing).
+# Print a single frontmatter field's value (trimmed; empty if missing or quoted-empty).
+# YAML-style: surrounding matched double or single quotes are stripped so that
+# `field: "value"` and `field: value` are semantically equivalent.
 intent_field() {
-    local file="$1" key="$2"
-    intent_frontmatter "$file" \
-      | awk -v k="$key" -F': *' '$1 == k { sub(/^[^:]*: */, ""); print; exit }' \
-      | sed 's/[[:space:]]*$//'
+    local file="$1" key="$2" v
+    v="$(intent_frontmatter "$file" \
+        | awk -v k="$key" -F': *' '$1 == k { sub(/^[^:]*: */, ""); print; exit }' \
+        | sed 's/[[:space:]]*$//')"
+    case "$v" in
+        '""'|"''")             v="" ;;
+        '"'*'"')               v="${v#\"}"; v="${v%\"}" ;;
+        "'"*"'")               v="${v#\'}"; v="${v%\'}" ;;
+    esac
+    printf '%s\n' "$v"
 }
 
 # Print the `related-patches` list as one id per line; empty if [].
