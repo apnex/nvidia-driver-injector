@@ -76,6 +76,16 @@ for file in "${files[@]}"; do
             err "$file" "rule 3: layer '$layer_val' disagrees with manifest layer '$manifest_layer' for '$stem'"
         fi
     fi
+
+    # Rule 4: source-branch matches manifest's fork:<branch> for this id (manifest_row from Rule 3).
+    if [ -n "$manifest_row" ]; then
+        sb_val="$(intent_field "$file" source-branch)"
+        manifest_src="$(echo "$manifest_row" | awk '{print $4}')"
+        manifest_branch="${manifest_src#fork:}"
+        if [ "$sb_val" != "$manifest_branch" ]; then
+            err "$file" "rule 4: source-branch '$sb_val' disagrees with manifest 'fork:$manifest_branch' for '$stem'"
+        fi
+    fi
 done
 
 [ "$errors" -eq 0 ] || exit 1
