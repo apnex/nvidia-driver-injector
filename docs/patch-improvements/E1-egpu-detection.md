@@ -704,7 +704,7 @@ an intent precursor.)
 - [x] `tools/intent-lint.sh` passes _(no intent change; lint re-verified after Step 11 catalog write)._
 - [x] `tools/validate-patchset.sh` passes (compile gate against kernel 7.0.9-204.fc44.x86_64).
 - [x] `bash tests/run.sh` green (34 ok, 0 failed).
-- [ ] Audit-reviewer subagent approved.
+- [x] Audit-reviewer subagent approved (sub-cycle 3 audit-reviewer, ✅ APPROVED WITH NOTES — all 10 spot-checked citations verbatim-verified; all 7 triages concurred; D1 naming-concern upheld with 3 strengthening signals; gates re-ran green; catalog length 899 lines justified by depth of design-doc archaeology in absence of direct aorus ancestor. Two non-blocking cosmetic nits flagged and left as-is: (a) `pci.h:467-473` is actually 467-471, (b) "five sites" in catalog vs "four places" in aorus `source-review-notes.md:23-33` reflects later Pass-3+ enumeration; both are pure-prose with zero bearing on triage outcomes or upstream-PR rationale).
 
 ## Methodology notes for the audit-reviewer
 
