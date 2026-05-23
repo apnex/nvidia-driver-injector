@@ -537,8 +537,17 @@ modify the intent.)
 - [x] `tools/validate-patchset.sh` passes. _(Verified at v3 close;
   see closeout commit.)_
 - [x] `bash tests/run.sh` green. _(Verified at v3 close: 34/0/0.)_
-- [ ] Audit-reviewer subagent approved. _(Pending audit-reviewer
-  pass.)_
+- [x] Audit-reviewer subagent approved. _(Sub-cycle 3 audit-reviewer
+  returned ✅ APPROVED — clean verdict, no "WITH NOTES" caveat.
+  All ~10 spot-checked citations verbatim; 9-ancestor consolidation
+  confirmed complete (none missed; 14 candidate ancestors grep'd → 9
+  in C5 + 5 correctly attributed to C3/C4/A2/A3/A4); C4↔C5 contract
+  (C4 registers, C5 consumes) verified; C5↔A1 dedup namespace-disjoint
+  (`os_pci_*` + `NV_GPU_*` vs `tb_egpu_*`); sovereignty zero
+  project-brand matches across 13 touched files; all 7 triages SOUND;
+  I1 strict-vs-loose adjudication SOUND. Audit verdict: "C5 is
+  upstream-PR-ready from a triangulated-review perspective." Audit
+  deltas: none required.)_
 
 ## Cross-references
 
