@@ -24,8 +24,9 @@ Internal Error fires as `Cor=0x2000` (Advisory Non-Fatal) and the
 recovery state machine sleeps. C2 clears the Internal Error bits at
 probe so subsequent Internal Errors fire as proper Uncorrectable
 Non-Fatal events, the Header Log captures the offending TLP, and any
-registered `pci_error_handlers` (introduced in [[C5-crash-safety]] and
-the addon recovery patches) gets dispatched.
+registered `pci_error_handlers` (registered by [[C4-err-handlers-scaffold]]
+and consumed by [[C5-crash-safety]] plus the addon recovery patches)
+gets dispatched.
 
 The historical journey to this patch is worth recording in this review
 file (it does NOT belong in the intent's Purpose — M3 from C1
@@ -267,6 +268,9 @@ is the zero-delta sentinel per M2 from the C1 checkpoint.
   `apnex/open-gpu-kernel-modules`
 - Upstream issue: n/a (NVIDIA-bug-#979 covers the eGPU error path that
   exposed the demotion; this patch is independent hardening)
-- Related reviews: [[C5-crash-safety]] (registers
-  `pci_error_handlers` and performs the actual recovery when an
-  Internal Error fires — C2 makes the error visible; C5 acts on it).
+- Related reviews: [[C4-err-handlers-scaffold]] (registers
+  `pci_error_handlers` so the kernel's recovery dispatch reaches the
+  driver — C2 makes the error visible; C4 makes the dispatch reachable).
+  [[C5-crash-safety]] (consumes the dispatched callbacks to contain
+  dead-bus reads and cleanup paths — C2 + C4 are scaffolding; C5 acts
+  on what the scaffolding exposes).

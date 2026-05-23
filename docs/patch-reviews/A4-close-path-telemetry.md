@@ -670,11 +670,16 @@ code against:
   alongside them in the addon stack as an independent
   consumer of A1; the three patches share A1's foundation
   but do not call each other.
-- A4's interaction with A5 is build-only — A5's
-  `CONFIG_NV_TB_EGPU` master toggle gates A4's source-list
-  rows (`nvidia/nv-tb-egpu-close.c` and
-  `nvidia-uvm/nv-tb-egpu-uvm.c`) at compile time. There is no
-  runtime A4 / A5 dependency.
+- A4's interaction with A5 is documentation-only — A5
+  declares `CONFIG_NV_TB_EGPU` as a reserved master toggle and
+  emits `-DCONFIG_NV_TB_EGPU` to every nvidia.ko object, but in
+  v1 the symbol does NOT gate any source-list row (A4's
+  `nvidia/nv-tb-egpu-close.c` and `nvidia-uvm/nv-tb-egpu-uvm.c`
+  rows are unconditional, matching every other addon source row).
+  The toggle is reserved for a future per-source gating step.
+  There is no runtime A4 / A5 dependency and no compile-time A4 /
+  A5 dependency either; the relationship is purely the
+  reserved-symbol contract A5 documents.
 - A4 holds the future-capability option to call A1's
   `tb_egpu_dump_aer_trigger_event(pdev, "<tag>", NULL)` if a
   future incident class proves the AER walk is needed at

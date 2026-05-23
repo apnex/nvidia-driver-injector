@@ -324,10 +324,12 @@ and supersede the legacy hardcoded `pci_get_domain_bus_and_slot(0,
   by `C4-err-handlers-scaffold` and filled in by
   [[A3-recovery]]. Module-parameter surfaces (master enable,
   tuning knobs) for A4 are NOT introduced — the close-path
-  telemetry is unconditional once compiled in; the master
-  `CONFIG_NV_TB_EGPU` build toggle lives in `A5-version-and-toggles`
-  and applies at the file-compilation level, not at any A4-internal
-  gate.
+  telemetry is unconditional once compiled in. The reserved
+  `CONFIG_NV_TB_EGPU` symbol declared by [[A5-version-and-toggles]]
+  is documentation-only in v1 and does NOT gate A4's
+  source-list rows or any A4-internal code path; any future
+  per-file gate would be a deliberate later step, not a
+  consequence of A4's current shape.
 - This patch does NOT use [[A1-pcie-primitives]]'s
   `tb_egpu_dump_aer_trigger_event(gpu_pdev, trigger, out)` API.
   The full AER multi-hop snapshot dump is reserved for

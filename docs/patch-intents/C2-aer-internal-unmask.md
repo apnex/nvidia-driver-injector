@@ -22,9 +22,11 @@ path. This patch clears the Internal Error bits (uncorrectable bit 22,
 correctable bit 14) at the device's `pci_probe` entry so subsequent
 Internal Errors take the standard AER recovery path, become visible in
 `dmesg` and the kernel's AER decode, and can be acted on by other
-patches that register `pci_error_handlers` (the related
-[[C5-crash-safety]] patch covers the actual recovery actions; this
-patch's job is purely to make the errors VISIBLE).
+patches: [[C4-err-handlers-scaffold]] registers the
+`pci_error_handlers` table that the kernel dispatches to, and
+[[C5-crash-safety]] (plus the addon recovery patches) supplies the
+actual recovery actions. This patch's job is purely to make the errors
+VISIBLE.
 
 ## Requirements
 
@@ -89,8 +91,9 @@ early-exit guard and BEFORE the rest of probe begins.
   that behaviour is explicitly NOT carried forward.
 - This patch does NOT register `pci_error_handlers` and does NOT
   perform recovery (slot reset, link retrain, GPU re-init) when an
-  Internal Error fires. Recovery is the responsibility of
-  [[C5-crash-safety]] and the addon recovery patches; C2's
+  Internal Error fires. Registration is the responsibility of
+  [[C4-err-handlers-scaffold]]; recovery is the responsibility of
+  [[C5-crash-safety]] and the addon recovery patches. C2's
   contribution is solely to make the error VISIBLE so a downstream
   handler exists for the kernel to dispatch.
 - This patch does NOT mutate AER configuration on PCIe bridges,
