@@ -17,12 +17,12 @@ intent-updates: []
 - **v2 review:** `docs/patch-reviews/PATCH-ID-HERE.md`.
 - **aorus-5090 ancestor patch:** `/root/aorus-5090-egpu/patches/<filename>.patch`.
 - **aorus-5090 docs:** `<paths + section anchors>`.
-- **Community-signal entries:** `<section in _community-signal.md>` (or "none tagged").
+- **Community-signal entries:** `<section in _community-signal.md>` (or "none tagged"). When citing community-signal evidence: **distinguish error-code commonality from code-path commonality.** A reported issue may share the same symptom (`NV_ERR_GPU_IS_LOST`) without exercising the same patched code path. Frame supporting evidence as "upstream-PR-rationale strengthening" unless the reported failure demonstrably runs through the patched site.
 
 ## v1 archaeology
 
 (What the aorus-5090 mining surfaced. Every claim MUST cite a specific
-aorus-5090 source path + section.)
+aorus-5090 source path + **line range** — 5-line windows are audit-friendly.)
 
 - **Original design intent:** <citation>
 - **Constraints discovered:** <citation>
@@ -45,6 +45,19 @@ aorus-5090 source path + section.)
 
 (repeat for each improvement; if no improvements surface, replace this
 section with "(no improvements surfaced — v2 already meets v3 quality bar)")
+
+## Re-examination of sub-cycle 2 deferrals
+
+(If the patch's sub-cycle 2 review file deferred any nice-to-have or
+should-fix items, list them here with the v3 disposition. Aorus
+archaeology may strengthen the deferral, surface new evidence that
+flips it to "land", or leave the disposition unchanged. Each entry
+cites the sub-cycle 2 deferral ID + the v3 disposition + the
+archaeological evidence that informed it.)
+
+- **`<v2-D-id>`:** <one-line description> → v3 disposition: **upheld** | **flipped to land** | **reframed**. Evidence: <aorus path + line range>.
+
+(or "(no sub-cycle 2 deferrals for this patch)")
 
 ## Improvements landed
 

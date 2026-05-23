@@ -117,7 +117,15 @@ For each cited aorus-5090 source, capture:
 - Alternative implementations considered + rejected.
 - Forgotten / latent invariants — load-bearing assumptions not yet captured in the v2 intent.
 
-**Every claim in step 8's `## v1 archaeology` section MUST cite a specific aorus-5090 path + section.** The audit-reviewer enforces this.
+**Every claim in step 8's `## v1 archaeology` section MUST cite a specific aorus-5090 path + section (line ranges preferred — 5-line windows are audit-friendly).** The audit-reviewer enforces this.
+
+**Methodology refinement from C3 pilot (M1+M2):** the `<aorus-docs>` binding in each task header is a **starting recommendation**, not a closed list. Before reading:
+
+1. **Verify the lever letter** by grepping `lever-catalog.md` for the patch's actual bug class. The plan's binding may name the wrong lever (C3's pilot found "Lever P" was wrong — actual is Lever I).
+2. **Drop irrelevant paths** if the document covers a different lever family. C3's pilot found `recovery.md` (operator runbook), `recovery-mechanism-findings.md` (Lever M, not Lever I), and `h17-g3-gen3-investigation-2026-05-07.md` (C2 territory) were not relevant despite being in the binding.
+3. **Add omitted paths** if the actual ancestor cites docs the binding missed (C3 added `architecture-and-modularity.md` for sovereignty-lens grounding).
+
+Document the actual sources consulted in §Triangulation sources of the catalog. Audit-reviewer cross-checks.
 
 ### Step 5: Read community-signal entries tagged for this patch
 
