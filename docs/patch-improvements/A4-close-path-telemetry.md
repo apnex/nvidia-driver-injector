@@ -74,7 +74,7 @@ intent-updates: []
   single-pdev `tb_egpu_get_gpu_pdev` semantics, D2 nice-to-have
   global UVM fd_count, D3 out-of-scope confirming A1's `out=NULL`
   future-proofing, D4 explicit no-must-fix sentinel). v1-tip-sha
-  and v2-tip-sha both `f356c3b3` in the review frontmatter; the
+  and v2-tip-sha both `8d85e1db` in the review frontmatter; the
   current fork-branch tip post the addon-recarve cascade is
   `8d85e1db…` (the SHA advanced when the A1 I8 / addon-recarve
   cascade rebased the addon stack). The review frontmatter SHA
@@ -620,15 +620,15 @@ documented resurrection source).
 - **Current state:** v2-D4 declared "v1's behaviour, telemetry, and
   surface match the v2 intent's normative shape" with all four
   intent Requirements satisfied and no must-fix or should-fix
-  deltas. The frontmatter `v1-tip-sha == v2-tip-sha == f356c3b3` in
+  deltas. The frontmatter `v1-tip-sha == v2-tip-sha == 8d85e1db` in
   the review file is the machine-checkable signal.
 - **Proposed state:** verify v1 source against the four intent
   Requirements and confirm the zero-delta sentinel holds across
-  the post-recarve fork-branch tip remap from `f356c3b3` to
+  the post-recarve fork-branch tip remap from `8d85e1db` to
   `8d85e1db`.
 - **Value:** confirms v2-D4's sentinel unchanged: A4 v1 satisfies
   the four Requirements with no v3-side defects. The fork-branch
-  tip advance from `f356c3b3` to `8d85e1db` is a cascade-rebase
+  tip advance from `8d85e1db` to `8d85e1db` is a cascade-rebase
   artefact (the A1 I8 / addon-recarve cascade), not a v3
   improvement; the v3 sentinel
   `v1-tip-sha == v2-tip-sha == 8d85e1db` holds because v3 lands
@@ -1073,8 +1073,33 @@ this v3 sweep started.)
   intent unchanged in v3 sweep; lint last validated at `e8fb311`.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green (34 ok / 0 failed).
-- [ ] Audit-reviewer subagent approved. _(Pending — this catalog
-  file is the audit-reviewer's input.)_
+- [x] Audit-reviewer subagent approved. _(Sub-cycle 3 audit-reviewer,
+  ✅ ⚠️ APPROVED WITH NOTES — headline guardrail HELD verified
+  directly: `git diff f57a38b2..a4-close-path-telemetry --name-only`
+  returns 8 files (`nv.c`, `nv-tb-egpu-close.{c,h}`, `nvidia-sources.Kbuild`,
+  `nvidia-uvm/uvm.c`, `nv-tb-egpu-uvm.{c,h}`, `nvidia-uvm-sources.Kbuild`)
+  — `nv-tb-egpu-qwd.c` (A2's TU) is NOT among them. A3's I1
+  revisit-trigger condition NOT fired. All 8 spot-checked aorus
+  citations verbatim (5 ancestor patches + 3 design docs); M1+M2
+  drops + adds sound (binding's `recovery-mechanism-findings.md`
+  correctly dropped, 0029 + 0030 correctly added); duty boundary
+  18-pattern grep re-run returns zero matches across A4's 4 source
+  files — telemetry-only confirmed; M6 all 4 D-entries first-class
+  re-examined; all 11 triages sound; gates re-ran green. Audit
+  delta surfaced + fixed: the audit identified that A4 v2 review's
+  frontmatter still carried the pre-A1-cascade SHA `f356c3b3` (the
+  Claude-scrub remap table only covered the last hop, not the
+  earlier A1-cascade hop). The pre-A1-cascade-to-current
+  remap (`f356c3b3 → 8d85e1db`, `420fcaed → 9d62f2e6`,
+  `f5216ee2 → f57a38b2`, `6d5e5e71 → cd1fe088`) was applied across
+  all docs files in the same closeout commit; all 11 review-file
+  frontmatters now reflect current post-scrub fork tips. Zero-delta
+  sentinel approved at `8d85e1db85675b6bec81dd63f4f63a950c258123`.
+  **Pre-warn for Task 13 (A5):** A5's reviewer should know A4 does
+  NOT touch A2's TU, A4 does NOT add `pci_error_handlers`/sysfs/
+  module parameter surfaces — if A5 introduces any of those, the
+  duty boundary trips. A5 is expected per recarve to be version
+  stamp + reserved `CONFIG_NV_TB_EGPU` toggle declaration only.)_
 
 ## Cross-references
 

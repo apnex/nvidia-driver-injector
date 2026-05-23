@@ -70,7 +70,7 @@ intent-updates: []
   L4 boundary, D2 nice-to-have `s_error_detected_logged` module-
   global vs per-device, D3 out-of-scope confirming A2-D1's qwd-detect
   ownership resolution, D4 explicit no-must-fix sentinel). Frontmatter
-  carries a STALE SHA (`f5216ee2…`) that the 2026-05-22 A1-cascade
+  carries a STALE SHA (`f57a38b2…`) that the 2026-05-22 A1-cascade
   remap missed; the actual fork-branch tip is `f57a38b2…`. Surfaced
   as I15 below — landed as a cosmetic doc fix.
 - **aorus-5090 ancestor patches** (verified per M1+M2 against grep
@@ -754,7 +754,7 @@ machine) plus C4 (err_handlers registration only).
   correction from `PCI_EXP_DPC_CTL` to `PCI_EXP_DPC_STATUS` —
   A1 catalog §I8 lines 475-543) propagated into A3's source
   via the cumulative-stack rebase (A3's fork-branch tip
-  advanced from `f5216ee2` to `f57a38b2`). A3 consumes A1's
+  advanced from `f57a38b2` to `f57a38b2`). A3 consumes A1's
   surface (`tb_egpu_recover_read_wpr2`, `TB_EGPU_RECOVER_WPR2_VAL_MASK`,
   `tb_egpu_dump_aer_trigger_event`) — but does NOT directly
   value-compare DPC bits or AER bits; A3 reads WPR2 and
@@ -779,8 +779,8 @@ machine) plus C4 (err_handlers registration only).
   `tb_egpu_recover_read_wpr2`) and PMC_BOOT_0 (direct
   `ioread32(bar0_phys + 0)`). The DPC offset correction does
   not propagate to any A3-side value comparison. The cumulative
-  rebase from `f5216ee2` to `f57a38b2` advanced line offsets
-  but not semantics. **The `f5216ee2` references in
+  rebase from `f57a38b2` to `f57a38b2` advanced line offsets
+  but not semantics. **The `f57a38b2` references in
   `docs/patch-intents/A3-recovery.md` line 549,
   `docs/patch-reviews/A3-recovery.md` lines 5, 6, 74, 826,
   873, 915 are STALE and need to be remapped to `f57a38b2`** —
@@ -1314,7 +1314,7 @@ machine) plus C4 (err_handlers registration only).
   (sub-cycle 2 deferral) is the cross-patch consistency audit
   for Task 14; A3's individual naming is correct in v1.**
 
-### A3-recovery-I15 — Documentation drift: v2 intent + review files reference stale fork-branch SHA `f5216ee2`
+### A3-recovery-I15 — Documentation drift: v2 intent + review files reference stale fork-branch SHA `f57a38b2`
 
 - **Lens:** quality (documentation accuracy)
 - **Current state:** The 2026-05-22 A1-cascade remap (commit
@@ -1324,7 +1324,7 @@ machine) plus C4 (err_handlers registration only).
   - `docs/patch-reviews/A3-recovery.md` lines 5, 6 (frontmatter
     v1-tip-sha + v2-tip-sha), 74, 826, 873, 915
   - `docs/patch-intents/A3-recovery.md` line 549 (Provenance §)
-  All reference `f5216ee20bcc803a265a6cb99bc0b246a10b6338`
+  All reference `f57a38b2f45b7f757e1982734e587336bb25606a`
   which was the pre-cascade SHA; the post-cascade tip is
   `f57a38b2f45b7f757e1982734e587336bb25606a` (already correctly
   in `patches/base/.regen-state` line 11, in
@@ -1465,7 +1465,7 @@ machine) plus C4 (err_handlers registration only).
 
 ## Improvements landed
 
-- **A3-recovery-I15** — Documentation drift: stale `f5216ee2`
+- **A3-recovery-I15** — Documentation drift: stale `f57a38b2`
   SHA references in `docs/patch-intents/A3-recovery.md`
   line 549 + `docs/patch-reviews/A3-recovery.md` lines 5, 6, 74,
   826, 873, 915 remapped to the post-cascade SHA

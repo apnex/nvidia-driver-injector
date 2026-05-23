@@ -79,7 +79,7 @@ worth of changes: 1243 insertions / 44 deletions across 7 files
 or earlier-patch files).
 
 **Hunk-by-hunk audit (against the immediately-prior `a2` tip
-`6d5e5e7190f8030f76da63d643469645d6f9f4a2`):**
+`cd1fe0888e7b2d135b0bb27214e32d31c9b382c3`):**
 
 1. **`kernel-open/nvidia/nv-tb-egpu-recover.c`** — NEW FILE (854
    lines). MIT-licensed (SPDX `nvidia-driver-injector contributors`
