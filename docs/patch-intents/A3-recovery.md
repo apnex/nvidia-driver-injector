@@ -546,7 +546,7 @@ soak window blocks promotion.
 - **Fork branch:** `a3-recovery` on `apnex/open-gpu-kernel-modules`
   (sits on top of the cumulative `a2-bus-loss-watchdog` base; the
   cumulative diff carries C1-C5 + E1 + A1 + A2 + A3 at tip
-  `f5216ee20bcc803a265a6cb99bc0b246a10b6338`).
+  `f57a38b2f45b7f757e1982734e587336bb25606a`).
 - **A1 ABI consumed:** A3 calls A1's
   `tb_egpu_recover_read_wpr2(bar0_phys, &raw)` verbatim from both
   the probe-time check and the post-rmInit-FAIL trigger; masks the

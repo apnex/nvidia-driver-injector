@@ -2,10 +2,10 @@
 id: C4-err-handlers-scaffold
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: 2f3c4896010198c722bc1fb14745ff5e780d17e5
-v2-tip-sha: 2f3c4896010198c722bc1fb14745ff5e780d17e5
+v1-tip-sha: 75e823eff5b18f08be8d56924d8099fce9829e58
+v2-tip-sha: 75e823eff5b18f08be8d56924d8099fce9829e58
 status: accepted
-related-patches: [E1-egpu-detection, C5-crash-safety]
+related-patches: [E1-egpu-detection, C5-crash-safety, A3-recovery]
 ---
 
 # C4-err-handlers-scaffold — v2 review
@@ -68,7 +68,7 @@ control to driver code.
 ## v1 audit
 
 The v1 fork branch tip
-(`2f3c4896010198c722bc1fb14745ff5e780d17e5` — "nv-pci: register
+(`75e823eff5b18f08be8d56924d8099fce9829e58` — "nv-pci: register
 pci_error_handlers") makes two hunks against
 `kernel-open/nvidia/nv-pci.c`:
 
@@ -299,13 +299,20 @@ The main alternatives considered during the v2 review:
   shipping minimum-correct bodies with prove-the-path logs is the
   point of the scaffolding patch. Kept v1's stub bodies.
 
-- **Five-callback table vs. minimal-three.** The kernel's
-  `struct pci_error_handlers` defines five fields (.error_detected,
-  .mmio_enabled, .slot_reset, .reset_done, .resume). v1 populates
-  four (skipping `.reset_done`). The kernel's err.c does not
-  require `.reset_done` and treats it as optional. Skipping it
-  matches the intent's "minimum at most" stipulation (the intent
-  requires the four populated). Kept v1's four-callback shape.
+- **Seven-field table, minimal-four populated.** The kernel's
+  `struct pci_error_handlers` defines seven fields
+  (`.error_detected`, `.mmio_enabled`, `.slot_reset`,
+  `.reset_prepare`, `.reset_done`, `.resume`, `.cor_error_detected`).
+  v1 populates four (`.error_detected`, `.mmio_enabled`,
+  `.slot_reset`, `.resume`) — the minimum for the AER state machine.
+  The three unpopulated fields are dispatched by orthogonal paths
+  the kernel NULL-checks before calling: `.reset_prepare` and
+  `.reset_done` are the `pci_reset_function()` bookends (not invoked
+  on the `pcie_do_recovery()` path), and `.cor_error_detected` is
+  the correctable-error path (separate dispatch in
+  `aer_process_err_devices()`). Populating any of the three would
+  expand the scaffold beyond the AER state machine's contract. Kept
+  v1's four-callback shape.
 
 - **Telemetry level: pci_info vs. pci_warn distribution.** v1 uses
   `pci_info` for happy-path callbacks (`.error_detected` non-fatal,
@@ -351,7 +358,7 @@ The main alternatives considered during the v2 review:
 
 Per M2 (zero-delta sentinel from the C1 checkpoint), the
 frontmatter `v1-tip-sha == v2-tip-sha ==
-2f3c4896010198c722bc1fb14745ff5e780d17e5` is the machine-checkable
+75e823eff5b18f08be8d56924d8099fce9829e58` is the machine-checkable
 signal that v1 already met v2 intent. The one `nice-to-have` delta
 (D1) is recorded for provenance; it does not require a fork-branch
 commit because its Resolution is `deferred`.
@@ -360,7 +367,7 @@ commit because its Resolution is `deferred`.
 
 - [x] `docs/patch-intents/C4-err-handlers-scaffold.md` exists, lints clean, `status: reviewed`.
 - [x] All must-fix deltas applied as fork-branch commits citing their delta IDs. _(N/A — zero must-fix deltas; D1 is nice-to-have with deferred Resolution.)_
-- [x] `patches/base/C4-err-handlers-scaffold.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `2f3c4896`.)_
+- [x] `patches/base/C4-err-handlers-scaffold.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `75e823ef`.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
 - [x] Audit-reviewer subagent approved. _(Pending — this review file is the audit-reviewer's input.)_

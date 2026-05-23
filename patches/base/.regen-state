@@ -1,13 +1,13 @@
-# regen-base-patches.sh state -- generated 2026-05-22T22:40:27Z
+# regen-base-patches.sh state -- generated 2026-05-23T11:00:13Z
 # base tag: 595.71.05 (51edebee79919b54f498c19a0be31982cd97646e)
-C1-kbuild-version-mk  c1-kbuild-version-mk  dce2a1148b0986205d74db7a10ebf9c6d01f83b7
-C2-aer-internal-unmask  c2-aer-internal-unmask  2cc240ef06fd740262a0c2532b043dd852258a83
-C3-gpu-lost-retry  c3-gpu-lost-retry  e069ffe0244d654a60cd155b9ca7c125e3882ee3
-C4-err-handlers-scaffold  c4-err-handlers-scaffold  2f3c4896010198c722bc1fb14745ff5e780d17e5
-E1-egpu-detection  e1-egpu-detection  2d43621b88eff6acb9a10f46ccb1fe7f40e91352
-C5-crash-safety  c5-crash-safety  8a67344f7a31b9a21e22fc516b03521922ceb2e2
-A1-pcie-primitives  a1-pcie-primitives  be1b56cf8ecc6d34bdfb8175d9ab184ef21d37bf
-A2-bus-loss-watchdog  a2-bus-loss-watchdog  6d5e5e7190f8030f76da63d643469645d6f9f4a2
-A3-recovery  a3-recovery  f5216ee20bcc803a265a6cb99bc0b246a10b6338
-A4-close-path-telemetry  a4-close-path-telemetry  f356c3b3782036307ac25e2f9100cfc9238aef05
-A5-version-and-toggles  a5-version-and-toggles  420fcaedf5ec72897f23206df9b663f18690ccd8
+C1-kbuild-version-mk  c1-kbuild-version-mk  51cfd01e9cfe62d3559fcd127a29e68d727803cb
+C2-aer-internal-unmask  c2-aer-internal-unmask  403d5daf8d80da79991534b3c9d2ef70ac91b63a
+C3-gpu-lost-retry  c3-gpu-lost-retry  c589673a33729e24c5179f92c5c98dbac4886d6b
+C4-err-handlers-scaffold  c4-err-handlers-scaffold  75e823eff5b18f08be8d56924d8099fce9829e58
+E1-egpu-detection  e1-egpu-detection  000ea7a51db8b78225950a753a390a82f3aa1d81
+C5-crash-safety  c5-crash-safety  416bdc37b81a1457e80ec576e1e8990b091136d6
+A1-pcie-primitives  a1-pcie-primitives  124e9c5eb8a433bcf78a2c2753c612eaf29c3a31
+A2-bus-loss-watchdog  a2-bus-loss-watchdog  cd1fe0888e7b2d135b0bb27214e32d31c9b382c3
+A3-recovery  a3-recovery  f57a38b2f45b7f757e1982734e587336bb25606a
+A4-close-path-telemetry  a4-close-path-telemetry  8d85e1db85675b6bec81dd63f4f63a950c258123
+A5-version-and-toggles  a5-version-and-toggles  9d62f2e6445a8899643f2f04ee8397e16ec6be16

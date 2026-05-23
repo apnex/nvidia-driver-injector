@@ -2,8 +2,8 @@
 id: A4-close-path-telemetry
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: f356c3b3782036307ac25e2f9100cfc9238aef05
-v2-tip-sha: f356c3b3782036307ac25e2f9100cfc9238aef05
+v1-tip-sha: 8d85e1db85675b6bec81dd63f4f63a950c258123
+v2-tip-sha: 8d85e1db85675b6bec81dd63f4f63a950c258123
 status: accepted
 related-patches: [A1-pcie-primitives, A3-recovery]
 ---
@@ -60,15 +60,15 @@ healthily?' without further instrumentation."
 
 ## v1 audit
 
-The v1 fork branch tip (`f356c3b3782036307ac25e2f9100cfc9238aef05` —
+The v1 fork branch tip (`8d85e1db85675b6bec81dd63f4f63a950c258123` —
 "tb-egpu: close-path nominal telemetry (A4)") sits on top of
-`a3-recovery` (`f5216ee2`) and adds one commit's worth of changes:
+`a3-recovery` (`f57a38b2`) and adds one commit's worth of changes:
 468 insertions across 8 files (two new files in `nvidia/`, two new
 files in `nvidia-uvm/`, and four additive hunks into vanilla or
 earlier-patch files).
 
 **Hunk-by-hunk audit (against the immediately-prior `a3` tip
-`f5216ee20bcc803a265a6cb99bc0b246a10b6338`):**
+`f57a38b2f45b7f757e1982734e587336bb25606a`):**
 
 1. **`kernel-open/nvidia/nv-tb-egpu-close.c`** — NEW FILE (152
    lines). MIT-licensed (SPDX `nvidia-driver-injector
@@ -641,7 +641,7 @@ The main alternatives considered during the v2 review:
 
 Per M2 (zero-delta sentinel from the C1 checkpoint), the
 frontmatter
-`v1-tip-sha == v2-tip-sha == f356c3b3782036307ac25e2f9100cfc9238aef05`
+`v1-tip-sha == v2-tip-sha == 8d85e1db85675b6bec81dd63f4f63a950c258123`
 is the machine-checkable signal that v1 already met v2 intent. The
 four deltas (D1 nice-to-have single-pdev deployment shape, D2
 nice-to-have global fd_count, D3 out-of-scope confirming A1's
@@ -691,7 +691,7 @@ code against:
 
 - [x] `docs/patch-intents/A4-close-path-telemetry.md` exists, lints clean, `status: reviewed`.
 - [x] All must-fix deltas applied as fork-branch commits citing their delta IDs. _(N/A — zero must-fix deltas; D1 / D2 nice-to-have deployment-shape documentation, D3 out-of-scope confirming A1's contract preservation, D4 explicitly closes "no must-fix".)_
-- [x] `patches/addon/A4-close-path-telemetry.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `f356c3b3`.)_
+- [x] `patches/addon/A4-close-path-telemetry.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `8d85e1db`.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
 - [ ] Audit-reviewer subagent approved. _(Pending — this review file is the audit-reviewer's input.)_
@@ -739,7 +739,7 @@ code against:
   - `kernel-open/nvidia-uvm/nv-tb-egpu-uvm.h` — NEW FILE (38
     lines, no vanilla counterpart).
 - Fork branch: `a4-close-path-telemetry` on
-  `apnex/open-gpu-kernel-modules` tip `f356c3b3`.
+  `apnex/open-gpu-kernel-modules` tip `8d85e1db`.
 - Upstream issue: n/a (addon-layer; not upstream-bound; per
   Rule 5 `upstream-candidacy: n/a` for `layer: addon`). The
   close-path instrumentation policy is project-local and never

@@ -2,8 +2,8 @@
 id: A5-version-and-toggles
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: 420fcaedf5ec72897f23206df9b663f18690ccd8
-v2-tip-sha: 420fcaedf5ec72897f23206df9b663f18690ccd8
+v1-tip-sha: 9d62f2e6445a8899643f2f04ee8397e16ec6be16
+v2-tip-sha: 9d62f2e6445a8899643f2f04ee8397e16ec6be16
 status: accepted
 related-patches: []
 ---
@@ -50,7 +50,7 @@ left at its v1 tip — zero-delta sentinel applies.
 
 ## v1 audit
 
-The v1 fork branch tip (`420fcaedf5ec72897f23206df9b663f18690ccd8`
+The v1 fork branch tip (`9d62f2e6445a8899643f2f04ee8397e16ec6be16`
 — "tb-egpu: version value + CONFIG_NV_TB_EGPU toggle (A5)") makes
 exactly two file edits, 14 net lines added:
 
@@ -318,7 +318,7 @@ The main alternatives considered during the v2 review:
   written at A4's review time (commit `c344571`, 2026-05-23) with
   the expectation that A5's review would deliver a real gate. The
   expectation was reasonable but did not match the v1 reality of
-  the A5 patch (`420fcaed`, authored at the same time the rest of
+  the A5 patch (`9d62f2e6`, authored at the same time the rest of
   the addon stack was being recarved). A5's adjudication (this
   delta) is **honest description over aspirational gating**: the
   reserved-toggle stance is the right design call for v1, and the
@@ -353,7 +353,7 @@ The main alternatives considered during the v2 review:
 - **Evidence:** Both intent Requirements have their scenarios
   satisfiable by inspection of v1. The Provenance section's
   description of the patch surface (2 files, 14 net lines)
-  matches `git show 420fcaed --stat` (2 files changed, 14
+  matches `git show 9d62f2e6 --stat` (2 files changed, 14
   insertions(+), 1 deletion(-)). The toggle's "reserved /
   documentation-only" stance is corroborated by reading the
   in-source comment block alongside the unconditional
@@ -361,7 +361,7 @@ The main alternatives considered during the v2 review:
 - **Resolution:** rejected — no v2 follow-up needed.
 
 Per M2 (zero-delta sentinel from the C1 checkpoint), the frontmatter
-`v1-tip-sha == v2-tip-sha == 420fcaedf5ec72897f23206df9b663f18690ccd8`
+`v1-tip-sha == v2-tip-sha == 9d62f2e6445a8899643f2f04ee8397e16ec6be16`
 is the machine-checkable signal that v1 already meets v2 intent. The
 three non-applied deltas (D1 adjudicating A1-D2 collapse, D2
 correcting A4-D3 prose drift, D3 explicit no-must-fix) are recorded
@@ -391,7 +391,7 @@ single canonical contract:
 
 - [x] `docs/patch-intents/A5-version-and-toggles.md` exists, lints clean, `status: reviewed`.
 - [x] All must-fix deltas applied as fork-branch commits citing their delta IDs. _(N/A — zero must-fix deltas; D1 adjudicates A1-D2 collapse, D2 corrects A4-D3 prose drift via intent + this record, D3 explicit no-must-fix.)_
-- [x] `patches/addon/A5-version-and-toggles.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `420fcaed`.)_
+- [x] `patches/addon/A5-version-and-toggles.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `9d62f2e6`.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
 - [ ] Audit-reviewer subagent approved. _(Pending — this review file is the audit-reviewer's input.)_

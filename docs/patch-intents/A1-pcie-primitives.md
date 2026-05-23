@@ -90,8 +90,11 @@ treated as a stable contract for the lifetime of the addon stack:
   values before any other action, MUST set `*present_out = false`
   and return immediately if `pdev == NULL` or the DPC cap is
   absent, otherwise MUST set `*present_out = true` and read
-  `PCI_DPC_CTL` (`+0x04`) and `PCI_DPC_STATUS` (`+0x06`) into the
-  matching outputs.
+  `PCI_EXP_DPC_CTL` (`+0x06`) and `PCI_EXP_DPC_STATUS` (`+0x08`)
+  into the matching outputs (per kernel canonical layout in
+  `<linux/pci_regs.h>`; `+0x04` is `PCI_EXP_DPC_CAP` and is
+  deliberately not read — its bits are static capability
+  declarations rather than incident-analysis state).
 - `void tb_egpu_recover_read_aer_full(struct pci_dev *pdev, int *pos_out, u32 *uesta, u32 *uemsk, u32 *uesvrt, u32 *cesta, u32 *cemsk, u32 hdrlog[4], u32 *rootcmd, u32 *rootsta, u32 *errsrc)`
   — reads the AER extended capability; MUST zero every output
   before any other action; MUST tolerate `pdev == NULL` (returns

@@ -469,7 +469,7 @@ lines align in dmesg and post-mortem grep is straightforward.
 - **Fork branch:** `a4-close-path-telemetry` on
   `apnex/open-gpu-kernel-modules` (sits on top of `a3-recovery`;
   the cumulative diff carries C1-C5 + E1 + A1 + A2 + A3 + A4 at
-  tip `f356c3b3782036307ac25e2f9100cfc9238aef05`).
+  tip `8d85e1db85675b6bec81dd63f4f63a950c258123`).
 - **Cross-module surface:** A4 introduces two
   `EXPORT_SYMBOL_GPL` symbols (`tb_egpu_close_diag_pdev`,
   `tb_egpu_get_gpu_pdev`) — these are the only

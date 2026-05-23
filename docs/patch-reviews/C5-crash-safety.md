@@ -2,8 +2,8 @@
 id: C5-crash-safety
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: 8a67344f7a31b9a21e22fc516b03521922ceb2e2
-v2-tip-sha: 8a67344f7a31b9a21e22fc516b03521922ceb2e2
+v1-tip-sha: 416bdc37b81a1457e80ec576e1e8990b091136d6
+v2-tip-sha: 416bdc37b81a1457e80ec576e1e8990b091136d6
 status: accepted
 related-patches: [C2-aer-internal-unmask, C3-gpu-lost-retry, C4-err-handlers-scaffold]
 ---
@@ -68,14 +68,14 @@ file and the matching intent govern.
 
 ## v1 audit
 
-The v1 fork branch tip (`8a67344f7a31b9a21e22fc516b03521922ceb2e2`
+The v1 fork branch tip (`416bdc37b81a1457e80ec576e1e8990b091136d6`
 — "crash-safety: bound driver paths that operate on an off-the-bus
 GPU") sits on top of the cumulative `c1..c4 + e1-detection` base and
 adds two commits' worth of changes:
 
-- `71f00c6b` — "os-pci: add os_pci_is/set_disconnected helpers": adds
+- `b215ec9f` — "os-pci: add os_pci_is/set_disconnected helpers": adds
   the two kernel-open primitives + their prototypes (43 insertions).
-- `8a67344f` — the headline C5 commit: adds the `nv-gpu-lost.h`
+- `416bdc37` — the headline C5 commit: adds the `nv-gpu-lost.h`
   header and the crash-safety guards at every consumer site (282
   insertions across 8 files).
 
@@ -407,7 +407,7 @@ The main alternatives considered during the v2 review:
 - **Resolution:** rejected — no v2 follow-up needed.
 
 Per M2 (zero-delta sentinel from the C1 checkpoint), the frontmatter
-`v1-tip-sha == v2-tip-sha == 8a67344f7a31b9a21e22fc516b03521922ceb2e2`
+`v1-tip-sha == v2-tip-sha == 416bdc37b81a1457e80ec576e1e8990b091136d6`
 is the machine-checkable signal that v1 already met v2 intent. The
 two nice-to-have / out-of-scope observations (D2, D3) are recorded
 for provenance; neither requires a fork-branch commit because both
@@ -417,7 +417,7 @@ have non-`applied` Resolutions.
 
 - [x] `docs/patch-intents/C5-crash-safety.md` exists, lints clean, `status: reviewed`.
 - [x] All must-fix deltas applied as fork-branch commits citing their delta IDs. _(N/A — zero must-fix deltas; D1 is verification, D2 is nice-to-have deferred, D3 is out-of-scope Task 14 reconciliation, D4 explicitly closes "no must-fix".)_
-- [x] `patches/base/C5-crash-safety.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `8a67344f`.)_
+- [x] `patches/base/C5-crash-safety.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `416bdc37`.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
 - [x] Audit-reviewer subagent approved. _(Pending — this review file is the audit-reviewer's input.)_

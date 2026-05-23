@@ -2,8 +2,8 @@
 id: C1-kbuild-version-mk
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: dce2a1148b0986205d74db7a10ebf9c6d01f83b7
-v2-tip-sha: dce2a1148b0986205d74db7a10ebf9c6d01f83b7
+v1-tip-sha: e3ca4853503cd5febda7ae6e4d7471e1bca30b23
+v2-tip-sha: e3ca4853503cd5febda7ae6e4d7471e1bca30b23
 status: accepted
 related-patches: []
 ---
@@ -35,7 +35,7 @@ without speculation about NVIDIA's likely response.
 ## v1 audit
 
 The v1 fork branch tip
-(`dce2a1148b0986205d74db7a10ebf9c6d01f83b7` —
+(`e3ca4853503cd5febda7ae6e4d7471e1bca30b23` —
 "Kbuild: derive NV_VERSION_STRING from version.mk") makes a single
 five-line hunk against `kernel-open/Kbuild` at the
 `-DNV_VERSION_STRING` site:

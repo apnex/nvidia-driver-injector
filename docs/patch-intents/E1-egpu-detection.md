@@ -5,7 +5,7 @@ source-branch: e1-egpu-detection
 upstream-candidacy: high
 telemetry-tier: nominal
 status: reviewed
-related-patches: [C4-err-handlers-scaffold]
+related-patches: [C4-err-handlers-scaffold, A2-bus-loss-watchdog, A3-recovery]
 ---
 
 # E1-egpu-detection — Detect TB4/USB4-Tunnelled GPUs via the Kernel's Own PCI Classification

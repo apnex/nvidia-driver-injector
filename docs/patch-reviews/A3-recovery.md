@@ -2,8 +2,8 @@
 id: A3-recovery
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: f5216ee20bcc803a265a6cb99bc0b246a10b6338
-v2-tip-sha: f5216ee20bcc803a265a6cb99bc0b246a10b6338
+v1-tip-sha: f57a38b2f45b7f757e1982734e587336bb25606a
+v2-tip-sha: f57a38b2f45b7f757e1982734e587336bb25606a
 status: accepted
 related-patches: [A1-pcie-primitives, A2-bus-loss-watchdog]
 ---
@@ -71,7 +71,7 @@ predictably with a counter that the standing soak gate reads."
 
 ## v1 audit
 
-The v1 fork branch tip (`f5216ee20bcc803a265a6cb99bc0b246a10b6338` —
+The v1 fork branch tip (`f57a38b2f45b7f757e1982734e587336bb25606a` —
 "tb-egpu: self-triggered recovery state machine (A3)") sits on top
 of the cumulative `a2-bus-loss-watchdog` base and adds one commit's
 worth of changes: 1243 insertions / 44 deletions across 7 files
@@ -79,7 +79,7 @@ worth of changes: 1243 insertions / 44 deletions across 7 files
 or earlier-patch files).
 
 **Hunk-by-hunk audit (against the immediately-prior `a2` tip
-`6d5e5e7190f8030f76da63d643469645d6f9f4a2`):**
+`cd1fe0888e7b2d135b0bb27214e32d31c9b382c3`):**
 
 1. **`kernel-open/nvidia/nv-tb-egpu-recover.c`** — NEW FILE (854
    lines). MIT-licensed (SPDX `nvidia-driver-injector contributors`
@@ -823,7 +823,7 @@ The main alternatives considered during the v2 review:
 - **Resolution:** rejected — no v2 follow-up needed.
 
 Per M2 (zero-delta sentinel from the C1 checkpoint), the frontmatter
-`v1-tip-sha == v2-tip-sha == f5216ee20bcc803a265a6cb99bc0b246a10b6338`
+`v1-tip-sha == v2-tip-sha == f57a38b2f45b7f757e1982734e587336bb25606a`
 is the machine-checkable signal that v1 already met v2 intent. The
 four deltas (D1 nice-to-have architectural boundary, D2
 nice-to-have single-vs-multi-device, D3 out-of-scope confirming
@@ -870,7 +870,7 @@ the contract they should code against:
 
 - [x] `docs/patch-intents/A3-recovery.md` exists, lints clean, `status: reviewed`.
 - [x] All must-fix deltas applied as fork-branch commits citing their delta IDs. _(N/A — zero must-fix deltas; D1 nice-to-have documented, D2 nice-to-have deferred, D3 out-of-scope confirming A2-D1, D4 explicitly closes "no must-fix".)_
-- [x] `patches/addon/A3-recovery.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `f5216ee2`.)_
+- [x] `patches/addon/A3-recovery.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `f57a38b2`.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
 - [ ] Audit-reviewer subagent approved. _(Pending — this review file is the audit-reviewer's input.)_
@@ -912,7 +912,7 @@ the contract they should code against:
   - `kernel-open/nvidia/nv-tb-egpu-recover.h` — NEW FILE
     (no vanilla counterpart).
 - Fork branch: `a3-recovery` on
-  `apnex/open-gpu-kernel-modules` tip `f5216ee2`.
+  `apnex/open-gpu-kernel-modules` tip `f57a38b2`.
 - Upstream issue: n/a (addon-layer; not upstream-bound; per
   Rule 5 `upstream-candidacy: n/a` for `layer: addon`). The
   underlying failure mode is tracked at NVIDIA bug #979 (Blackwell

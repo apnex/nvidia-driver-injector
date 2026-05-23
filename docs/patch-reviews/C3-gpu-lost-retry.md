@@ -2,8 +2,8 @@
 id: C3-gpu-lost-retry
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: e069ffe0244d654a60cd155b9ca7c125e3882ee3
-v2-tip-sha: e069ffe0244d654a60cd155b9ca7c125e3882ee3
+v1-tip-sha: c589673a33729e24c5179f92c5c98dbac4886d6b
+v2-tip-sha: c589673a33729e24c5179f92c5c98dbac4886d6b
 status: accepted
 related-patches: [C5-crash-safety]
 ---
@@ -64,7 +64,7 @@ the matching intent govern.
 ## v1 audit
 
 The v1 fork branch tip
-(`e069ffe0244d654a60cd155b9ca7c125e3882ee3` — "osinit: retry
+(`c589673a33729e24c5179f92c5c98dbac4886d6b` — "osinit: retry
 NV_PMC_BOOT_0 before declaring the GPU lost") makes one
 behavioural change against the vanilla 595.71.05 baseline in
 `src/nvidia/arch/nvalloc/unix/src/osinit.c`:
@@ -372,7 +372,7 @@ The main alternatives considered during the v2 review:
 
 Per M2 (zero-delta sentinel from the C1 checkpoint), the
 frontmatter `v1-tip-sha == v2-tip-sha ==
-e069ffe0244d654a60cd155b9ca7c125e3882ee3` is the
+c589673a33729e24c5179f92c5c98dbac4886d6b` is the
 machine-checkable signal that v1 already met v2 intent. The
 two `nice-to-have` deltas (D1, D2) are recorded for
 provenance; they do not require fork-branch commits because
@@ -382,7 +382,7 @@ their Resolutions are `deferred`.
 
 - [x] `docs/patch-intents/C3-gpu-lost-retry.md` exists, lints clean, `status: reviewed`.
 - [x] All must-fix deltas applied as fork-branch commits citing their delta IDs. _(N/A — zero must-fix deltas; D1 and D2 are nice-to-have with deferred Resolutions.)_
-- [x] `patches/base/C3-gpu-lost-retry.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `e069ffe0`.)_
+- [x] `patches/base/C3-gpu-lost-retry.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `c589673a`.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
 - [x] Audit-reviewer subagent approved.
