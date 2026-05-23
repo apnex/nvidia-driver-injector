@@ -113,6 +113,8 @@ Edit `/root/nvidia-driver-injector/docs/patch-intents/<patch-id>.md`:
 
 **Capture the v2 NORMATIVE shape — what the code SHALL do, not what v1 does.**
 
+**Purpose discipline (M3 from C1 checkpoint):** keep `## Purpose` tight — one paragraph stating the persistent capability. Historical context (project incidents, previous patch generations, debugging journey) belongs in the review file's `## Rationale` section, not the intent's Purpose. For richer-history patches (C3, C5, A2, A3) this matters more — Purpose can easily bloat to 3+ paragraphs of backstory if discipline slips.
+
 Lint immediately:
 
 ```bash
@@ -170,7 +172,9 @@ Each delta in Section 5 has this shape:
 
 Delta IDs are sequential per patch: `<patch-id>-D1`, `<patch-id>-D2`, etc.
 
-If a patch has zero must-fix deltas (e.g. trivial patches like C1-kbuild may need no changes), the deltas section can be `(no v1→v2 deltas — v1 already meets the v2 intent)` and Steps 6–8 are skipped.
+If a patch has zero must-fix deltas (e.g. trivial patches like C1-kbuild may need no changes), the deltas section uses the canonical zero-delta wording `(no v1→v2 deltas — v1 already meets the v2 intent)` and Steps 6–8 are skipped.
+
+**Zero-delta sentinel convention (M2 from C1 checkpoint):** when a review surfaces zero deltas, the review file's frontmatter has `v1-tip-sha == v2-tip-sha` (both pointing at the unchanged fork-branch tip). This pair-of-identical-SHAs is the machine-checkable sentinel for "v1 already met v2 intent." Audit-reviewers should treat the sentinel as a valid green state — no Resolution updates required, no fork-branch commits expected. Don't write `v2-tip-sha: pending` and don't write `v2-tip-sha: n/a`; mirror the v1 SHA so cross-references work.
 
 ### Step 6: Apply must-fix deltas as fork-branch commits
 

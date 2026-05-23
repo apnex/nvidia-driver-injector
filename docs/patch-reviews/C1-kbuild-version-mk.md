@@ -126,7 +126,7 @@ The main alternatives considered during the v2 review:
 - [x] `patches/base/C1-kbuild-version-mk.patch` refreshed by `regen`. _(N/A — no fork-branch change.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
-- [ ] Audit-reviewer subagent approved.
+- [x] Audit-reviewer subagent approved.
 
 ## Cross-references
 

@@ -1,14 +1,3 @@
-<!--
-  Canonical patch-intent template.
-
-  This file is intentionally EXCLUDED from `intent-lint` (by filename).
-  Copy it to docs/patch-intents/<PATCH-ID>.md and replace every placeholder
-  value (PATCH-ID, BRANCH-NAME, etc.) with the values from the corresponding
-  patches/manifest row. Keep the section order and the RFC 2119 discipline.
-
-  See docs/superpowers/specs/2026-05-22-patch-intent-schema-design.md
-  for the full schema.
--->
 ---
 id: PATCH-ID-HERE
 layer: base

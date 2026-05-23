@@ -1,13 +1,3 @@
-<!--
-  Canonical patch-review template for sub-cycle 2.
-
-  Copy to docs/patch-reviews/<PATCH-ID>.md and fill in every placeholder.
-  Keep the section order; deltas use the ### <id>-D<N> heading shape.
-  Review files are NOT lint-checked in sub-cycle 2 — discipline is human.
-
-  See docs/superpowers/specs/2026-05-23-sub-cycle-2-patch-deep-review-design.md
-  for the full spec.
--->
 ---
 id: PATCH-ID-HERE
 review-date: 2026-05-DD
