@@ -452,7 +452,7 @@ re-lint required.)
 - [x] `tools/intent-lint.sh` passes _(no intent change; lint re-verified, exit 0)._
 - [x] `tools/validate-patchset.sh` passes (compile gate; composed C1-A5 patchset, exit 0).
 - [x] `bash tests/run.sh` green (34 ok / 0 failed expected; gate re-run at catalog closeout).
-- [ ] Audit-reviewer subagent approved. _(Pending — this catalog file is the audit-reviewer's input for Task 13.)_
+- [x] Audit-reviewer subagent approved. _(Sub-cycle 3 audit-reviewer, ✅ APPROVED — clean verdict, no "WITH NOTES" caveat. All 6 spot-checked citations verbatim; duty boundary confirmed (14 net lines across `kernel-open/Kbuild` + `version.mk` only; zero forbidden surfaces across 9-pattern grep); M1+M2 drops + adds sound; M6 all 3 D-entries (D1/D2/D3) re-examined with the post-v2 `e8fb311` retroactive heal documented in D2; A5↔C1 mechanical orthogonality confirmed by direct diff; `CONFIG_NV_TB_EGPU` doc-only verified (only `-D` define gate; zero `NVIDIA_SOURCES += ...` rows gated); all 4 triages sound; SHA-remap verified in both catalog + review frontmatters at `9d62f2e6`; gates re-ran green. Audit deltas: none required. **Pre-warns for Task 14:** (1) headline dropped-`CONFIG_NV_TB_EGPU_DIAG` carve (A5-I1) — adjudicate whether to lift into A5 intent Provenance or leave at legacy + A4-review locus; (2) A5↔C1 symmetric carve (C1-I4 also deferred) — adjudicate together; (3) catalog ratio note: 480 lines for 14-line patch reflects high-archaeology / low-surface category, not bloat.)_
 
 ## Cross-references
 
