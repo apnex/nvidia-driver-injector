@@ -51,7 +51,8 @@ The normative keywords are **MUST / MUST NOT / REQUIRED / SHALL / SHALL NOT / SH
 
 | Reference target | Form |
 |---|---|
-| Another patch's intent | `[[<id>]]` — wiki-style; `intent-lint` resolves to a file under `docs/patch-intents/`. |
+| Another patch's intent (lint-resolved) | `related-patches:` frontmatter list. Each id MUST resolve to another `docs/patch-intents/<id>.md` (enforced by Rule 6). |
+| Another patch's intent (in body prose) | `[[<id>]]` wiki-style — presentation convention only. NOT lint-resolved; reviewers verify by eye. |
 | Vanilla NVIDIA source | Backticked `path:symbol` — e.g. `` `kernel-open/nvidia/os-mlock.c:osHandleGpuLost` ``. Not lint-resolved. |
 | Upstream issue | Full URL. |
 
