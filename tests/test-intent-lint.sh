@@ -222,4 +222,43 @@ The driver MUST exist.
 INTENT
 assert_exit 1 "id != filename stem fails lint" lint_fixture "$d"
 
+# Case: layer field disagrees with manifest row.
+d="$(mk)"
+_intent_test_dirs+=("$d")
+cat > "$d/docs/patch-intents/X1-good.md" <<'INTENT'
+---
+id: X1-good
+layer: addon
+source-branch: x1-good
+upstream-candidacy: n/a
+telemetry-tier: nominal
+status: draft
+related-patches: []
+---
+
+# X1-good — Layer Mismatch
+
+## Purpose
+Stub.
+## Requirements
+### Requirement: Stub
+The driver MUST exist.
+#### Scenario: Stub
+- **GIVEN** stub
+- **WHEN** stub
+- **THEN** MUST stub
+## Scope boundary
+- Stub.
+## Telemetry contract
+| Event | Level | Format |
+|---|---|---|
+| e | `dev_warn` | `"e"` |
+## Provenance
+- **Source cluster:** stub.
+- **Vanilla baseline:** stub.
+- **Fork branch:** stub.
+- **Upstream issue:** n/a.
+INTENT
+assert_exit 1 "layer != manifest fails lint" lint_fixture "$d"
+
 finish_tests

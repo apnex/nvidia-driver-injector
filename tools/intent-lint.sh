@@ -64,6 +64,18 @@ for file in "${files[@]}"; do
     if [ -n "$id_val" ] && [ "$id_val" != "$stem" ]; then
         err "$file" "rule 2: frontmatter id '$id_val' does not match filename stem '$stem'"
     fi
+
+    # Rule 3: layer matches the corresponding manifest row's layer.
+    layer_val="$(intent_field "$file" layer)"
+    manifest_row="$(grep -E "^[[:space:]]*${stem}[[:space:]]" "$manifest" || true)"
+    if [ -z "$manifest_row" ]; then
+        err "$file" "rule 3: id '$stem' not found in manifest $manifest"
+    else
+        manifest_layer="$(echo "$manifest_row" | awk '{print $2}')"
+        if [ "$layer_val" != "$manifest_layer" ]; then
+            err "$file" "rule 3: layer '$layer_val' disagrees with manifest layer '$manifest_layer' for '$stem'"
+        fi
+    fi
 done
 
 [ "$errors" -eq 0 ] || exit 1
