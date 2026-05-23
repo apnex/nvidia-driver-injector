@@ -537,4 +537,43 @@ The driver SHALL stub.
 INTENT
 assert_exit 1 "Requirement without Scenario fails lint" lint_fixture "$d"
 
+# Case: # <prefix> — Title — the prefix doesn't match the frontmatter id.
+d="$(mk)"
+_intent_test_dirs+=("$d")
+cat > "$d/docs/patch-intents/X1-good.md" <<'INTENT'
+---
+id: X1-good
+layer: base
+source-branch: x1-good
+upstream-candidacy: high
+telemetry-tier: nominal
+status: draft
+related-patches: []
+---
+
+# WRONG-ID — Title Says Wrong
+
+## Purpose
+Stub.
+## Requirements
+### Requirement: Stub
+The driver SHALL stub.
+#### Scenario: Stub
+- **GIVEN** stub
+- **WHEN** stub
+- **THEN** MUST stub
+## Scope boundary
+- Stub.
+## Telemetry contract
+| Event | Level | Format |
+|---|---|---|
+| e | `dev_warn` | `"e"` |
+## Provenance
+- **Source cluster:** stub.
+- **Vanilla baseline:** stub.
+- **Fork branch:** stub.
+- **Upstream issue:** n/a.
+INTENT
+assert_exit 1 "top heading id mismatch fails lint" lint_fixture "$d"
+
 finish_tests

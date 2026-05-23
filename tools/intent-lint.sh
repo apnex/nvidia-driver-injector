@@ -136,6 +136,14 @@ for file in "${files[@]}"; do
             err "$file" "rule 10: Requirement '$req_name' has no #### Scenario: block"
         fi
     done < <(intent_requirements "$file")
+
+    # Rule 11: top-level "# <id> — <title>" heading's id prefix matches frontmatter id.
+    top="$(intent_top_heading "$file")"
+    top_id="${top%% —*}"
+    top_id="${top_id%% *}"
+    if [ -n "$id_val" ] && [ -n "$top" ] && [ "$top_id" != "$id_val" ]; then
+        err "$file" "rule 11: top heading id '$top_id' does not match frontmatter id '$id_val'"
+    fi
 done
 
 [ "$errors" -eq 0 ] || exit 1
