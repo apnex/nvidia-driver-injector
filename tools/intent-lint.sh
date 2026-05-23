@@ -127,6 +127,15 @@ for file in "${files[@]}"; do
             err "$file" "rule 9: Requirement '$req_name' has no UPPERCASE RFC 2119 keyword"
         fi
     done < <(intent_requirements "$file")
+
+    # Rule 10: each Requirement has >= 1 #### Scenario: block.
+    while read -r req_name; do
+        [ -z "$req_name" ] && continue
+        scenarios_n="$(intent_scenarios_for "$file" "$req_name" | grep -c . || true)"
+        if [ "${scenarios_n:-0}" -eq 0 ]; then
+            err "$file" "rule 10: Requirement '$req_name' has no #### Scenario: block"
+        fi
+    done < <(intent_requirements "$file")
 done
 
 [ "$errors" -eq 0 ] || exit 1
