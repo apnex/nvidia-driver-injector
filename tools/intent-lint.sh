@@ -112,6 +112,12 @@ for file in "${files[@]}"; do
     if [ "$actual_sections" != "$expected_pattern" ]; then
         err "$file" "rule 7: ## sections must be exactly (in order): $expected_sections; got: $(echo "$actual_sections" | tr '|' ',')"
     fi
+
+    # Rule 8: at least one ### Requirement: block exists.
+    req_count="$(intent_requirements "$file" | grep -c . || true)"
+    if [ "${req_count:-0}" -eq 0 ]; then
+        err "$file" "rule 8: ## Requirements has no ### Requirement: block"
+    fi
 done
 
 [ "$errors" -eq 0 ] || exit 1

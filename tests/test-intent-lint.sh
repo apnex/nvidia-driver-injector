@@ -417,4 +417,41 @@ The driver MUST exist.
 INTENT
 assert_exit 1 "section order violation fails lint" lint_fixture "$d"
 
+# Case: ## Requirements section present but has no ### Requirement: blocks.
+d="$(mk)"
+_intent_test_dirs+=("$d")
+cat > "$d/docs/patch-intents/X1-good.md" <<'INTENT'
+---
+id: X1-good
+layer: base
+source-branch: x1-good
+upstream-candidacy: high
+telemetry-tier: nominal
+status: draft
+related-patches: []
+---
+
+# X1-good — No Requirements
+
+## Purpose
+Stub.
+
+## Requirements
+
+(intentionally empty)
+
+## Scope boundary
+- Stub.
+## Telemetry contract
+| Event | Level | Format |
+|---|---|---|
+| e | `dev_warn` | `"e"` |
+## Provenance
+- **Source cluster:** stub.
+- **Vanilla baseline:** stub.
+- **Fork branch:** stub.
+- **Upstream issue:** n/a.
+INTENT
+assert_exit 1 "no Requirement blocks fails lint" lint_fixture "$d"
+
 finish_tests
