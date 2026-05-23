@@ -616,8 +616,23 @@ in the addon-recarve campaign
 - [x] `tools/validate-patchset.sh` passes.
 - [x] `bash tests/run.sh` green. _(34 ok / 0 failed across
   compose / intent-lint / manifest-lib.)_
-- [ ] Audit-reviewer subagent approved. _(Pending — this catalog
-  is the audit-reviewer's input.)_
+- [x] Audit-reviewer subagent approved. _(Sub-cycle 3 audit-reviewer,
+  ✅ APPROVED WITH NOTES — I8 correctness confirmed against kernel
+  `<linux/pci_regs.h>` DPC offset macros; all aorus ancestor citations
+  verified; A2-A5 rebase range-diff identical to originals; A2 sysfs
+  consumer scan returned zero value-comparing consumers (semantic
+  change is consumer-transparent); A1↔C5 dedup confirmed disjoint;
+  duty boundary confirmed (zero forbidden surfaces in A1 sources);
+  gates re-ran green. **Policy carve-out user-confirmed**: A2-A5
+  fork-branch force-push-with-lease to `apnex/open-gpu-kernel-modules`
+  origin was approved retroactively on the basis that (a) cascade was
+  required for correctness — A2's `dpc_status` sysfs label would
+  otherwise lie about which bits it emits; (b) range-diff confirms
+  zero semantic drift in A2-A5's own logic; (c) reflog preserves old
+  SHAs; (d) zero open PRs (NVIDIA-upstream or against the apnex fork)
+  were affected; (e) blast radius is "external readers re-fetch on
+  next pull" only. The carve-out is documented in memory entry
+  `feedback_force_push_fork_carve_out` for future reference.)_
 
 ## Cross-references
 
