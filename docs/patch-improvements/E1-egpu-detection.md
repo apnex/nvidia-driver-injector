@@ -2,8 +2,8 @@
 id: E1-egpu-detection
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: 2d43621b88eff6acb9a10f46ccb1fe7f40e91352
-v2-tip-sha: 2d43621b88eff6acb9a10f46ccb1fe7f40e91352
+v1-tip-sha: 000ea7a51db8b78225950a753a390a82f3aa1d81
+v2-tip-sha: 000ea7a51db8b78225950a753a390a82f3aa1d81
 status: accepted
 intent-updates: []
 ---
@@ -75,7 +75,7 @@ intent-updates: []
   rename vs keep, NULL-guard placement, `pci_info` vs `pci_warn` vs
   `pci_notice`, false-path log line emission, removing-legacy-TB3-table,
   C4 frontmatter cross-ref).
-- **Fork branch tip (v1 == v2):** `2d43621b88eff6acb9a10f46ccb1fe7f40e91352`
+- **Fork branch tip (v1 == v2):** `000ea7a51db8b78225950a753a390a82f3aa1d81`
   on `apnex/open-gpu-kernel-modules` branch `e1-egpu-detection`. The
   branch is **built on top of `c4-err-handlers-scaffold`** (so the
   cumulative diff carries C1-C4 + E1).
@@ -683,7 +683,7 @@ no direct in-driver patch ancestor):
   M6 archaeology surfaces no new evidence that flips the
   disposition — all 7 I-candidates above triage to reject or
   defer. Zero-delta sentinel
-  `v1-tip-sha == v2-tip-sha == 2d43621b88eff6acb9a10f46ccb1fe7f40e91352`
+  `v1-tip-sha == v2-tip-sha == 000ea7a51db8b78225950a753a390a82f3aa1d81`
   holds across sub-cycle 3.
 
 ## Improvements landed
@@ -819,7 +819,7 @@ an intent precursor.)
   propagation OR `arch_pci_dev_is_removable(dev)`).
 - Fork branch: `e1-egpu-detection` on
   `apnex/open-gpu-kernel-modules` (v1-tip == v2-tip ==
-  `2d43621b88eff6acb9a10f46ccb1fe7f40e91352` — zero-delta
+  `000ea7a51db8b78225950a753a390a82f3aa1d81` — zero-delta
   sentinel; built on top of `c4-err-handlers-scaffold`).
 - aorus-5090 ancestor: **NONE** — no direct in-driver patch
   ancestor. The aorus geometry used the modprobe.d cmdline

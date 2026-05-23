@@ -2,8 +2,8 @@
 id: C1-kbuild-version-mk
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: dce2a1148b0986205d74db7a10ebf9c6d01f83b7
-v2-tip-sha: 6d118726fb1aa31386e812ac9fcd535ca4e21bb2
+v1-tip-sha: e3ca4853503cd5febda7ae6e4d7471e1bca30b23
+v2-tip-sha: 51cfd01e9cfe62d3559fcd127a29e68d727803cb
 status: accepted
 intent-updates: []
 ---
@@ -15,7 +15,7 @@ intent-updates: []
 - **Vanilla NVIDIA 595.71.05:** `kernel-open/Kbuild:82` — single line `ccflags-y += -DNV_VERSION_STRING=\"595.71.05\"`. Repo-root `version.mk:1` defines `NVIDIA_VERSION = 595.71.05` independently. The two are decoupled.
 - **v2 intent:** `/root/nvidia-driver-injector/docs/patch-intents/C1-kbuild-version-mk.md` (two Requirements: module version string equals `version.mk`'s `NVIDIA_VERSION` + version.mk include is purely additive; two Scenarios on Requirement 1, one Scenario on Requirement 2).
 - **v2 review:** `/root/nvidia-driver-injector/docs/patch-reviews/C1-kbuild-version-mk.md` (zero must-fix deltas; **no deferrals at all** — review notes "no weaknesses surfaced").
-- **Fork branch tips:** v1 = `dce2a1148b0986205d74db7a10ebf9c6d01f83b7`; v2 = `6d118726fb1aa31386e812ac9fcd535ca4e21bb2` (advances by 1 v3 commit `C1-kbuild-version-mk-I1`); both on `apnex/open-gpu-kernel-modules` branch `c1-kbuild-version-mk`.
+- **Fork branch tips:** v1 = `e3ca4853503cd5febda7ae6e4d7471e1bca30b23`; v2 = `51cfd01e9cfe62d3559fcd127a29e68d727803cb` (advances by 1 v3 commit `C1-kbuild-version-mk-I1`); both on `apnex/open-gpu-kernel-modules` branch `c1-kbuild-version-mk`.
 - **aorus-5090 ancestor patch:** `/root/aorus-5090-egpu/patches/0025-Kbuild-version-from-version-mk.patch` — the direct mechanism ancestor (the drift-fix that this C1 patch continues). The earlier `patches/0005-version-mark-aorus-build.patch` is the **drift-introducing** ancestor (it edits both Kbuild and `version.mk` to the same literal `595.71.05-aorus.5`, which set up the drift trap that 0025 later closed).
 - **aorus-5090 docs:**
   - `/root/aorus-5090-egpu/docs/lever-catalog.md:353-373` (Lever M-recover patch list — entry for Patch 0025 + the upstream-readiness note flagging 0025 as "the cleanest standalone candidate for upstreaming").
@@ -47,7 +47,7 @@ What the aorus-5090 mining surfaced about C1's mechanism ancestor (Patch 0025):
   # version string has a single source of truth and cannot drift from a
   # hardcoded Kbuild literal.
   ```
-  This captures the **static** invariant (single source of truth) but omits the **dynamic** invariant: that `make modules` after a `version.mk` bump correctly picks up the new value without `make clean`. The dynamic guarantee is documented in the v1 commit message (commit `dce2a114` body lines 12-15), in intent Scenario 2 (lines 45-56), and in the v2 review (review lines 64-68) — but not in the file the maintainer reads when staring at the Kbuild include.
+  This captures the **static** invariant (single source of truth) but omits the **dynamic** invariant: that `make modules` after a `version.mk` bump correctly picks up the new value without `make clean`. The dynamic guarantee is documented in the v1 commit message (commit `e3ca4853` body lines 12-15), in intent Scenario 2 (lines 45-56), and in the v2 review (review lines 64-68) — but not in the file the maintainer reads when staring at the Kbuild include.
 - **Proposed state:** Extend the in-file comment by two lines to lift the rebuild guarantee (matching the aorus 0025 ancestor's in-file comment verbatim in spirit):
   ```
   # Derive NV_VERSION_STRING from the repo-root version.mk so the module
@@ -61,7 +61,7 @@ What the aorus-5090 mining surfaced about C1's mechanism ancestor (Patch 0025):
 - **Verification mode:** A (code-reading — confirm by re-reading the updated Kbuild file and the regenerated `patches/base/C1-kbuild-version-mk.patch`).
 - **Intent impact:** none (Scenario 2 already names the rebuild guarantee normatively; the change is purely lifting it from the commit message into the in-file comment so the on-disk artifact stands alone).
 - **Triage decision:** land.
-- **Resolution:** applied as `6d118726fb1aa31386e812ac9fcd535ca4e21bb2` on fork branch `c1-kbuild-version-mk` (commit subject: `C1-kbuild-version-mk-I1: lift .cmd-rebuild guarantee into in-file comment`). v2-tip-sha advances from `dce2a114` to `6d118726`; +3 / -1 LoC in `kernel-open/Kbuild`; regenerated `patches/base/C1-kbuild-version-mk.patch`.
+- **Resolution:** applied as `51cfd01e9cfe62d3559fcd127a29e68d727803cb` on fork branch `c1-kbuild-version-mk` (commit subject: `C1-kbuild-version-mk-I1: lift .cmd-rebuild guarantee into in-file comment`). v2-tip-sha advances from `e3ca4853` to `51cfd01e`; +3 / -1 LoC in `kernel-open/Kbuild`; regenerated `patches/base/C1-kbuild-version-mk.patch`.
 
 ### C1-kbuild-version-mk-I2 — Add an explicit Scenario for out-of-tree (`O=...`) builds
 
@@ -105,7 +105,7 @@ What the aorus-5090 mining surfaced about C1's mechanism ancestor (Patch 0025):
 
 ## Improvements landed
 
-- **C1-kbuild-version-mk-I1** — `6d118726` on `c1-kbuild-version-mk`: lifted the `.cmd`-hashing rebuild guarantee into the in-file Kbuild comment so a maintainer reading the stanza alone can answer "do I need `make clean` after a `NVIDIA_VERSION` bump?" without consulting commit message, intent, or review. +3 / -1 LoC; no semantic change vs vanilla beyond comment surface.
+- **C1-kbuild-version-mk-I1** — `51cfd01e` on `c1-kbuild-version-mk`: lifted the `.cmd`-hashing rebuild guarantee into the in-file Kbuild comment so a maintainer reading the stanza alone can answer "do I need `make clean` after a `NVIDIA_VERSION` bump?" without consulting commit message, intent, or review. +3 / -1 LoC; no semantic change vs vanilla beyond comment surface.
 
 ## Intent updates landed
 
@@ -114,7 +114,7 @@ What the aorus-5090 mining surfaced about C1's mechanism ancestor (Patch 0025):
 ## Done gate
 
 - [x] Every candidate improvement has explicit `Resolution:` (no `pending`).
-- [x] All "land" improvements applied as fork-branch commits citing their `<id>-I<N>` IDs. _(I1 → `6d118726`.)_
+- [x] All "land" improvements applied as fork-branch commits citing their `<id>-I<N>` IDs. _(I1 → `51cfd01e`.)_
 - [x] Substantive intent updates landed as precursor commits. _(N/A — zero substantive intent updates.)_
 - [x] `tools/intent-lint.sh` passes _(no intent change; lint re-verified, exit 0)._
 - [x] `tools/validate-patchset.sh` passes (compile gate; composed C1-A5 patchset against kernel 7.0.9-204.fc44.x86_64, exit 0).
@@ -127,7 +127,7 @@ What the aorus-5090 mining surfaced about C1's mechanism ancestor (Patch 0025):
 - Review file: `docs/patch-reviews/C1-kbuild-version-mk.md`
 - Manifest row: `patches/manifest` line for `C1-kbuild-version-mk` (layer `base`, source `fork:c1-kbuild-version-mk`)
 - Vanilla baseline: `kernel-open/Kbuild:82` (vanilla 595.71.05 hardcoded `-DNV_VERSION_STRING=\"595.71.05\"`); `version.mk:1` defines `NVIDIA_VERSION = 595.71.05`
-- Fork branch: `c1-kbuild-version-mk` on `apnex/open-gpu-kernel-modules` (v1 tip `dce2a1148b0986205d74db7a10ebf9c6d01f83b7`; v2 tip `6d118726fb1aa31386e812ac9fcd535ca4e21bb2` after I1)
+- Fork branch: `c1-kbuild-version-mk` on `apnex/open-gpu-kernel-modules` (v1 tip `e3ca4853503cd5febda7ae6e4d7471e1bca30b23`; v2 tip `51cfd01e9cfe62d3559fcd127a29e68d727803cb` after I1)
 - aorus-5090 ancestor: `/root/aorus-5090-egpu/patches/0025-Kbuild-version-from-version-mk.patch` (the drift-fix predecessor); `/root/aorus-5090-egpu/patches/0005-version-mark-aorus-build.patch` (the drift-introducing predecessor)
 - aorus-5090 design + investigation: `/root/aorus-5090-egpu/docs/lever-catalog.md:353-373` (Patch 0025 listing + upstream-readiness flag); `/root/aorus-5090-egpu/docs/architecture-and-modularity.md:84-100` (L1 sovereignty justification for version-mark family); `/root/aorus-5090-egpu/docs/patched-driver-runbook.md:40-118` (operator-side `modinfo` consumer).
 - Upstream issue: n/a (standalone build-system cleanup; candidate for upstream as an independent PR)

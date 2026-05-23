@@ -2,8 +2,8 @@
 id: C4-err-handlers-scaffold
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: 2f3c4896010198c722bc1fb14745ff5e780d17e5
-v2-tip-sha: 2f3c4896010198c722bc1fb14745ff5e780d17e5
+v1-tip-sha: 75e823eff5b18f08be8d56924d8099fce9829e58
+v2-tip-sha: 75e823eff5b18f08be8d56924d8099fce9829e58
 status: accepted
 related-patches: [E1-egpu-detection, C5-crash-safety]
 ---
@@ -68,7 +68,7 @@ control to driver code.
 ## v1 audit
 
 The v1 fork branch tip
-(`2f3c4896010198c722bc1fb14745ff5e780d17e5` — "nv-pci: register
+(`75e823eff5b18f08be8d56924d8099fce9829e58` — "nv-pci: register
 pci_error_handlers") makes two hunks against
 `kernel-open/nvidia/nv-pci.c`:
 
@@ -358,7 +358,7 @@ The main alternatives considered during the v2 review:
 
 Per M2 (zero-delta sentinel from the C1 checkpoint), the
 frontmatter `v1-tip-sha == v2-tip-sha ==
-2f3c4896010198c722bc1fb14745ff5e780d17e5` is the machine-checkable
+75e823eff5b18f08be8d56924d8099fce9829e58` is the machine-checkable
 signal that v1 already met v2 intent. The one `nice-to-have` delta
 (D1) is recorded for provenance; it does not require a fork-branch
 commit because its Resolution is `deferred`.
@@ -367,7 +367,7 @@ commit because its Resolution is `deferred`.
 
 - [x] `docs/patch-intents/C4-err-handlers-scaffold.md` exists, lints clean, `status: reviewed`.
 - [x] All must-fix deltas applied as fork-branch commits citing their delta IDs. _(N/A — zero must-fix deltas; D1 is nice-to-have with deferred Resolution.)_
-- [x] `patches/base/C4-err-handlers-scaffold.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `2f3c4896`.)_
+- [x] `patches/base/C4-err-handlers-scaffold.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `75e823ef`.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
 - [x] Audit-reviewer subagent approved. _(Pending — this review file is the audit-reviewer's input.)_

@@ -2,8 +2,8 @@
 id: C2-aer-internal-unmask
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: 2cc240ef06fd740262a0c2532b043dd852258a83
-v2-tip-sha: 2cc240ef06fd740262a0c2532b043dd852258a83
+v1-tip-sha: 403d5daf8d80da79991534b3c9d2ef70ac91b63a
+v2-tip-sha: 403d5daf8d80da79991534b3c9d2ef70ac91b63a
 status: accepted
 related-patches: [C4-err-handlers-scaffold, C5-crash-safety]
 ---
@@ -60,7 +60,7 @@ makes for CXL devices.
 ## v1 audit
 
 The v1 fork branch tip
-(`2cc240ef06fd740262a0c2532b043dd852258a83` —
+(`403d5daf8d80da79991534b3c9d2ef70ac91b63a` —
 "nv-pci: unmask AER Internal Errors at probe") makes two hunks against
 `kernel-open/nvidia/nv-pci.c`:
 
@@ -243,14 +243,14 @@ improvements over the legacy ancestors at v1 commit time. The v2
 intent reifies those decisions as the normative shape; the audit
 finds no behaviour gap to close.
 
-`v1-tip-sha == v2-tip-sha == 2cc240ef06fd740262a0c2532b043dd852258a83`
+`v1-tip-sha == v2-tip-sha == 403d5daf8d80da79991534b3c9d2ef70ac91b63a`
 is the zero-delta sentinel per M2 from the C1 checkpoint.
 
 ## Done gate
 
 - [x] `docs/patch-intents/C2-aer-internal-unmask.md` exists, lints clean, `status: reviewed`.
 - [x] All must-fix deltas applied as fork-branch commits citing their delta IDs. _(N/A — zero deltas.)_
-- [x] `patches/base/C2-aer-internal-unmask.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `2cc240ef`.)_
+- [x] `patches/base/C2-aer-internal-unmask.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `403d5daf`.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
 - [x] Audit-reviewer subagent approved. _(Pending — this review file is the audit-reviewer's input.)_

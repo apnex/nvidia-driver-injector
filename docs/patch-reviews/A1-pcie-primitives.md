@@ -2,8 +2,8 @@
 id: A1-pcie-primitives
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: be1b56cf8ecc6d34bdfb8175d9ab184ef21d37bf
-v2-tip-sha: be1b56cf8ecc6d34bdfb8175d9ab184ef21d37bf
+v1-tip-sha: 8097786cdeeacd371b5309c2b78c8a1f9627a939
+v2-tip-sha: 8097786cdeeacd371b5309c2b78c8a1f9627a939
 status: accepted
 related-patches: [A2-bus-loss-watchdog, A3-recovery, A4-close-path-telemetry, A5-version-and-toggles]
 ---
@@ -55,7 +55,7 @@ is the contract this review file and the matching intent govern.
 
 ## v1 audit
 
-The v1 fork branch tip (`be1b56cf8ecc6d34bdfb8175d9ab184ef21d37bf`
+The v1 fork branch tip (`8097786cdeeacd371b5309c2b78c8a1f9627a939`
 — "tb-egpu: shared PCIe/AER register-read primitives (A1)") sits on
 top of the cumulative `c1..c5 + e1-detection` base and adds one
 commit's worth of changes: 379 insertions across 3 files (two new
@@ -419,7 +419,7 @@ The main alternatives considered during the v2 review:
 - **Resolution:** rejected — no v2 follow-up needed.
 
 Per M2 (zero-delta sentinel from the C1 checkpoint), the frontmatter
-`v1-tip-sha == v2-tip-sha == be1b56cf8ecc6d34bdfb8175d9ab184ef21d37bf`
+`v1-tip-sha == v2-tip-sha == 8097786cdeeacd371b5309c2b78c8a1f9627a939`
 is the machine-checkable signal that v1 already met v2 intent. The
 three non-applied deltas (D1 nice-to-have rename deferred, D2 source-
 list gate deferred, D3 log-level rejected) are recorded for
@@ -440,7 +440,7 @@ the contract they should code against:
 
 - [x] `docs/patch-intents/A1-pcie-primitives.md` exists, lints clean, `status: reviewed`.
 - [x] All must-fix deltas applied as fork-branch commits citing their delta IDs. _(N/A — zero must-fix deltas; D1 nice-to-have deferred, D2 out-of-scope deferred to A5, D3 rejected, D4 explicitly closes "no must-fix".)_
-- [x] `patches/addon/A1-pcie-primitives.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `be1b56cf`.)_
+- [x] `patches/addon/A1-pcie-primitives.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `8097786c`.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
 - [ ] Audit-reviewer subagent approved. _(Pending — this review file is the audit-reviewer's input.)_

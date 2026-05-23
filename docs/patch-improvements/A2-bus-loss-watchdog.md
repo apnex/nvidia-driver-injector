@@ -2,8 +2,8 @@
 id: A2-bus-loss-watchdog
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: a5cc2877c27de29304b34056faab1ef0a2ecaf29
-v2-tip-sha: a5cc2877c27de29304b34056faab1ef0a2ecaf29
+v1-tip-sha: cd1fe0888e7b2d135b0bb27214e32d31c9b382c3
+v2-tip-sha: cd1fe0888e7b2d135b0bb27214e32d31c9b382c3
 status: accepted
 intent-updates: []
 ---
@@ -416,7 +416,7 @@ campaign (`project_addon_recarve_merged_2026_05_22`).
   `tb_egpu_qwd_last_aer_summary_show` formats the snapshot's
   `dpc_status` field via the format string `"... DPC_Status=0x%04x ..."`
   passing `s->dpc_status`. After A1's I8 landed (commit
-  `fccf6a85` on `a1-pcie-primitives`), A1's
+  `124e9c5e` on `a1-pcie-primitives`), A1's
   `tb_egpu_recover_read_dpc_state` was corrected to read
   `PCI_EXP_DPC_STATUS` (`+0x08`) instead of `PCI_EXP_DPC_CTL`
   (`+0x06`) — see `docs/patch-improvements/A1-pcie-primitives.md`
@@ -751,12 +751,12 @@ campaign (`project_addon_recarve_merged_2026_05_22`).
   Nine candidates considered (I1-I9): 0 land, 2 defer
   (I1, I2 — both upheld from v2), 7 reject (I3-I9 —
   verification passes). Zero-delta sentinel holds:
-  `v1-tip-sha == v2-tip-sha == a5cc2877c27de29304b34056faab1ef0a2ecaf29`.
+  `v1-tip-sha == v2-tip-sha == cd1fe0888e7b2d135b0bb27214e32d31c9b382c3`.
 
 ## Improvements landed
 
 (no improvements landed — v2 already meets v3 quality bar; zero-delta
-sentinel holds at `a5cc2877c27de29304b34056faab1ef0a2ecaf29`)
+sentinel holds at `cd1fe0888e7b2d135b0bb27214e32d31c9b382c3`)
 
 ## Intent updates landed
 
@@ -811,7 +811,7 @@ structurally and is not affected by A1's I8 semantic change to
 - Fork branch: `a2-bus-loss-watchdog` on
   `apnex/open-gpu-kernel-modules` (sits on top of
   `a1-pcie-primitives`; current tip
-  `a5cc2877c27de29304b34056faab1ef0a2ecaf29` — same as
+  `cd1fe0888e7b2d135b0bb27214e32d31c9b382c3` — same as
   the A1-cascade-rebase tip; v3 zero-delta means tip is
   unchanged from v2)
 - aorus-5090 ancestor patches (verified per M1+M2):

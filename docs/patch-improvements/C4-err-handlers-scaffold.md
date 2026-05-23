@@ -2,8 +2,8 @@
 id: C4-err-handlers-scaffold
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: 2f3c4896010198c722bc1fb14745ff5e780d17e5
-v2-tip-sha: 2f3c4896010198c722bc1fb14745ff5e780d17e5
+v1-tip-sha: 75e823eff5b18f08be8d56924d8099fce9829e58
+v2-tip-sha: 75e823eff5b18f08be8d56924d8099fce9829e58
 status: accepted
 intent-updates: []
 ---
@@ -88,7 +88,7 @@ intent-updates: []
   minimal-3, log-level distribution, helper-function vs designated
   initialiser, eager [[E1]]/[[C5]] frontmatter cross-refs).
 - **Fork branch tip (v1 == v2):**
-  `2f3c4896010198c722bc1fb14745ff5e780d17e5` on
+  `75e823eff5b18f08be8d56924d8099fce9829e58` on
   `apnex/open-gpu-kernel-modules` branch `c4-err-handlers-scaffold`.
   The branch is **built on top of `c3-gpu-lost-retry`** (review
   lines 187-193); the per-patch v1 hunks against the c3 base are
@@ -672,7 +672,7 @@ C4 carve-out:
   disposition: **upheld**. M6 archaeology surfaces no new
   evidence that flips the disposition — all 7 I-candidates
   above triage to reject or defer. Zero-delta sentinel
-  `v1-tip-sha == v2-tip-sha == 2f3c4896010198c722bc1fb14745ff5e780d17e5`
+  `v1-tip-sha == v2-tip-sha == 75e823eff5b18f08be8d56924d8099fce9829e58`
   holds across sub-cycle 3.
 
 ## Improvements landed
@@ -682,7 +682,7 @@ C4 carve-out:
   injector-branch commit `49ecc03` ("docs: C4 v2 review — correct
   struct pci_error_handlers field count"). Documentation-only;
   no fork-branch code change. Zero-delta sentinel
-  `v1-tip-sha == v2-tip-sha == 2f3c4896010198c722bc1fb14745ff5e780d17e5`
+  `v1-tip-sha == v2-tip-sha == 75e823eff5b18f08be8d56924d8099fce9829e58`
   preserved.
 
 (I1, I2, I4, I6, I7 rejected; I3 deferred to Task 14 cross-patch
@@ -775,7 +775,7 @@ audit for `related-patches:` frontmatter atomic sweep.)
 - Manifest row: `patches/manifest` line for `C4-err-handlers-scaffold` (layer `base`, source `fork:c4-err-handlers-scaffold`)
 - Vanilla baseline: `kernel-open/nvidia/nv-pci.c:nv_pci_driver` (vanilla 595.71.05 leaves `.err_handler` unset; no `pci_error_handlers` table is defined anywhere in `kernel-open/`; the patch is purely additive — `git show 595.71.05:kernel-open/nvidia/nv-pci.c` lines 2750-2764 + `nv_pci_register_driver()`/`nv_pci_unregister_driver()` at lines 2767-2785, unmodified)
 - Kernel reference: `/root/linux-v6.19/include/linux/pci.h:191-208` (`pci_channel_state_t` enum definition — three values: `pci_channel_io_normal`, `pci_channel_io_frozen`, `pci_channel_io_perm_failure`); `/root/linux-v6.19/include/linux/pci.h:898-918` (`pci_ers_result_t` enum — six values including `PCI_ERS_RESULT_NO_AER_DRIVER`); `/root/linux-v6.19/include/linux/pci.h:921-941` (`struct pci_error_handlers` — seven function-pointer fields); `/root/linux-v6.19/drivers/pci/pcie/err.c:49-86` (`report_error_detected` dispatch site — the kernel branch that distinguishes "no callback" → `PCI_ERS_RESULT_NO_AER_DRIVER`); `/root/linux-v6.19/drivers/pci/pcie/err.c:210-267` (`pcie_do_recovery` state machine — shows `slot_reset` is dispatched only when status reaches `NEED_RESET`)
-- Fork branch: `c4-err-handlers-scaffold` on `apnex/open-gpu-kernel-modules` (v1-tip == v2-tip == `2f3c4896010198c722bc1fb14745ff5e780d17e5` — zero-delta sentinel)
+- Fork branch: `c4-err-handlers-scaffold` on `apnex/open-gpu-kernel-modules` (v1-tip == v2-tip == `75e823eff5b18f08be8d56924d8099fce9829e58` — zero-delta sentinel)
 - aorus-5090 ancestor: `/root/aorus-5090-egpu/patches/0007-nv-pci-register-error-handlers-Lever-M-base.patch` (Lever M-base, 2026-05-04 — single-callback table with unconditional DISCONNECT + log-once flag)
 - aorus-5090 docs: `/root/aorus-5090-egpu/docs/lever-catalog.md:281-303` (Lever M-base catalogue entry — the M-base mechanism + staging discipline); `/root/aorus-5090-egpu/docs/lever-catalog.md:307-396` (Lever M-recover catalogue entry — the patches 0027 finding about explicit out-of-band dispatch); `/root/aorus-5090-egpu/docs/lever-M-recover-design.md:31-52` (the M-base → M-recover layering rationale + why the kernel's `pci_error_handlers` framework is the right layer); `/root/aorus-5090-egpu/docs/lever-M-recover-design.md:196-258` (the runtime AER state machine that C4 stays out of and A3 owns); `/root/aorus-5090-egpu/docs/lever-m-recover-commit3-handover.md:48-62` (the storm postmortem + 4 H15 hardening fixes); `/root/aorus-5090-egpu/docs/lever-m-recover-commit3-handover.md:119-130` (the H4 smarter-`error_detected` truth table that belongs to A3, not C4)
 - Upstream issue: <https://github.com/NVIDIA/open-gpu-kernel-modules/issues/979> — Blackwell GPU over Thunderbolt commits permanent lost state on transient PCIe failures. C4 is the load-bearing scaffolding that any subsequent in-driver PCIe error-handling depends on; TOSUKUi 2026-05-02 comment is the verbatim "no error_detected callback" symptom evidence.

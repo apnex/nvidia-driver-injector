@@ -2,8 +2,8 @@
 id: C3-gpu-lost-retry
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: e069ffe0244d654a60cd155b9ca7c125e3882ee3
-v2-tip-sha: e069ffe0244d654a60cd155b9ca7c125e3882ee3
+v1-tip-sha: c589673a33729e24c5179f92c5c98dbac4886d6b
+v2-tip-sha: c589673a33729e24c5179f92c5c98dbac4886d6b
 status: accepted
 intent-updates: []
 ---
@@ -15,7 +15,7 @@ intent-updates: []
 - **Vanilla NVIDIA 595.71.05:** `src/nvidia/arch/nvalloc/unix/src/osinit.c:osHandleGpuLost` (single `NV_PRIV_REG_RD32(NV_PMC_BOOT_0)` then fall-through to lost-state branch on mismatch).
 - **v2 intent:** `/root/nvidia-driver-injector/docs/patch-intents/C3-gpu-lost-retry.md` (two Requirements: bounded retry budget + log-once-on-recovery; four scenarios on Requirement 1; three scenarios on Requirement 2).
 - **v2 review:** `/root/nvidia-driver-injector/docs/patch-reviews/C3-gpu-lost-retry.md` (zero must-fix deltas; D1 stylistic dead-code and D2 log-level both `nice-to-have` with deferred Resolutions).
-- **Fork branch tip (v1 == v2):** `e069ffe0244d654a60cd155b9ca7c125e3882ee3` on `apnex/open-gpu-kernel-modules` branch `c3-gpu-lost-retry`.
+- **Fork branch tip (v1 == v2):** `c589673a33729e24c5179f92c5c98dbac4886d6b` on `apnex/open-gpu-kernel-modules` branch `c3-gpu-lost-retry`.
 - **aorus-5090 ancestor patch:** `/root/aorus-5090-egpu/patches/0001-osHandleGpuLost-retry-on-transient-pcie-failure.patch` (the original Lever I implementation, 2026-05-03).
 - **aorus-5090 docs:**
   - `/root/aorus-5090-egpu/docs/lever-catalog.md` §"Lever I — osHandleGpuLost retry on transient PCIe failure" (lines 178-206): class + status + mechanism + code surface.
@@ -148,7 +148,7 @@ What the aorus-5090 mining surfaced about Lever I (C3's direct ancestor):
 - Review file: `docs/patch-reviews/C3-gpu-lost-retry.md`
 - Manifest row: `patches/manifest` line for `C3-gpu-lost-retry` (layer `base`, source `fork:c3-gpu-lost-retry`)
 - Vanilla baseline: `src/nvidia/arch/nvalloc/unix/src/osinit.c:osHandleGpuLost` (vanilla 595.71.05)
-- Fork branch: `c3-gpu-lost-retry` on `apnex/open-gpu-kernel-modules` (tip `e069ffe0244d654a60cd155b9ca7c125e3882ee3`)
+- Fork branch: `c3-gpu-lost-retry` on `apnex/open-gpu-kernel-modules` (tip `c589673a33729e24c5179f92c5c98dbac4886d6b`)
 - aorus-5090 ancestor: `/root/aorus-5090-egpu/patches/0001-osHandleGpuLost-retry-on-transient-pcie-failure.patch`
 - aorus-5090 design + investigation: `/root/aorus-5090-egpu/docs/lever-catalog.md:178-206` (Lever I entry); `/root/aorus-5090-egpu/docs/source-review-notes.md:993-1198` (Pass 7 implementation analysis); `/root/aorus-5090-egpu/docs/reliability-hypothesis-ledger.md:226-254` (H14 — PMC_BOOT_0 transient evidence); `/root/aorus-5090-egpu/docs/architecture-and-modularity.md:64-100` (L1 sovereignty justification).
 - Upstream issue: <https://github.com/NVIDIA/open-gpu-kernel-modules/issues/979> (Blackwell GPU over Thunderbolt: brief PCIe link drop commits GPU to permanent lost state) — C3 is the headline fix.

@@ -2,8 +2,8 @@
 id: A1-pcie-primitives
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: be1b56cf8ecc6d34bdfb8175d9ab184ef21d37bf
-v2-tip-sha: fccf6a8588c0753c009e1fd3e6468be8d460b31d
+v1-tip-sha: 8097786cdeeacd371b5309c2b78c8a1f9627a939
+v2-tip-sha: 124e9c5eb8a433bcf78a2c2753c612eaf29c3a31
 status: accepted
 intent-updates: [Requirement-2-DPC-offsets]
 ---
@@ -607,7 +607,7 @@ in the addon-recarve campaign
   (no `pending`). _(8 candidates: 1 landed (I8), 2 deferred
   (I1, I2), 5 rejected (I3, I4, I5, I6, I7).)_
 - [x] All "land" improvements applied as fork-branch commits
-  citing their `<id>-I<N>` IDs. _(I8 landed as `fccf6a85` on
+  citing their `<id>-I<N>` IDs. _(I8 landed as `124e9c5e` on
   `a1-pcie-primitives`.)_
 - [x] Substantive intent updates landed as precursor commits.
   _(Requirement #2 DPC-offset prose landed as injector-branch

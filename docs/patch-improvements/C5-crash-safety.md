@@ -2,8 +2,8 @@
 id: C5-crash-safety
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: 8a67344f7a31b9a21e22fc516b03521922ceb2e2
-v2-tip-sha: 8a67344f7a31b9a21e22fc516b03521922ceb2e2
+v1-tip-sha: 416bdc37b81a1457e80ec576e1e8990b091136d6
+v2-tip-sha: 416bdc37b81a1457e80ec576e1e8990b091136d6
 status: accepted
 intent-updates: []
 ---
@@ -460,8 +460,8 @@ consolidated into C5; none are missed.
 - **Proposed state:** confirm the contract. Note that the unified diff
   `595.71.05..c5-crash-safety` carries the C4 hunks too (because C5's
   branch sits on top of C4 in the stack), but the **specific** commits
-  separate cleanly: `2f3c4896` is C4 (`nv-pci: register
-  pci_error_handlers`); `71f00c6b` + `8a67344f` are the C5-specific
+  separate cleanly: `75e823ef` is C4 (`nv-pci: register
+  pci_error_handlers`); `b215ec9f` + `416bdc37` are the C5-specific
   commits.
 - **Value:** confirms the C4↔C5 separation that sub-cycle 2's C2
   review (commit `89a69b9`) had to retroactively correct (per
@@ -475,9 +475,9 @@ consolidated into C5; none are missed.
 - **Resolution:** rejected because no change is needed.
   `git log --oneline 595.71.05..c5-crash-safety` confirms the
   per-commit separation:
-  - `2f3c4896` C4 — `nv-pci: register pci_error_handlers`
-  - `71f00c6b` C5 — `os-pci: add os_pci_is/set_disconnected helpers`
-  - `8a67344f` C5 — `crash-safety: bound driver paths that operate on
+  - `75e823ef` C4 — `nv-pci: register pci_error_handlers`
+  - `b215ec9f` C5 — `os-pci: add os_pci_is/set_disconnected helpers`
+  - `416bdc37` C5 — `crash-safety: bound driver paths that operate on
     an off-the-bus GPU`
   C5's intent Scope boundary (intent lines 196-201) explicitly states
   "This patch does NOT register `pci_error_handlers`. The kernel's
@@ -503,13 +503,13 @@ consolidated into C5; none are missed.
   registration to C5" → v3 disposition: **upheld (deferred to Task
   14)**. C5's own intent + review are correct; the inconsistency is
   in C2's prose. Task 14's cross-patch audit owns the fix. Evidence:
-  v1 commit log shows C4 registers (`2f3c4896`); C5 does not (`71f00c6b`
-  + `8a67344f`). Captured here as I3 (defer).
+  v1 commit log shows C4 registers (`75e823ef`); C5 does not (`b215ec9f`
+  + `416bdc37`). Captured here as I3 (defer).
 - **v2-D4** — "No must-fix deltas" → v3 disposition: **upheld**. The
   triangulated 9-ancestor archaeology surfaces no new must-fix items.
   Every Scenario in v2 intent's three Requirements remains satisfied
   by v1. Zero-delta sentinel `v1-tip-sha == v2-tip-sha ==
-  8a67344f7a31b9a21e22fc516b03521922ceb2e2` holds.
+  416bdc37b81a1457e80ec576e1e8990b091136d6` holds.
 
 ## Improvements landed
 
@@ -567,7 +567,7 @@ modify the intent.)
   - `src/nvidia/src/kernel/vgpu/rpc.c`
   - `src/nvidia/src/libraries/resserv/src/{rs_client.c,rs_server.c}`
 - Fork branch: `c5-crash-safety` on `apnex/open-gpu-kernel-modules`
-  (tip `8a67344f`)
+  (tip `416bdc37`)
 - aorus-5090 ancestor patches (9 consolidated into C5):
   - `patches/0002-journal-rcdbAddRmGpuDump-shortcircuit-and-relax-assert.patch`
   - `patches/0003-nvDumpAllEngines-break-on-gpu-lost.patch`

@@ -2,8 +2,8 @@
 id: E1-egpu-detection
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
-v1-tip-sha: 2d43621b88eff6acb9a10f46ccb1fe7f40e91352
-v2-tip-sha: 2d43621b88eff6acb9a10f46ccb1fe7f40e91352
+v1-tip-sha: 000ea7a51db8b78225950a753a390a82f3aa1d81
+v2-tip-sha: 000ea7a51db8b78225950a753a390a82f3aa1d81
 status: accepted
 related-patches: [C4-err-handlers-scaffold]
 ---
@@ -70,7 +70,7 @@ govern.
 ## v1 audit
 
 The v1 fork branch tip
-(`2d43621b88eff6acb9a10f46ccb1fe7f40e91352` — "osinit: detect
+(`000ea7a51db8b78225950a753a390a82f3aa1d81` — "osinit: detect
 external GPUs from the kernel's PCI classification") makes four
 hunks: three additions and one substantial rewrite.
 
@@ -404,7 +404,7 @@ The main alternatives considered during the v2 review:
 
 Per M2 (zero-delta sentinel from the C1 checkpoint), the
 frontmatter `v1-tip-sha == v2-tip-sha ==
-2d43621b88eff6acb9a10f46ccb1fe7f40e91352` is the machine-checkable
+000ea7a51db8b78225950a753a390a82f3aa1d81` is the machine-checkable
 signal that v1 already met v2 intent. The one `nice-to-have` delta
 (D1) is recorded for provenance; it does not require a fork-branch
 commit because its Resolution is `deferred`.
@@ -413,7 +413,7 @@ commit because its Resolution is `deferred`.
 
 - [x] `docs/patch-intents/E1-egpu-detection.md` exists, lints clean, `status: reviewed`.
 - [x] All must-fix deltas applied as fork-branch commits citing their delta IDs. _(N/A — zero must-fix deltas; D1 is nice-to-have with deferred Resolution.)_
-- [x] `patches/base/E1-egpu-detection.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `2d43621b`.)_
+- [x] `patches/base/E1-egpu-detection.patch` refreshed by `regen`. _(N/A — no fork-branch change; existing file already reflects `000ea7a5`.)_
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
 - [x] Audit-reviewer subagent approved. _(Pending — this review file is the audit-reviewer's input.)_
