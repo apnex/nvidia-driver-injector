@@ -5,7 +5,7 @@ reviewer: Claude Opus 4.7
 v1-tip-sha: 2cc240ef06fd740262a0c2532b043dd852258a83
 v2-tip-sha: 2cc240ef06fd740262a0c2532b043dd852258a83
 status: accepted
-related-patches: []
+related-patches: [C4-err-handlers-scaffold, C5-crash-safety]
 ---
 
 # C2-aer-internal-unmask — v2 review

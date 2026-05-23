@@ -5,7 +5,7 @@ reviewer: Claude Opus 4.7
 v1-tip-sha: be1b56cf8ecc6d34bdfb8175d9ab184ef21d37bf
 v2-tip-sha: be1b56cf8ecc6d34bdfb8175d9ab184ef21d37bf
 status: accepted
-related-patches: []
+related-patches: [A2-bus-loss-watchdog, A3-recovery, A4-close-path-telemetry, A5-version-and-toggles]
 ---
 
 # A1-pcie-primitives — v2 review

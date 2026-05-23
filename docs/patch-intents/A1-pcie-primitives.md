@@ -5,7 +5,7 @@ source-branch: a1-pcie-primitives
 upstream-candidacy: n/a
 telemetry-tier: nominal
 status: reviewed
-related-patches: []
+related-patches: [A2-bus-loss-watchdog, A3-recovery, A4-close-path-telemetry, A5-version-and-toggles]
 ---
 
 # A1-pcie-primitives — Shared PCIe/AER/WPR2 Register-Read Substrate for the Addon Stack

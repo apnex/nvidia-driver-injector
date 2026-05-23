@@ -5,7 +5,7 @@ source-branch: a2-bus-loss-watchdog
 upstream-candidacy: n/a
 telemetry-tier: mandatory
 status: reviewed
-related-patches: [A1-pcie-primitives]
+related-patches: [A1-pcie-primitives, A3-recovery]
 ---
 
 # A2-bus-loss-watchdog — Per-Device Heartbeat Watchdog for Silent Bus-Loss Detection

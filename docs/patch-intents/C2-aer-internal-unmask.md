@@ -5,7 +5,7 @@ source-branch: c2-aer-internal-unmask
 upstream-candidacy: high
 telemetry-tier: nominal
 status: reviewed
-related-patches: []
+related-patches: [C4-err-handlers-scaffold, C5-crash-safety]
 ---
 
 # C2-aer-internal-unmask — Make AER Internal Errors Visible to the Recovery Path

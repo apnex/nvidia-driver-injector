@@ -5,7 +5,7 @@ reviewer: Claude Opus 4.7
 v1-tip-sha: e069ffe0244d654a60cd155b9ca7c125e3882ee3
 v2-tip-sha: e069ffe0244d654a60cd155b9ca7c125e3882ee3
 status: accepted
-related-patches: []
+related-patches: [C5-crash-safety]
 ---
 
 # C3-gpu-lost-retry — v2 review

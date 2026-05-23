@@ -5,7 +5,7 @@ source-branch: c3-gpu-lost-retry
 upstream-candidacy: high
 telemetry-tier: mandatory
 status: reviewed
-related-patches: []
+related-patches: [C5-crash-safety]
 ---
 
 # C3-gpu-lost-retry — Survive Transient PCIe Reads in the GPU-Lost Preflight
