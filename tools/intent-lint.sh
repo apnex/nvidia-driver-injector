@@ -57,6 +57,13 @@ for file in "${files[@]}"; do
             err "$file" "rule 1: frontmatter missing required field '$field'"
         fi
     done
+
+    # Rule 2: id field equals filename stem.
+    stem="$(basename "$file" .md)"
+    id_val="$(intent_field "$file" id)"
+    if [ -n "$id_val" ] && [ "$id_val" != "$stem" ]; then
+        err "$file" "rule 2: frontmatter id '$id_val' does not match filename stem '$stem'"
+    fi
 done
 
 [ "$errors" -eq 0 ] || exit 1

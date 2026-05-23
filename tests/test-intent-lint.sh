@@ -183,4 +183,43 @@ The driver MUST exist.
 INTENT
 assert_exit 1 "quoted-empty field fails lint" lint_fixture "$d"
 
+# Case: frontmatter id does not match filename stem.
+d="$(mk)"
+_intent_test_dirs+=("$d")
+cat > "$d/docs/patch-intents/X1-good.md" <<'INTENT'
+---
+id: WRONG-NAME
+layer: base
+source-branch: x1-good
+upstream-candidacy: high
+telemetry-tier: nominal
+status: draft
+related-patches: []
+---
+
+# WRONG-NAME — Mismatched Id
+
+## Purpose
+Stub.
+## Requirements
+### Requirement: Stub
+The driver MUST exist.
+#### Scenario: Stub
+- **GIVEN** a stub
+- **WHEN** stubbed
+- **THEN** MUST stub
+## Scope boundary
+- Stub.
+## Telemetry contract
+| Event | Level | Format |
+|---|---|---|
+| e | `dev_warn` | `"e"` |
+## Provenance
+- **Source cluster:** stub.
+- **Vanilla baseline:** stub.
+- **Fork branch:** stub.
+- **Upstream issue:** n/a.
+INTENT
+assert_exit 1 "id != filename stem fails lint" lint_fixture "$d"
+
 finish_tests
