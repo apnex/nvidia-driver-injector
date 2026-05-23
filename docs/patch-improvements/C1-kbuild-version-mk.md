@@ -119,7 +119,7 @@ What the aorus-5090 mining surfaced about C1's mechanism ancestor (Patch 0025):
 - [x] `tools/intent-lint.sh` passes _(no intent change; lint re-verified, exit 0)._
 - [x] `tools/validate-patchset.sh` passes (compile gate; composed C1-A5 patchset against kernel 7.0.9-204.fc44.x86_64, exit 0).
 - [x] `bash tests/run.sh` green (8/16/10 across compose/intent-lint/manifest-lib = 34 ok, 0 failed, exit 0).
-- [ ] Audit-reviewer subagent approved.
+- [x] Audit-reviewer subagent approved (sub-cycle 3 audit-reviewer, ✅ APPROVED WITH NOTES — all citations verbatim-verified, all 4 triages concurred, all gates re-ran green, zero audit deltas required).
 
 ## Cross-references
 

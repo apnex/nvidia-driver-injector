@@ -260,6 +260,8 @@ tools/regen-base-patches.sh
 git diff patches/<layer>/<patch-id>.patch
 ```
 
+**Methodology refinement from C1 audit (M8) — `.regen-state` truncation handling.** When the v3 I-commit on `<patch-id>` advances its fork-branch tip, `tools/regen-base-patches.sh` truncates `patches/base/.regen-state` to entries up to the first non-descendant downstream branch (the C1→…→A5 fork stack is currently flat at v1-tips; we do NOT rebase the unaffected branches on every per-patch I-commit). The correct operating procedure: **restore the unaffected entries from `git show HEAD:patches/base/.regen-state` and commit a `.regen-state` that lists all 11 fork-branch tips with only `<patch-id>`'s SHA advanced.** Stage this restored file in the Step 11 closeout commit. Rationale: `.regen-state` is a complete inventory of fork-branch tips, not a rebase ledger — letting it shrink would invalidate the v2-tip-shas the other 10 patches' catalogs cite. The underlying tool behaviour is a deferred follow-up (see `tools/regen-base-patches.sh` content-hash gate fix in §"Deferred follow-ups").
+
 ### Step 11: Compile gate + test gate + catalog closeout + commit
 
 Run compile gate:
