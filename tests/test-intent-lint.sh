@@ -300,4 +300,43 @@ The driver MUST exist.
 INTENT
 assert_exit 1 "source-branch != manifest fails lint" lint_fixture "$d"
 
+# Case: base row with upstream-candidacy: n/a (disallowed; n/a only valid for addon).
+d="$(mk)"
+_intent_test_dirs+=("$d")
+cat > "$d/docs/patch-intents/X1-good.md" <<'INTENT'
+---
+id: X1-good
+layer: base
+source-branch: x1-good
+upstream-candidacy: n/a
+telemetry-tier: nominal
+status: draft
+related-patches: []
+---
+
+# X1-good — Base With NA
+
+## Purpose
+Stub.
+## Requirements
+### Requirement: Stub
+The driver MUST exist.
+#### Scenario: Stub
+- **GIVEN** stub
+- **WHEN** stub
+- **THEN** MUST stub
+## Scope boundary
+- Stub.
+## Telemetry contract
+| Event | Level | Format |
+|---|---|---|
+| e | `dev_warn` | `"e"` |
+## Provenance
+- **Source cluster:** stub.
+- **Vanilla baseline:** stub.
+- **Fork branch:** stub.
+- **Upstream issue:** n/a.
+INTENT
+assert_exit 1 "base + n/a candidacy fails lint" lint_fixture "$d"
+
 finish_tests

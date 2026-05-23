@@ -86,6 +86,15 @@ for file in "${files[@]}"; do
             err "$file" "rule 4: source-branch '$sb_val' disagrees with manifest 'fork:$manifest_branch' for '$stem'"
         fi
     fi
+
+    # Rule 5: upstream-candidacy: n/a iff layer: addon.
+    cand_val="$(intent_field "$file" upstream-candidacy)"
+    if [ "$layer_val" = "addon" ] && [ "$cand_val" != "n/a" ]; then
+        err "$file" "rule 5: addon layer requires upstream-candidacy 'n/a' (got '$cand_val')"
+    fi
+    if [ "$layer_val" = "base" ] && [ "$cand_val" = "n/a" ]; then
+        err "$file" "rule 5: base layer must have upstream-candidacy in {high,medium,low} (got 'n/a')"
+    fi
 done
 
 [ "$errors" -eq 0 ] || exit 1
