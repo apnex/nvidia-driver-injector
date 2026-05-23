@@ -781,8 +781,23 @@ structurally and is not affected by A1's I8 semantic change to
   no intent change in this task).
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
-- [ ] Audit-reviewer subagent approved. _(Pending —
-  this catalog is the audit-reviewer's input.)_
+- [x] Audit-reviewer subagent approved. _(Sub-cycle 3 audit-reviewer,
+  ✅ APPROVED WITH NOTES — all 8 spot-checked aorus citations verbatim;
+  all 9 triages concurred; vanilla baseline + 2-ancestor consolidation
+  + kernel API surface verified; M1+M2 drops (`lever-R-design.md`,
+  `recovery.md`) sound; M5 community framing for #1111+#1132 verified
+  as upstream-PR-rationale strengthening (code-path adjacency only);
+  A2-A1 contract post-A1-I8 consumer-transparent confirmed (sole hit
+  was a refactor-roadmap note, not a value-comparator); 4 robustness
+  claims source-verified (counter wrap, idle-burst latch reset, sysfs-
+  remove-before-kthread_stop teardown ordering at source lines
+  370-400, surprise-removal cooperation with C4/C5); duty-boundary
+  grep returns zero forbidden-surface matches; gates re-ran green.
+  Audit deltas: NONE required. Zero-delta sentinel approved at
+  `cd1fe0888e7b2d135b0bb27214e32d31c9b382c3`. **Pre-warn for Task 11
+  (A3):** I1's cross-cluster `tb_egpu_dump_aer_trigger_event` call
+  pattern is the exact addon-recarve regression A3's reviewer must
+  address as a first-class candidate — surface, not bury.)_
 
 ## Cross-references
 
