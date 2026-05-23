@@ -1508,8 +1508,27 @@ commit, not as a precursor.)
 - [x] `bash tests/run.sh` green (34 ok / 0 failed:
   test-compose.sh 8 / test-intent-lint.sh 16 /
   test-manifest-lib.sh 10).
-- [ ] Audit-reviewer subagent approved. _(Pending — this
-  catalog is the audit-reviewer's input.)_
+- [x] Audit-reviewer subagent approved. _(Sub-cycle 3 audit-reviewer,
+  ✅ APPROVED WITH NOTES — all 12 spot-checked aorus citations verbatim
+  (8 ancestor patches + 5 design docs line-count-verified);
+  8-ancestor consolidation framing correctly disambiguates the
+  C4-vs-A3 division for 0007 (M-base). A2-D1 cross-cluster pattern
+  adjudication **CONCUR with option (d)** — 5-point rationale audited
+  (production-validation weight; symmetric contract verified in both
+  A2 + A3 intents; carve principle is heuristic per recarve-design;
+  cost-benefit asymmetry of 4-branch cascade for zero-production-value
+  cleanup; revisit triggers concrete + falsifiable). M1+M2 drops sound;
+  M6 D-entries all re-examined; A3 duty boundary clean (only legitimate
+  territory + 1 documented cross-TU edit at `nv-tb-egpu-qwd.c`); 6
+  robustness checks source-verified (I7 non-blocking note: a 3rd
+  init-time `atomic_set` at line 796 is one-shot, doesn't affect the
+  "2 reset sites in the running state machine" claim); gates re-ran
+  green; all 16 triages concurred. Zero-delta sentinel approved at
+  `f57a38b2f45b7f757e1982734e587336bb25606a`. **Pre-warn for Task 12
+  (A4):** A4's reviewer should NOT add cross-cluster edits at A2's
+  detection latch; if A4 needs telemetry there, hoist BOTH A3's
+  qwd-detect call AND A4's new call into A2 in ONE cascade-triggering
+  change — this would fire I1's first revisit trigger.)_
 
 ## Cross-references
 
