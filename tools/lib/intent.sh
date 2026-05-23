@@ -7,7 +7,7 @@
 # Sourced by tools/intent-lint.sh and tools/render-patch-index.sh.
 
 # RFC 2119 normative keywords (UPPERCASE forms).
-INTENT_RFC2119='MUST|MUST NOT|REQUIRED|SHALL|SHALL NOT|SHOULD|SHOULD NOT|RECOMMENDED|MAY|OPTIONAL'
+INTENT_RFC2119='MUST NOT|MUST|SHALL NOT|SHALL|SHOULD NOT|SHOULD|REQUIRED|RECOMMENDED|MAY|OPTIONAL'
 
 # Print the body of the frontmatter (lines between the first two --- markers).
 # Empty output if the file has no frontmatter.
@@ -16,6 +16,15 @@ intent_frontmatter() {
         /^---$/ { count++; next }
         count == 1 { print }
         count == 2 { exit }
+    ' "$1"
+}
+
+# Return 0 if the file has a well-formed (opened-and-closed) frontmatter block.
+intent_has_frontmatter() {
+    awk '
+        NR == 1 && /^---$/ { opened = 1; next }
+        opened && /^---$/  { closed = 1; exit }
+        END { exit !(opened && closed) }
     ' "$1"
 }
 

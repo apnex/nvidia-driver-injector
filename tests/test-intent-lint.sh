@@ -12,7 +12,18 @@ here="$(cd "$(dirname "$0")" && pwd)"
 
 INTENT_LINT="$here/../tools/intent-lint.sh"
 
+# Temp fixture dirs created by mk() — wiped on test exit.
+_intent_test_dirs=()
+trap '
+    for _d in "${_intent_test_dirs[@]}"; do
+        [ -n "$_d" ] && rm -rf "$_d"
+    done
+' EXIT
+
 # mk: create a temp fixture root with a default manifest containing X1-good (base) and X2-good (addon).
+# Callers MUST register the returned dir for cleanup:  d="$(mk)"; _intent_test_dirs+=("$d")
+# (Registration cannot happen inside mk() because mk is invoked under $(...), a subshell
+# whose array mutations do not propagate to the parent.)
 mk() {
     local d; d="$(mktemp -d)"
     mkdir -p "$d/patches" "$d/docs/patch-intents"
@@ -81,9 +92,8 @@ lint_fixture() {
 }
 
 # Case 0: valid-case fixture passes lint.
-d="$(mk)"
+d="$(mk)"; _intent_test_dirs+=("$d")
 write_valid_intent "$d"
 assert_exit 0 "valid intent passes lint" lint_fixture "$d"
-rm -rf "$d"
 
 finish_tests
