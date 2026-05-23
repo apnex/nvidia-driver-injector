@@ -299,13 +299,20 @@ The main alternatives considered during the v2 review:
   shipping minimum-correct bodies with prove-the-path logs is the
   point of the scaffolding patch. Kept v1's stub bodies.
 
-- **Five-callback table vs. minimal-three.** The kernel's
-  `struct pci_error_handlers` defines five fields (.error_detected,
-  .mmio_enabled, .slot_reset, .reset_done, .resume). v1 populates
-  four (skipping `.reset_done`). The kernel's err.c does not
-  require `.reset_done` and treats it as optional. Skipping it
-  matches the intent's "minimum at most" stipulation (the intent
-  requires the four populated). Kept v1's four-callback shape.
+- **Seven-field table, minimal-four populated.** The kernel's
+  `struct pci_error_handlers` defines seven fields
+  (`.error_detected`, `.mmio_enabled`, `.slot_reset`,
+  `.reset_prepare`, `.reset_done`, `.resume`, `.cor_error_detected`).
+  v1 populates four (`.error_detected`, `.mmio_enabled`,
+  `.slot_reset`, `.resume`) — the minimum for the AER state machine.
+  The three unpopulated fields are dispatched by orthogonal paths
+  the kernel NULL-checks before calling: `.reset_prepare` and
+  `.reset_done` are the `pci_reset_function()` bookends (not invoked
+  on the `pcie_do_recovery()` path), and `.cor_error_detected` is
+  the correctable-error path (separate dispatch in
+  `aer_process_err_devices()`). Populating any of the three would
+  expand the scaffold beyond the AER state machine's contract. Kept
+  v1's four-callback shape.
 
 - **Telemetry level: pci_info vs. pci_warn distribution.** v1 uses
   `pci_info` for happy-path callbacks (`.error_detected` non-fatal,
