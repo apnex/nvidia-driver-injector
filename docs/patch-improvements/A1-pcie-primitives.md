@@ -3,8 +3,8 @@ id: A1-pcie-primitives
 review-date: 2026-05-23
 reviewer: Claude Opus 4.7
 v1-tip-sha: be1b56cf8ecc6d34bdfb8175d9ab184ef21d37bf
-v2-tip-sha: pending
-status: in-progress
+v2-tip-sha: fccf6a8588c0753c009e1fd3e6468be8d460b31d
+status: accepted
 intent-updates: [Requirement-2-DPC-offsets]
 ---
 
@@ -603,16 +603,21 @@ in the addon-recarve campaign
 
 ## Done gate
 
-- [ ] Every candidate improvement has explicit `Resolution:`
+- [x] Every candidate improvement has explicit `Resolution:`
   (no `pending`). _(8 candidates: 1 landed (I8), 2 deferred
   (I1, I2), 5 rejected (I3, I4, I5, I6, I7).)_
-- [ ] All "land" improvements applied as fork-branch commits
-  citing their `<id>-I<N>` IDs. _(I8 landed.)_
-- [ ] Substantive intent updates landed as precursor commits.
-- [ ] `tools/intent-lint.sh` passes.
-- [ ] `tools/validate-patchset.sh` passes.
-- [ ] `bash tests/run.sh` green.
-- [ ] Audit-reviewer subagent approved.
+- [x] All "land" improvements applied as fork-branch commits
+  citing their `<id>-I<N>` IDs. _(I8 landed as `fccf6a85` on
+  `a1-pcie-primitives`.)_
+- [x] Substantive intent updates landed as precursor commits.
+  _(Requirement #2 DPC-offset prose landed as injector-branch
+  commit `9339150`.)_
+- [x] `tools/intent-lint.sh` passes.
+- [x] `tools/validate-patchset.sh` passes.
+- [x] `bash tests/run.sh` green. _(34 ok / 0 failed across
+  compose / intent-lint / manifest-lib.)_
+- [ ] Audit-reviewer subagent approved. _(Pending — this catalog
+  is the audit-reviewer's input.)_
 
 ## Cross-references
 
