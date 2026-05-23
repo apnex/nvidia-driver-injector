@@ -571,16 +571,19 @@ C4 carve-out:
 - **Intent impact:** none (the intent specifies the four populated
   callbacks correctly; the struct's actual field count is a
   kernel-side fact).
-- **Triage decision:** defer.
-- **Resolution:** deferred — the miscount is a **review-prose
-  documentation precision issue, not a v1 code defect**. The
-  v3 catalog (this file) surfaces the correct field count for
-  audit-reviewer visibility. **Disposition for follow-up:** if
-  Task 14 cross-patch audit revisits the v2 review files for
-  any other consistency fix, fold this correction in then;
-  otherwise leave the v2 review as-is. Tracked here so a future
-  maintainer doesn't derive a wrong struct model from the v2
-  review prose.
+- **Triage decision:** land (reframed during audit — see Resolution).
+- **Resolution:** applied as commit `49ecc03` ("docs: C4 v2 review —
+  correct struct pci_error_handlers field count") on
+  `feature/v3-patch-improvements`. Audit-reviewer reframed the
+  implementer's original `defer` to `land` on the basis that
+  (a) the fix is a one-token correction plus a clarifying
+  half-sentence (cost trivial), (b) the miscount would not
+  survive an upstream PR reviewer reading `pci.h`, and (c)
+  deferring risks the wrong mental model propagating into the
+  A3 / C5 reviews that follow in this sub-cycle. v2 review file
+  now characterises the struct as seven fields and explains why
+  v1's four-callback choice is the AER-state-machine minimum.
+  No code change; zero-delta sentinel preserved.
 
 ### C4-err-handlers-scaffold-I6 — Refine "recovery aborts" prose to match kernel's PCI_ERS_RESULT_NO_AER_DRIVER vote
 
@@ -674,10 +677,16 @@ C4 carve-out:
 
 ## Improvements landed
 
-(none — all 7 candidates triaged to reject (5) or defer (2);
-v1 already meets the v3 quality bar. Zero-delta sentinel
-`v1-tip-sha == v2-tip-sha == 2f3c4896010198c722bc1fb14745ff5e780d17e5`
-holds across the sub-cycle 3 review.)
+- **C4-err-handlers-scaffold-I5** (review-prose precision fix,
+  reframed from defer to land during audit) — applied as
+  injector-branch commit `49ecc03` ("docs: C4 v2 review — correct
+  struct pci_error_handlers field count"). Documentation-only;
+  no fork-branch code change. Zero-delta sentinel
+  `v1-tip-sha == v2-tip-sha == 2f3c4896010198c722bc1fb14745ff5e780d17e5`
+  preserved.
+
+(I1, I2, I4, I6, I7 rejected; I3 deferred to Task 14 cross-patch
+audit for `related-patches:` frontmatter atomic sweep.)
 
 ## Intent updates landed
 
@@ -691,7 +700,7 @@ holds across the sub-cycle 3 review.)
 - [x] `tools/intent-lint.sh` passes (no intent change; lint re-verified).
 - [x] `tools/validate-patchset.sh` passes (compile gate; composed C1-A5 patchset against kernel 7.0.9-204.fc44.x86_64).
 - [x] `bash tests/run.sh` green (34 ok, 0 failed).
-- [ ] Audit-reviewer subagent approved.
+- [x] Audit-reviewer subagent approved (sub-cycle 3 audit-reviewer, ✅ APPROVED WITH NOTES — all citations verbatim-verified; 6 of 7 triages concurred, I5 reframed from defer to land and applied as `49ecc03`; gates re-ran green; cross-patch contract C4-registers / C5-consumes confirmed; one cosmetic "six grep hits" → actual two in recovery.md drop justification left as-is per audit's "safe to leave").
 
 ## Methodology notes for the audit-reviewer
 
