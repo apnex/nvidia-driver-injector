@@ -5,6 +5,8 @@ per-patch intent specifications, plus the canonical template, the validation
 tool, and the index renderer. The actual *content* of the 11 intents and the
 subsequent deep code-review are separate cycles that consume this design.
 
+**Canonical living reference:** `docs/patch-intent-schema.md` (versioned, undated). This dated brainstorming spec remains as the design's decision record.
+
 ## Context
 
 The injector now ships a complete `C+E+A` composed driver (vanilla
