@@ -5,7 +5,7 @@ source-branch: c4-err-handlers-scaffold
 upstream-candidacy: high
 telemetry-tier: nominal
 status: reviewed
-related-patches: [E1-egpu-detection, C5-crash-safety]
+related-patches: [E1-egpu-detection, C5-crash-safety, A3-recovery]
 ---
 
 # C4-err-handlers-scaffold — Register `pci_error_handlers` so PCIe Error Recovery Can Reach the Driver

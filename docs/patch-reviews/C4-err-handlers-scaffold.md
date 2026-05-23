@@ -5,7 +5,7 @@ reviewer: Claude Opus 4.7
 v1-tip-sha: 75e823eff5b18f08be8d56924d8099fce9829e58
 v2-tip-sha: 75e823eff5b18f08be8d56924d8099fce9829e58
 status: accepted
-related-patches: [E1-egpu-detection, C5-crash-safety]
+related-patches: [E1-egpu-detection, C5-crash-safety, A3-recovery]
 ---
 
 # C4-err-handlers-scaffold — v2 review
