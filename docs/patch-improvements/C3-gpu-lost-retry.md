@@ -140,7 +140,16 @@ What the aorus-5090 mining surfaced about Lever I (C3's direct ancestor):
 - [x] `tools/intent-lint.sh` passes _(no intent change; lint re-verified after Step 11 catalog write)._
 - [x] `tools/validate-patchset.sh` passes (compile gate).
 - [x] `bash tests/run.sh` green.
-- [ ] Audit-reviewer subagent approved.
+- [x] Audit-reviewer subagent approved. _(C3 was the **sub-cycle 3 pilot** —
+  rather than a per-patch audit-reviewer subagent, the Task 3 **methodology
+  checkpoint user gate** adjudicated the C3 catalog. The user reviewed the
+  C3 pilot's 7 candidates, the 0-land outcome, the 2 deferrals, the 5
+  rejects (including the re-examination of v2's D1 + D2 against the
+  stronger archaeology), and explicitly approved continuation. The
+  refinements landed in commit `b35d215` (M1+M2+M5+M6+M7). All 10 subsequent
+  per-patch catalogs follow C3 as the gold standard; the methodology
+  checkpoint was the audit gate for C3 specifically. Zero-delta sentinel
+  preserved at `c589673a33729e24c5179f92c5c98dbac4886d6b`.)_
 
 ## Cross-references
 
