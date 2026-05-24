@@ -7,9 +7,9 @@ Tested on Fedora 43–44, kernels 6.19–7.0.
 
 ## Install
 
-Two supported paths share Layer 1 host bring-up and diverge at Layer 2 (how the driver container is scheduled).
+Two supported paths share `Layer 1` host bring-up and diverge at `Layer 2` (how the driver container is scheduled).
 
-Layer 1 is the same on both paths:
+`Layer 1` is the same on both paths:
 
 ```bash
 sudo git clone https://github.com/apnex/nvidia-driver-injector /root/nvidia-driver-injector
@@ -79,7 +79,7 @@ Isolated by design so its CUDA-devel surface cannot bloat or destabilise the inj
 
 ## Remove
 
-Reverse the install order: Layer 3 (workload) → Layer 2 (this container) → Layer 1 (host).\
+Reverse the install order: `Layer 3` (workload) → `Layer 2` (this container) → `Layer 1` (host).\
 Stop your GPU consumers first (anything holding `/dev/nvidia*`) using their own teardown — the commands below tear down only the injector.
 
 ### Path A — docker-compose
@@ -97,7 +97,7 @@ kubectl exec -n kube-system daemonset/nvidia-driver-injector -- /entrypoint.sh u
 kubectl delete -f k8s/daemonset.yaml
 ```
 
-### Layer 1 (both paths)
+### `Layer 1` (both paths)
 
 ```bash
 sudo ./scripts/remove.sh
@@ -125,22 +125,22 @@ Layer 1  Host config                  - cmdline / modprobe.d / udev / bridge cap
 Layer 0  Hardware                     - AORUS 5090 over TB, NUC 15 Pro+
 ```
 
-Layer 0 is the hardware.
+`Layer 0` is the hardware.
 
 - Out of scope for this repo.
 
-Layer 1 is the host config.
+`Layer 1` is the host config.
 
 - Set up once by `scripts/apply.sh`.
 
-Layer 2 is the driver-injector container at this repo's root.
+`Layer 2` is the driver-injector container at this repo's root.
 
 - Builds the patched `nvidia.ko` against the host's `/lib/modules/$(uname -r)/build`.
 - Loads it via `modprobe`.
 - Materialises `/dev/nvidia*`.
 - Engages persistence mode.
 
-Layer 3 is the workload.
+`Layer 3` is the workload.
 
 - Consumes `/dev/nvidia*`.
 
@@ -168,7 +168,7 @@ docker compose restart
 The container exits at the BAR1-verify step with `BAR1 too small: <N> bytes (need ≥ 34359738368 = 32 GiB)`.\
 The kernel cmdline is missing `thunderbolt.host_reset=false` or `pci=resource_alignment=35@<bridge_bdf>`.\
 BAR1 sizing happens once at boot and cannot be changed at runtime on TB-tunneled hardware.\
-Re-run Layer 1 host bring-up, then reboot:
+Re-run `Layer 1` host bring-up, then reboot:
 
 ```bash
 sudo ./scripts/apply.sh
