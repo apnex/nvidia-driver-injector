@@ -30,7 +30,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: apnex/nvidia-driver-injector:595.71.05-aorus.13
+    image: apnex/nvidia-driver-injector:595.71.05-aorus.14
     container_name: nvidia-driver-injector
     privileged: true
     pid: host

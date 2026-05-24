@@ -1,7 +1,7 @@
 # nvidia-driver-injector
 
 A containerised kernel-injector for a **patched build of the NVIDIA open kernel
-module** (`595.71.05-aorus.13`) that mitigates the silent host-freeze bug at
+module** (`595.71.05-aorus.14`) that mitigates the silent host-freeze bug at
 [NVIDIA/open-gpu-kernel-modules#979](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/979)
 — a Thunderbolt-attached Blackwell GPU (e.g. RTX 5090) hard-locking the host
 under CUDA load. The patches add in-driver crash-safety, a PCIe-error recovery
@@ -189,7 +189,7 @@ After successful load:
 
 ```bash
 nvidia-smi -L                            # GPU 0: NVIDIA GeForce RTX 5090
-cat /sys/module/nvidia/version           # 595.71.05-aorus.13
+cat /sys/module/nvidia/version           # 595.71.05-aorus.14
 ```
 
 To stop:
@@ -220,6 +220,68 @@ The `uninstall` path:
 - Exit 0 → host restored to pre-injector baseline; re-run `docker compose up` to
   reload.
 
+## Driver upgrade (cutover)
+
+When a new image tag (e.g. `aorus.<N+1>`) is built and you want to swap the
+running module without rebooting, use this sequence. Each step has a
+known-failure mode and stops the chain on non-zero exit. Validated against
+`aorus.13` → `aorus.14` on 2026-05-24.
+
+```bash
+cd /root/nvidia-driver-injector
+
+# 1. Build the new image
+sudo docker build -t apnex/nvidia-driver-injector:595.71.05-aorus.<N+1> .
+
+# 2. Graceful Layer 2 teardown — entrypoint's safe-path rmmod
+sudo docker compose run --rm driver-injector uninstall
+
+# 3. Stop + remove the long-running container + its network
+sudo docker compose down
+
+# 4. Bump compose tag
+sudo sed -i 's|nvidia-driver-injector:595.71.05-aorus.<N>|nvidia-driver-injector:595.71.05-aorus.<N+1>|' docker-compose.yml
+
+# 5. Start the new container (entrypoint rebuilds + modprobes new modules)
+sudo docker compose up -d
+
+# 6. Wait for entrypoint to finish (build + modprobe takes ~30-60s on rebuild)
+until lsmod | grep -q '^nvidia '; do sleep 5; done
+
+# 7. Verify
+sudo modinfo -F version nvidia                       # expect: 595.71.05-aorus.<N+1>
+cat /sys/module/nvidia/refcnt                        # expect: 1 (just nvidia_uvm)
+sudo scripts/status.sh                               # expect: 38/2/0 or better
+```
+
+**Pre-cutover checklist:**
+
+- No active GPU consumers — `sudo fuser /dev/nvidia*` returns empty
+  (vLLM / ollama / nvidia-persistenced will block the `uninstall`
+  pre-flight; stop them first).
+- Previous image still on disk for rollback — `docker images
+  apnex/nvidia-driver-injector` shows both `aorus.<N>` and the new
+  `aorus.<N+1>` tag.
+
+**Rollback** (if step 7 fails or you need to revert):
+
+```bash
+sudo docker compose run --rm driver-injector uninstall
+sudo docker compose down
+sudo sed -i 's|nvidia-driver-injector:595.71.05-aorus.<N+1>|nvidia-driver-injector:595.71.05-aorus.<N>|' docker-compose.yml
+sudo docker compose up -d
+```
+
+**Notes on what NOT to use here:**
+
+- `scripts/remove.sh` reverses Layer 1 host config (modprobe.d / systemd /
+  udev). Layer 1 doesn't change in a tag bump, so re-running it is
+  unnecessary churn.
+- `scripts/remove.sh --purge` implies `--revert-cmdline` and requires a
+  reboot — too disruptive for a tag bump within the same geometry.
+- Raw `modprobe -r nvidia_uvm nvidia` skips the `uninstall` subcommand's
+  active-consumer check — works but loses the safety gate.
+
 ## Verifying the install
 
 After `docker compose up -d`, let the build finish (1-2 min on first run, ~30s
@@ -232,7 +294,7 @@ grep -E "^nvidia " /proc/modules
 
 # 2. Patched build (-aorus.<n> suffix is the project marker)
 cat /sys/module/nvidia/version
-# 595.71.05-aorus.13
+# 595.71.05-aorus.14
 
 # 3. GPU bound to nvidia
 ls -la /sys/bus/pci/devices/0000:04:00.0/driver
