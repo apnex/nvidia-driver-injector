@@ -48,6 +48,7 @@ Full step-by-step for both paths (Thunderbolt authorisation, what `apply.sh` doe
 
 The injector is infrastructure — you don't interact with it directly.
 Once installed, your workload uses the GPU as normal.
+Day-2 operations (logs, graceful unload, driver upgrade) live in [`docs/teardown-workflow.md`](docs/teardown-workflow.md).
 
 ### Path A — docker-compose
 
@@ -57,10 +58,6 @@ Container workloads consume the GPU via the standard `nvidia-container-toolkit` 
 ### Path B — k3s DaemonSet
 
 Workload Deployments gate on the producer/consumer contract — see [`docs/consumer-contract.md`](docs/consumer-contract.md) for the required `nodeSelector`, `runtimeClassName`, and env settings.
-
----
-
-Day-2 operations (logs, graceful unload, driver upgrade) live in [`docs/teardown-workflow.md`](docs/teardown-workflow.md).
 
 ---
 
