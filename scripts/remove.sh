@@ -10,7 +10,9 @@
 #   3. Remove /etc/modprobe.d/nvidia-driver-injector.conf.
 #   4. Remove /etc/udev/rules.d/79-nvidia-driver-injector.rules.
 #   5. Re-enable Vulkan/EGL/OpenCL ICDs (rename .disabled → original).
-#   6. Reload systemd + udev.
+#   6. Delete cluster-side RuntimeClass nvidia + (under --purge) revert
+#      nvidia-ctk containerd config. Skipped with --skip-k3s.
+#   7. Reload systemd + udev.
 #
 # What this does NOT do (operator opt-in):
 #   - Revert kernel cmdline changes (use --revert-cmdline).
@@ -35,12 +37,17 @@
 #   --no-act           Print every action without making changes.
 #   --revert-cmdline   Strip the kernel cmdline args this repo added
 #                      (iommu=off etc.). Reboot required after.
+#   --skip-k3s         Don't touch the cluster-side RuntimeClass nvidia.
+#                      Mirrors apply.sh's --skip-k3s for symmetry.
 #   --purge            Deep clean for "fresh-host" testing. In addition
 #                      to the standard reverse-apply, also:
 #                        - remove /usr/lib/modules/<kver>/extra/nvidia*.ko*
 #                          (patched on-disk module from a prior install)
 #                        - restore *.aorus-disabled ICDs to active
 #                          (legacy from prior apnex/aorus-5090-egpu install)
+#                        - revert nvidia-ctk containerd config (removes the
+#                          NVIDIA-managed config drop-in). RuntimeClass is
+#                          ALSO removed unless --skip-k3s is set.
 #                      Implies --revert-cmdline. Reboot required after.
 #                      Use this when you want to validate the canonical
 #                      "fresh Fedora install + apply.sh" workflow.
@@ -52,12 +59,14 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NO_ACT=0
 REVERT_CMDLINE=0
 PURGE=0
+SKIP_K3S=0
 
 for arg in "$@"; do
     case "$arg" in
         --no-act)         NO_ACT=1 ;;
         --revert-cmdline) REVERT_CMDLINE=1 ;;
         --purge)          PURGE=1; REVERT_CMDLINE=1 ;;
+        --skip-k3s)       SKIP_K3S=1 ;;
         -h|--help)
             sed -n '/^# remove\.sh/,/^set -euo/p' "$0" | sed 's/^# \?//' | head -n -1
             exit 0
@@ -98,7 +107,7 @@ fi
 # ===========================================================================
 # Step 1: bridge-link-cap systemd unit
 # ===========================================================================
-step "1/6 bridge-link-cap systemd unit"
+step "1/7 bridge-link-cap systemd unit"
 
 unit="nvidia-driver-injector-bridge-link-cap.service"
 unit_path="/etc/systemd/system/${unit}"
@@ -115,7 +124,7 @@ fi
 # ===========================================================================
 # Step 2: bridge-link-cap binary
 # ===========================================================================
-step "2/6 bridge-link-cap binary"
+step "2/7 bridge-link-cap binary"
 
 bin="/usr/local/sbin/nvidia-driver-injector-bridge-link-cap"
 if [[ -f "$bin" ]]; then
@@ -146,7 +155,7 @@ fi
 # ===========================================================================
 # Step 3: modprobe.d
 # ===========================================================================
-step "3/6 /etc/modprobe.d/nvidia-driver-injector.conf"
+step "3/7 /etc/modprobe.d/nvidia-driver-injector.conf"
 
 f="/etc/modprobe.d/nvidia-driver-injector.conf"
 if [[ -f "$f" ]]; then
@@ -159,7 +168,7 @@ fi
 # ===========================================================================
 # Step 6: udev rules
 # ===========================================================================
-step "4/6 /etc/udev/rules.d/{79,80}-nvidia-driver-injector*.rules"
+step "4/7 /etc/udev/rules.d/{79,80}-nvidia-driver-injector*.rules"
 
 for f in /etc/udev/rules.d/79-nvidia-driver-injector.rules \
          /etc/udev/rules.d/80-nvidia-driver-injector-disable-audio.rules; do
@@ -178,7 +187,7 @@ done
 # ===========================================================================
 # Step 5: re-enable ICDs
 # ===========================================================================
-step "5/6 re-enable Vulkan/EGL/OpenCL ICDs"
+step "5/7 re-enable Vulkan/EGL/OpenCL ICDs"
 
 icd_paths=(
     /usr/share/vulkan/icd.d/nvidia_icd.x86_64.json
@@ -199,9 +208,67 @@ for f in "${icd_paths[@]}"; do
 done
 
 # ===========================================================================
-# Step 6: optional cmdline revert
+# Step 6: k3s / Kubernetes integration teardown
 # ===========================================================================
-step "6/6 reload + optional cmdline revert"
+# Mirror apply.sh step 9. We always remove the cluster-side RuntimeClass
+# (cheap; safe; consumers referencing it will fail loudly rather than silently
+# scheduling onto a node that no longer has the runtime configured). The
+# containerd-config revert is opt-in via --purge — the nvidia runtime
+# handler is benign on a host that doesn't use it, and tearing it down can
+# disrupt OTHER GPU consumers if you keep nvidia-container-toolkit around.
+step "6/7 k3s teardown (RuntimeClass + optional containerd revert)"
+
+if [[ "$SKIP_K3S" -eq 1 ]]; then
+    yellow "  --skip-k3s set; leaving RuntimeClass + containerd config alone"
+elif ! command -v k3s >/dev/null 2>&1 && ! systemctl list-unit-files k3s.service 2>/dev/null | grep -q '^k3s\.service'; then
+    yellow "  k3s not present; nothing to tear down"
+else
+    if command -v kubectl >/dev/null 2>&1; then
+        kubeconfig="/etc/rancher/k3s/k3s.yaml"
+        if [[ -r "$kubeconfig" ]]; then
+            if KUBECONFIG="$kubeconfig" kubectl get runtimeclass nvidia >/dev/null 2>&1; then
+                act "KUBECONFIG=${kubeconfig} kubectl delete runtimeclass nvidia"
+                green "    RuntimeClass/nvidia removed"
+            else
+                yellow "    RuntimeClass/nvidia not present — already absent"
+            fi
+        else
+            yellow "    ${kubeconfig} not readable; skipping RuntimeClass removal"
+        fi
+    else
+        yellow "    kubectl not installed; can't auto-remove RuntimeClass"
+    fi
+
+    if [[ "$PURGE" -eq 1 ]]; then
+        # nvidia-ctk owns the config drop-in; it doesn't ship a `revert`
+        # subcommand, so we just remove the file. Standard paths:
+        # /etc/nvidia-container-runtime/config.toml is its own file (not
+        # touched), but the containerd drop-in lives at:
+        #   /etc/containerd/config.toml.d/99-nvidia.toml   (vanilla containerd)
+        # k3s reads its config from:
+        #   /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl
+        # which k3s auto-generates from a template + the nvidia runtime
+        # auto-detection when /usr/bin/nvidia-container-runtime is present.
+        # Removing the binary path is out of scope (it's RPM-managed); we
+        # remove only our drop-in if it exists.
+        for cfg in /etc/containerd/config.toml.d/99-nvidia.toml \
+                   /etc/containerd/config.toml.d/nvidia.toml; do
+            if [[ -f "$cfg" ]]; then
+                act "rm -f ${cfg}"
+                green "    removed nvidia-ctk drop-in ${cfg}"
+            fi
+        done
+        yellow "    note: k3s auto-detects nvidia-container-runtime by binary"
+        yellow "    presence at /usr/bin/. If you also want to fully unwire the"
+        yellow "    nvidia runtime from k3s, uninstall nvidia-container-toolkit"
+        yellow "    (e.g. dnf remove nvidia-container-toolkit) and restart k3s."
+    fi
+fi
+
+# ===========================================================================
+# Step 7: optional cmdline revert
+# ===========================================================================
+step "7/7 reload + optional cmdline revert"
 
 act "systemctl daemon-reload"
 act "udevadm control --reload-rules"
@@ -239,7 +306,7 @@ fi
 # Step 7: --purge mode — deep clean for "fresh-host" testing
 # ===========================================================================
 if [[ "$PURGE" -eq 1 ]]; then
-    step "7/7 --purge: deep clean (patched .ko + legacy .aorus-disabled ICDs)"
+    step "8/8 --purge: deep clean (patched .ko + legacy .aorus-disabled ICDs)"
 
     # Patched on-disk module from a prior install. /usr/lib/modules/<kver>/
     # extra/ is the canonical location for vendor-rebuilt or akmod modules.

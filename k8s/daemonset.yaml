@@ -1,24 +1,80 @@
-# DaemonSet to deploy nvidia-driver-injector on every GPU node in a cluster.
+# DaemonSet to deploy the nvidia-driver-injector on every node in a k3s /
+# Kubernetes cluster. One pod per node; the pod builds + loads the patched
+# nvidia.ko into the node's host kernel, then writes node labels so consumer
+# Deployments can gate on driver readiness.
+#
+# This is the canonical PRODUCTION deployment path. The docker-compose path at
+# the repo root remains supported for dev / single-host operator use; see
+# docs/install-workflow.md for the Path A vs Path B split.
+#
+# Consumer contract (what to put on your vLLM / workload Deployment):
+#   spec.nodeSelector:    nvidia.driver/state: ready
+#   spec.runtimeClassName: nvidia
+#   spec.containers[].env: NVIDIA_VISIBLE_DEVICES=all
+#                          NVIDIA_DRIVER_CAPABILITIES=compute,utility
+# Full contract + failure modes + worked example: docs/consumer-contract.md.
+#
+# Prerequisites on each node (one-shot host bring-up):
+#   sudo scripts/apply.sh
+# This installs the kernel cmdline, modprobe.d, bridge-link-cap service,
+# udev rules, and on k3s hosts also configures the containerd nvidia runtime +
+# creates the cluster-side RuntimeClass.
 #
 # Apply:
 #   kubectl apply -f k8s/daemonset.yaml
+#   kubectl rollout status daemonset/nvidia-driver-injector -n kube-system
 #
-# This loads the patched nvidia.ko into each matching node's host kernel.
-# Pairs naturally with NVIDIA's device-plugin DaemonSet (separate); together
-# they replace the GPU Operator's Driver+Toolkit pair for hardware that needs
-# our specific 7-patch series.
+# Verify:
+#   kubectl get nodes -L nvidia.driver/state,nvidia.driver/version
+#   # expect:  NAME   STATE  VERSION
+#   #          obpc   ready  595.71.05-aorus.14
 #
-# Node selection:
-#   nodes must have label `apnex.com.au/aorus-egpu=true` to opt in. Set with:
-#     kubectl label node <NODE> apnex.com.au/aorus-egpu=true
-#
-# Prerequisites on each selected node:
-#   - kernel cmdline tuned per this repo's scripts/apply.sh
-#     (iommu=off, thunderbolt.host_reset=false, pci=resource_alignment=...)
-#   - kernel-devel installed (host /lib/modules/<kver>/build populated)
-#   - eGPU enumerated; bridge-link-cap LnkCtl2 cap applied
-#   - nvidia NOT auto-loaded by any other mechanism on the node
+# Image:
+#   apnex/nvidia-driver-injector:595.71.05-aorus.14 (built locally with
+#   `docker build`; on k3s, import to containerd with
+#   `docker save <image> | sudo k3s ctr images import -`).
+#   imagePullPolicy=IfNotPresent so a missing registry never blocks startup.
 
+---
+# ---------------------------------------------------------------------------
+# RBAC — SA + ClusterRole + ClusterRoleBinding for node-label writes.
+# The entrypoint runs `kubectl label nodes <self> nvidia.driver/state=ready`
+# after a successful module load, and unconditionally removes both labels in
+# the `uninstall` subcommand. That requires `patch` on the `nodes` resource.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nvidia-driver-injector
+  namespace: kube-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nvidia-driver-injector
+rules:
+  # `patch` is enough to add / remove labels via `kubectl label`. `get` is
+  # used by the entrypoint to read back the post-write state for the log line.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nvidia-driver-injector
+subjects:
+  - kind: ServiceAccount
+    name: nvidia-driver-injector
+    namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nvidia-driver-injector
+
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -37,74 +93,100 @@ spec:
         app.kubernetes.io/name: nvidia-driver-injector
         app.kubernetes.io/component: kernel-driver
     spec:
-      # Only run on opted-in GPU nodes.
-      nodeSelector:
-        apnex.com.au/aorus-egpu: "true"
-      # Tolerate common GPU node taints.
+      serviceAccountName: nvidia-driver-injector
+      # Run on every node. Single-node host today; if you later add nodes
+      # without an eGPU, add a nodeSelector here. The container exits cleanly
+      # at the PCI gate when no matching GPU is found, so a stray pod on a
+      # GPU-less node is harmless (it sleeps + restarts; never labels).
+      nodeSelector: {}
+      # Match any node taints — on a single-node k3s the control-plane carries
+      # the standard taints and we still need to run there.
       tolerations:
-        - key: nvidia.com/gpu
-          operator: Exists
-          effect: NoSchedule
-        - key: node.kubernetes.io/not-ready
-          operator: Exists
-          effect: NoExecute
-      # Use host PID + network — needed so insmod into host kernel works
-      # cleanly and modules show up in host's /proc/modules.
+        - operator: Exists
+      # hostPID so modprobe / depmod / udevadm see the host's process + module
+      # namespace; without it `grep ^nvidia /proc/modules` reads the
+      # container's PID-1 view and reports nothing.
       hostPID: true
-      hostNetwork: true
+      # hostNetwork is NOT required (the API server is reachable via the
+      # in-cluster Service DNS that kubelet injects), but kubectl needs the
+      # KUBERNETES_SERVICE_HOST env that the pod gets automatically. Leave
+      # hostNetwork off to keep the pod's network namespace small.
       containers:
         - name: driver
           image: apnex/nvidia-driver-injector:595.71.05-aorus.14
           imagePullPolicy: IfNotPresent
-          # Privileged — must load kernel modules + write PCI sysfs.
-          # This is the same security posture as NVIDIA's own driver pods.
+          # Privileged + SYS_MODULE — load kernel modules + write PCI sysfs.
+          # Same security posture as NVIDIA's own driver DaemonSet.
           securityContext:
             privileged: true
+          # Pod-level injection: tell the entrypoint to write the node label
+          # after a successful load (and remove it on `uninstall`). Off-switch:
+          # set to "0" if you want to run the injector standalone without
+          # touching cluster state (e.g. for debugging on a single node).
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: INJECTOR_WRITE_NODE_LABEL
+              value: "1"
           volumeMounts:
-            - name: lib-modules
-              mountPath: /lib/modules
-            - name: usr-src
-              mountPath: /usr/src
-              readOnly: true
-            - name: dev
-              mountPath: /dev
-            - name: sys
-              mountPath: /sys
-          # Liveness: verify the patched build is still loaded. If something
-          # unloaded nvidia (rare), restart the pod to reload.
+            # Bind-mounts mirror docker-compose.yml so behaviour is identical
+            # across the two deployment paths.
+            - { name: lib-modules,   mountPath: /lib/modules }
+            - { name: usr-src,       mountPath: /usr/src,         readOnly: true }
+            - { name: sys,           mountPath: /sys }
+            - { name: proc,          mountPath: /proc }
+            - { name: dev,           mountPath: /dev }
+            - { name: etc-modprobe,  mountPath: /etc/modprobe.d,  readOnly: true }
+            - { name: etc-group,     mountPath: /etc/group,       readOnly: true }
+            - { name: lib-firmware,  mountPath: /lib/firmware }
+          # Liveness: nvidia module still loaded? Restart the pod (which
+          # re-runs the entrypoint) if not. 120s initial delay covers the
+          # cold-build path (~60-90s on this host).
           livenessProbe:
             exec:
               command:
                 - /bin/sh
                 - -c
-                - 'grep -q "^nvidia " /proc/modules && [ -r /sys/module/nvidia/version ]'
-            initialDelaySeconds: 120     # build can take ~60-90s on first run
+                - '[ -e /sys/module/nvidia/version ]'
+            initialDelaySeconds: 180
             periodSeconds: 60
             failureThreshold: 3
-          # Readiness: nvidia loaded + GPU bound.
+          # Readiness: same check, faster cadence. Pod READY is what kubelet
+          # surfaces as the DaemonSet `numberReady` count; consumers should
+          # rely on the node LABEL (set by the entrypoint after the full
+          # load + bind + perms + persistence-engage sequence), not on pod
+          # READY alone.
           readinessProbe:
             exec:
               command:
                 - /bin/sh
                 - -c
-                - 'grep -q "^nvidia " /proc/modules && ls /sys/bus/pci/drivers/nvidia/0000:04:00.0 >/dev/null 2>&1'
-            initialDelaySeconds: 90
+                - '[ -e /sys/module/nvidia/version ]'
+            initialDelaySeconds: 120
             periodSeconds: 15
+          # No CPU / mem limits on the single-node host running essential
+          # infra; minimal requests so the scheduler keeps headroom.
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
       volumes:
-        - name: lib-modules
-          hostPath:
-            path: /lib/modules
-        - name: usr-src
-          hostPath:
-            path: /usr/src
-        - name: dev
-          hostPath:
-            path: /dev
-        - name: sys
-          hostPath:
-            path: /sys
-  # Reasonable rolling update — pods are independent per node.
+        - { name: lib-modules,  hostPath: { path: /lib/modules } }
+        - { name: usr-src,      hostPath: { path: /usr/src } }
+        - { name: sys,          hostPath: { path: /sys } }
+        - { name: proc,         hostPath: { path: /proc } }
+        - { name: dev,          hostPath: { path: /dev } }
+        - { name: etc-modprobe, hostPath: { path: /etc/modprobe.d } }
+        - { name: etc-group,    hostPath: { path: /etc/group, type: File } }
+        - { name: lib-firmware, hostPath: { path: /lib/firmware } }
   updateStrategy:
+    # Rolling update is largely cosmetic for this DaemonSet — the container is
+    # a "container of intent" that sleeps forever once the module is loaded,
+    # and kernel-module state is host state. For a driver-version bump, the
+    # documented path is `kubectl delete daemonset` + `kubectl apply` with the
+    # new image tag; see docs/teardown-workflow.md §Driver upgrade.
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 1

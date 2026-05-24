@@ -47,6 +47,17 @@ RUN apt-get update && \
         psmisc && \
     rm -rf /var/lib/apt/lists/*
 
+# kubectl — used by the entrypoint to write node labels in the k3s /
+# Kubernetes deployment path (Path B in docs/install-workflow.md). Off by
+# default outside a cluster (entrypoint checks KUBERNETES_SERVICE_HOST).
+# Pinned to a recent stable that talks to k3s v1.32+ (Kubernetes 1.29+).
+# Static binary, ~50 MB — rounding error vs the rest of the image.
+ARG KUBECTL_VERSION=v1.32.2
+RUN curl -fsSL -o /usr/local/bin/kubectl \
+        "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/$(dpkg --print-architecture)/kubectl" && \
+    chmod +x /usr/local/bin/kubectl && \
+    /usr/local/bin/kubectl version --client=true >/dev/null
+
 # Build nvidia-modprobe from upstream — small C program (~200 LoC), GPL-2.0,
 # pinned to the same tag as the kernel module. Used at runtime to materialise
 # /dev/nvidia-uvm-tools after module load.

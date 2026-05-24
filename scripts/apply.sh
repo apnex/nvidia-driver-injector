@@ -23,18 +23,29 @@
 #      access group) and rewrite NVreg_DeviceFileGID in modprobe.d to
 #      match the host's actual GID.
 #   9. systemctl daemon-reload + udev reload.
+#  10. k3s / Kubernetes integration (only if k3s is present on the host):
+#      a) `nvidia-ctk runtime configure --runtime=containerd` so containerd
+#         picks up the nvidia runtime handler (idempotent — no-op on
+#         subsequent runs once the config drop-in is in place).
+#      b) Install the cluster-side `RuntimeClass nvidia` so consumer
+#         Deployments can `runtimeClassName: nvidia`.
+#      Skipped entirely with `--skip-k3s` (docker-compose-only operators).
 #
 # What this does NOT do:
 #   - Build or load nvidia.ko. That's the injector container's job
-#     (Layer 2). Once this script exits, `docker compose up -d` in the
-#     repo root will load the patched module via modprobe, picking up
-#     the modprobe.d options this script just installed.
+#     (Layer 2). Once this script exits, EITHER `docker compose up -d`
+#     in the repo root OR `kubectl apply -f k8s/daemonset.yaml` will load
+#     the patched module via modprobe, picking up the modprobe.d options
+#     this script just installed.
 #
 # Flags:
 #   --no-act         Print every action without making changes.
 #   --force-coexist  Skip the aorus-egpu conflict check (use with care).
 #   --skip-cmdline   Don't touch kernel cmdline (you'll manage it yourself).
 #   --skip-icd       Don't touch Vulkan/EGL/OpenCL ICD files.
+#   --skip-k3s       Don't touch k3s containerd config or RuntimeClass.
+#                    Use this for docker-compose-only deployments, or when
+#                    you manage k3s integration via your own config tool.
 #
 # This script lives in the nvidia-driver-injector repo; it is a
 # *cleanroom* equivalent of the Layer 1 bits of apnex/aorus-5090-egpu's
@@ -49,6 +60,7 @@ NO_ACT=0
 FORCE_COEXIST=0
 SKIP_CMDLINE=0
 SKIP_ICD=0
+SKIP_K3S=0
 
 for arg in "$@"; do
     case "$arg" in
@@ -56,6 +68,7 @@ for arg in "$@"; do
         --force-coexist) FORCE_COEXIST=1 ;;
         --skip-cmdline)  SKIP_CMDLINE=1 ;;
         --skip-icd)      SKIP_ICD=1 ;;
+        --skip-k3s)      SKIP_K3S=1 ;;
         -h|--help)
             sed -n '/^# apply\.sh/,/^set -euo/p' "$0" | sed 's/^# \?//' | head -n -1
             exit 0
@@ -85,7 +98,7 @@ act() {
 # ===========================================================================
 # Step 0: conflict check
 # ===========================================================================
-step "0/9 conflict check (apnex/aorus-5090-egpu artifacts?)"
+step "0/10 conflict check (apnex/aorus-5090-egpu artifacts?)"
 
 if [[ "$FORCE_COEXIST" -eq 1 ]]; then
     yellow "  --force-coexist set; skipping conflict check (you own the consequences)"
@@ -100,7 +113,7 @@ fi
 # ===========================================================================
 # Step 1: kernel cmdline
 # ===========================================================================
-step "1/9 kernel cmdline (grubby)"
+step "1/10 kernel cmdline (grubby)"
 
 REQUIRED_ARGS=(
     "iommu=off"
@@ -177,7 +190,7 @@ fi
 # ===========================================================================
 # Step 2: kernel-devel
 # ===========================================================================
-step "2/9 kernel-devel for $(uname -r)"
+step "2/10 kernel-devel for $(uname -r)"
 
 KSRC="/lib/modules/$(uname -r)/build"
 if [[ -e "$KSRC/Makefile" ]]; then
@@ -199,7 +212,7 @@ fi
 # ===========================================================================
 # Step 3: gpu group + rewrite NVreg_DeviceFileGID in modprobe.d
 # ===========================================================================
-step "3/9 gpu UNIX group + GID-rewrite in modprobe.d"
+step "3/10 gpu UNIX group + GID-rewrite in modprobe.d"
 
 if getent group gpu >/dev/null 2>&1; then
     GPU_GID=$(getent group gpu | cut -d: -f3)
@@ -213,7 +226,7 @@ fi
 # ===========================================================================
 # Step 4: modprobe.d
 # ===========================================================================
-step "4/9 /etc/modprobe.d/nvidia-driver-injector.conf"
+step "4/10 /etc/modprobe.d/nvidia-driver-injector.conf"
 
 # Clean up the aorus-5090-egpu transition stub if it exists. remove.sh
 # from that repo installs zz-aorus-egpu-blacklist.conf as a temporary
@@ -243,7 +256,7 @@ fi
 # ===========================================================================
 # Step 5: systemd unit + binary for bridge-link-cap
 # ===========================================================================
-step "5/9 nvidia-driver-injector-bridge-link-cap (binary + systemd unit)"
+step "5/10 nvidia-driver-injector-bridge-link-cap (binary + systemd unit)"
 
 act "install -m 0755 -D ${HOST_FILES}/usr/local/sbin/nvidia-driver-injector-bridge-link-cap /usr/local/sbin/nvidia-driver-injector-bridge-link-cap"
 act "install -m 0644 -D ${HOST_FILES}/etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service /etc/systemd/system/nvidia-driver-injector-bridge-link-cap.service"
@@ -259,7 +272,7 @@ green "  bridge-link-cap installed + enabled"
 #   80-nvidia-driver-injector-disable-audio.rules — unbind the eGPU's HDMI
 #       audio function (compute-only host; keeps it out of D0 and off the
 #       snd_hda_intel autoload path)
-step "6/9 udev rules"
+step "6/10 udev rules"
 
 act "install -m 0644 -D ${HOST_FILES}/etc/udev/rules.d/79-nvidia-driver-injector.rules /etc/udev/rules.d/79-nvidia-driver-injector.rules"
 act "install -m 0644 -D ${HOST_FILES}/etc/udev/rules.d/80-nvidia-driver-injector-disable-audio.rules /etc/udev/rules.d/80-nvidia-driver-injector-disable-audio.rules"
@@ -270,7 +283,7 @@ green "  udev rules installed (perms + audio-disable)"
 # ===========================================================================
 # Step 7: Vulkan/EGL/OpenCL ICD disable (compute-only posture)
 # ===========================================================================
-step "7/9 Vulkan/EGL/OpenCL ICD disable"
+step "7/10 Vulkan/EGL/OpenCL ICD disable"
 
 if [[ "$SKIP_ICD" -eq 1 ]]; then
     yellow "  --skip-icd set; not touching ICD files"
@@ -294,32 +307,9 @@ else
 fi
 
 # ===========================================================================
-# Step 8: summary + reboot guidance
+# Step 8: apply bridge-link-cap now (without rebooting)
 # ===========================================================================
-step "8/9 summary"
-
-green "Layer 1 install complete."
-echo
-echo "Next steps:"
-if [[ "${CMDLINE_CHANGED:-0}" -eq 1 ]]; then
-    yellow "  1. Reboot to apply kernel cmdline changes:"
-    echo "       sudo reboot"
-    echo "  2. After reboot, bring up the injector container:"
-else
-    echo "  1. Bring up the injector container:"
-fi
-echo "       cd ${REPO_ROOT}"
-echo "       docker compose up -d"
-echo
-echo "  2. Once the injector container reports healthy, bring up your"
-echo "     workload (e.g., vLLM):"
-echo "       cd /path/to/your/workload && docker compose up -d"
-echo
-
-# ===========================================================================
-# Step 9: optional kick-the-bridge-cap-now if no reboot needed
-# ===========================================================================
-step "9/9 apply bridge-link-cap now (without rebooting)"
+step "8/10 apply bridge-link-cap now (without rebooting)"
 
 if [[ "${CMDLINE_CHANGED:-0}" -eq 0 && "$NO_ACT" -eq 0 ]]; then
     if /usr/local/sbin/nvidia-driver-injector-bridge-link-cap status 2>/dev/null | grep -q '^bridge='; then
@@ -331,3 +321,115 @@ if [[ "${CMDLINE_CHANGED:-0}" -eq 0 && "$NO_ACT" -eq 0 ]]; then
 else
     yellow "  reboot pending or dry-run; skipping live apply"
 fi
+
+# ===========================================================================
+# Step 9: k3s / Kubernetes integration (containerd config + RuntimeClass)
+# ===========================================================================
+# Detects k3s presence (binary OR systemd unit). When present:
+#   a) `nvidia-ctk runtime configure --runtime=containerd` adds the nvidia
+#      runtime handler to containerd's config. k3s reads its containerd config
+#      from /var/lib/rancher/k3s/agent/etc/containerd/config.toml and merges
+#      drop-ins from config-v3.toml.d/. nvidia-ctk targets /etc/containerd by
+#      default; on k3s, the canonical pattern is the drop-in template
+#      (/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl) which
+#      k3s also auto-merges when the nvidia-container-runtime binary is
+#      present at /usr/bin/nvidia-container-runtime. We let k3s auto-detect
+#      where it can; otherwise nvidia-ctk's idempotent config drop-in covers
+#      vanilla containerd hosts.
+#   b) Cluster-side `RuntimeClass nvidia` so consumer pods can opt in with
+#      `spec.runtimeClassName: nvidia`. Idempotent via `kubectl apply`.
+#
+# Skipped entirely with `--skip-k3s`.
+step "9/10 k3s integration (containerd runtime + RuntimeClass)"
+
+if [[ "$SKIP_K3S" -eq 1 ]]; then
+    yellow "  --skip-k3s set; not touching k3s containerd config or RuntimeClass"
+elif ! command -v k3s >/dev/null 2>&1 && ! systemctl list-unit-files k3s.service 2>/dev/null | grep -q '^k3s\.service'; then
+    yellow "  k3s not present on this host; skipping k3s integration"
+    yellow "  (re-run with k3s installed, or pass --skip-k3s to silence this)"
+else
+    green "  k3s detected"
+
+    # (a) containerd configuration. k3s auto-merges the nvidia runtime when
+    # /usr/bin/nvidia-container-runtime exists, so on a k3s host this is
+    # often already wired up. Run nvidia-ctk anyway — it's idempotent and
+    # covers operators who installed k3s before nvidia-container-toolkit.
+    if command -v nvidia-ctk >/dev/null 2>&1; then
+        act "nvidia-ctk runtime configure --runtime=containerd"
+        # Verify post-config: either k3s's own containerd config OR
+        # /etc/containerd/config.toml should reference the nvidia handler.
+        k3s_cfg="/var/lib/rancher/k3s/agent/etc/containerd/config.toml"
+        std_cfg="/etc/containerd/config.toml"
+        found=0
+        for cfg in "$k3s_cfg" "$std_cfg"; do
+            if [[ -f "$cfg" ]] && grep -q "runtimes\.['\"\]nvidia['\"\]" "$cfg" 2>/dev/null; then
+                green "    nvidia handler present in ${cfg}"
+                found=1
+            fi
+        done
+        if [[ "$found" -eq 0 ]]; then
+            yellow "    nvidia handler not yet visible in containerd config;"
+            yellow "    a containerd restart may be needed (sudo systemctl restart k3s)"
+        fi
+    else
+        yellow "  nvidia-ctk not installed — install nvidia-container-toolkit first"
+        yellow "  (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)"
+    fi
+
+    # (b) RuntimeClass — cluster-side resource so consumers can request the
+    # nvidia runtime via spec.runtimeClassName. We talk to the local k3s API
+    # via the embedded kubeconfig at /etc/rancher/k3s/k3s.yaml.
+    if command -v kubectl >/dev/null 2>&1; then
+        kubeconfig="/etc/rancher/k3s/k3s.yaml"
+        if [[ ! -r "$kubeconfig" ]]; then
+            yellow "    ${kubeconfig} not readable; skipping RuntimeClass install"
+            yellow "    (k3s may not be running yet; re-run after k3s starts)"
+        else
+            if KUBECONFIG="$kubeconfig" kubectl get runtimeclass nvidia >/dev/null 2>&1; then
+                green "    RuntimeClass/nvidia already present"
+            else
+                # printf-piped form so `act` (which uses eval) sees one
+                # composable command string.
+                rc_yaml='apiVersion: node.k8s.io/v1\nkind: RuntimeClass\nmetadata:\n  name: nvidia\nhandler: nvidia\n'
+                act "printf '${rc_yaml}' | KUBECONFIG=${kubeconfig} kubectl apply -f -"
+                green "    RuntimeClass/nvidia installed"
+            fi
+        fi
+    else
+        yellow "    kubectl not installed; cannot install RuntimeClass automatically."
+        yellow "    Manually: kubectl apply -f - <<EOF"
+        yellow "      apiVersion: node.k8s.io/v1"
+        yellow "      kind: RuntimeClass"
+        yellow "      metadata: { name: nvidia }"
+        yellow "      handler: nvidia"
+        yellow "    EOF"
+    fi
+fi
+
+# ===========================================================================
+# Step 10: summary + next-step guidance
+# ===========================================================================
+step "10/10 summary"
+
+green "Layer 1 install complete."
+echo
+echo "Next steps:"
+if [[ "${CMDLINE_CHANGED:-0}" -eq 1 ]]; then
+    yellow "  1. Reboot to apply kernel cmdline changes:"
+    echo "       sudo reboot"
+    echo "  2. After reboot, bring up the injector — pick a path:"
+else
+    echo "  1. Bring up the injector — pick a path:"
+fi
+echo "       # Path A (dev / single-host): docker-compose"
+echo "       cd ${REPO_ROOT} && docker compose up -d"
+echo
+echo "       # Path B (recommended for production): k3s DaemonSet"
+echo "       cd ${REPO_ROOT} && kubectl apply -f k8s/daemonset.yaml"
+echo "       kubectl rollout status -n kube-system ds/nvidia-driver-injector"
+echo
+echo "  2. Once ready, bring up your GPU consumer (e.g., vLLM):"
+echo "     - Path A: cd /path/to/workload && docker compose up -d"
+echo "     - Path B: see docs/consumer-contract.md (nodeSelector +"
+echo "               runtimeClassName: nvidia)"
+echo

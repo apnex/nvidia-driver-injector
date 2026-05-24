@@ -32,6 +32,68 @@ warn() { printf '[nvidia-driver-injector] WARN: %s\n' "$*" >&2; }
 fail() { printf '[nvidia-driver-injector] FAIL: %s\n' "$*" >&2; exit 1; }
 
 # ============================================================================
+# Node-label writer (k3s / Kubernetes consumer contract)
+# ============================================================================
+# After a successful module load, label the node so consumer Deployments can
+# gate their nodeSelector on driver readiness. On graceful uninstall, remove
+# both labels so consumers stop scheduling immediately.
+#
+# Activation:
+#   - Auto-on when the pod is in-cluster (KUBERNETES_SERVICE_HOST set) AND a
+#     bearer token mount exists at the SA's standard path.
+#   - Hard off when INJECTOR_WRITE_NODE_LABEL=0 (operator override; useful for
+#     debugging the injector standalone without touching cluster state).
+#
+# Labels written / removed:
+#   nvidia.driver/state=ready        binary signal — "is the patched module loaded?"
+#   nvidia.driver/version=<version>  richer match — read from /sys/module/nvidia/version
+#
+# Implementation: kubectl (baked into the image; ~50 MB on a 700+ MB base —
+# rounding error). The SA + ClusterRole + ClusterRoleBinding in
+# k8s/daemonset.yaml grant `get,patch` on nodes; nothing else.
+node_label_should_run() {
+    [[ "${INJECTOR_WRITE_NODE_LABEL:-1}" != "0" ]] || return 1
+    [[ -n "${KUBERNETES_SERVICE_HOST:-}" ]] || return 1
+    [[ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]] || return 1
+    command -v kubectl >/dev/null 2>&1 || {
+        warn "node-label write requested but kubectl missing from image"
+        return 1
+    }
+    [[ -n "${NODE_NAME:-}" ]] || {
+        warn "NODE_NAME env not set (DaemonSet should inject it from fieldRef);
+       skipping node-label write"
+        return 1
+    }
+    return 0
+}
+
+cmd_label_node() {
+    node_label_should_run || return 0
+    local version="$1"   # e.g. 595.71.05-aorus.14
+    log "labelling node ${NODE_NAME} (nvidia.driver/state=ready, version=${version}) ..."
+    if kubectl label nodes "$NODE_NAME" \
+            "nvidia.driver/state=ready" \
+            "nvidia.driver/version=${version}" \
+            --overwrite >/dev/null 2>&1; then
+        log "node-label ✓ — consumers can now schedule against this node"
+    else
+        warn "kubectl label nodes ${NODE_NAME} failed — check RBAC
+       (need ClusterRole granting get,patch on nodes for SA
+       ${POD_NAMESPACE:-kube-system}/nvidia-driver-injector)"
+    fi
+}
+
+cmd_unlabel_node() {
+    node_label_should_run || return 0
+    log "removing node labels on ${NODE_NAME} ..."
+    # Trailing `-` deletes the label. Two separate kubectl calls so a missing
+    # label on one doesn't block the other.
+    kubectl label nodes "$NODE_NAME" "nvidia.driver/state-"   >/dev/null 2>&1 || true
+    kubectl label nodes "$NODE_NAME" "nvidia.driver/version-" >/dev/null 2>&1 || true
+    log "node-label ✓ — labels removed (consumers will stop scheduling)"
+}
+
+# ============================================================================
 # Subcommand: uninstall
 # ============================================================================
 # Graceful host-side teardown of the nvidia kernel modules. Safe-by-default:
@@ -50,6 +112,13 @@ cmd_uninstall() {
     log "=========================================="
     log "  UNINSTALL — graceful host-side teardown"
     log "=========================================="
+
+    # First: remove the node labels so consumers stop scheduling onto this
+    # node BEFORE we touch the module. Order matters — if rmmod takes a few
+    # seconds and a fresh pod schedules in that window, it'll fail to open
+    # /dev/nvidia*. Doing this unconditionally is safe (no-op if not in
+    # cluster, no-op if labels never existed).
+    cmd_unlabel_node
 
     # Pre-flight 1: nothing loaded at all? Nothing to do.
     local any_loaded=false
@@ -495,6 +564,15 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 else
     warn "nvidia-smi missing from image — skipping persistence engagement (GPU will stay lazy)"
 fi
+
+# ============================================================================
+# Step 8: Publish node readiness (k3s consumer contract)
+# ============================================================================
+# Now that the full bring-up (load + bind + perms + persistence-engage) is
+# complete, publish the node label that consumer Deployments (vLLM etc.) gate
+# their nodeSelector on. See docs/consumer-contract.md.
+
+cmd_label_node "${loaded_version:-unknown}"
 
 # ============================================================================
 # Done — sleep as container of intent

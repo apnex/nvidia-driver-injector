@@ -2,9 +2,9 @@
 
 > **Status:** current as of 2026-05-24.
 > Most target-architecture gaps have been closed (see "Gaps" at the end).
-> Layer 1 surface: 1 systemd service + 1 modprobe.d + 2 udev rules + kernel cmdline + ICD disable.
-> Layer 2: 1 container (`nvidia-driver-injector`), folds GPU engagement into its entrypoint.
-> Layer 3: workload (vLLM / OpenCode / etc.), independent compose stack.
+> Layer 1 surface: 1 systemd service + 1 modprobe.d + 2 udev rules + kernel cmdline + ICD disable + (k3s) RuntimeClass + containerd nvidia handler.
+> Layer 2: 1 container (`nvidia-driver-injector`), folds GPU engagement into its entrypoint. Same image runs under docker-compose (Path A) or as a k3s DaemonSet (Path B).
+> Layer 3: workload (vLLM / OpenCode / etc.), independent compose stack OR Kubernetes Deployment that satisfies the [consumer contract](consumer-contract.md).
 >
 > Companion: the [`diag/`](../diag/) container is a **separate** image
 > (`apnex/nvidia-driver-diag`) — own lifecycle, own failure domain.
@@ -12,6 +12,8 @@
 
 For the operator-facing install / use / test / remove journeys, start at the
 top-level [`README.md`](../README.md). This doc is the design reference.
+For the producer / consumer contract on Path B, see
+[`consumer-contract.md`](consumer-contract.md).
 
 ## TL;DR
 
@@ -45,6 +47,25 @@ That repo deploys the same patched driver via host systemd services
 (no container).
 You pick **one** of the two deployment patterns —
 they are NOT meant to coexist on the same host.
+
+### Path A vs Path B (Layer 2 substrate)
+
+The injector image is substrate-neutral. The same container runs under either
+of two orchestration substrates; only Layer 2's "how is the pod scheduled
+and how do consumers reach it" differs.
+
+| Aspect | Path A — docker-compose | Path B — k3s DaemonSet |
+|---|---|---|
+| Substrate | Docker daemon | k3s containerd |
+| Scheduling | `docker compose up -d` | `kubectl apply -f k8s/daemonset.yaml` |
+| Image source | local docker daemon cache | local k3s containerd cache (`k3s ctr images import`) |
+| Consumer wiring | `depends_on: { driver-injector: { condition: service_healthy } }` | node label `nvidia.driver/state=ready` + `runtimeClassName: nvidia` |
+| Producer/consumer contract | Implicit (compose-side healthcheck) | Explicit ([`consumer-contract.md`](consumer-contract.md)) |
+| When to use | Dev / test / single-host operator | Production |
+
+Path B is the recommended production path. Path A stays first-class for dev
+work and for hosts that don't run k3s. Both paths share Layer 1 (`apply.sh`)
+unchanged; `apply.sh --skip-k3s` collapses to a Path-A-only install.
 
 ## The architecture
 
@@ -82,6 +103,8 @@ they are NOT meant to coexist on the same host.
 │   - Vulkan/EGL/OpenCL loader disable (rename → .disabled)       │
 │   - udev: 79-...rules (/dev/nvidia* group perms) +              │
 │     80-...rules (HDMI audio function unbind, compute-only)      │
+│   - (Path B only) nvidia-ctk runtime configure --runtime=       │
+│     containerd  +  RuntimeClass nvidia                          │
 └─────────────────────────────────────────────────────────────────┘
 ┌─────────────────────────────────────────────────────────────────┐
 │ Layer 0: Hardware + firmware                                    │
@@ -127,11 +150,14 @@ Everything else can be containerised.
 | Bridge LnkCtl2 cap (H17) | Layer 1 (systemd service) | Must run `Before=docker.service` |
 | Vulkan/EGL/OpenCL ICD disable | Layer 1 (one-shot rename) | Compute-only posture is permanent; lives in `/usr/share/vulkan/icd.d/` etc. |
 | udev rules for `/dev/nvidia*` group + HDMI audio unbind | Layer 1 | Owned by host udev (79-...rules + 80-...rules) |
+| containerd nvidia handler (Path B) | Layer 1 (`nvidia-ctk runtime configure`) | k3s reads its containerd config at startup; must be in place before the DaemonSet pod schedules |
+| `RuntimeClass nvidia` (Path B) | Layer 1 (`kubectl apply` from `apply.sh`) | Cluster-scope resource; consumers gate `runtimeClassName: nvidia` on its existence |
 | **nvidia.ko build + load** | **Layer 2 (this container)** | The whole point of the injector |
 | **`/dev/nvidia*` perms post-load** | **Layer 2** | Trivial chmod after modprobe |
 | **`nvidia-smi -pm 1`** | **Layer 2** | Engages GPU (GSP / PMU / thermal subsystem) + sets driver persistence flag. Daemon-less successor to `nvidia-persistenced`. |
-| **Module unload (uninstall)** | **Layer 2** | Explicit `uninstall` subcommand — never auto on container exit |
-| Workload (vLLM etc.) | Layer 3 | Independent restart policy |
+| **Node label write (Path B)** | **Layer 2** | Entrypoint's `cmd_label_node` runs after successful load; writes `nvidia.driver/state=ready` + `nvidia.driver/version=<v>`. SA + ClusterRole shipped in `k8s/daemonset.yaml` |
+| **Module unload (uninstall)** | **Layer 2** | Explicit `uninstall` subcommand — never auto on container exit. Also removes node labels (Path B) before rmmod |
+| Workload (vLLM etc.) | Layer 3 | Independent restart policy; Path B consumers follow the [consumer contract](consumer-contract.md) |
 
 ## Workflows
 
@@ -213,11 +239,12 @@ Surfaced 2026-05-10 after a reboot incident
 | 4 | No `chown` / `chmod` of `/dev/nvidia*` post-load | Permissions are 0666 root:root (works but wide open) | **CLOSED** — entrypoint chgrps to `gpu` and chmods 0660 if the group exists on host. |
 | 5 | No GPU engagement inside container — lazy state wastes 41 W idle | Cooler at floor RPM, GSP not loaded, idle power ~63 W vs ~22 W proper P8 (measured 2026-05-12 on this stack) | **CLOSED 2026-05-12** — Dockerfile extracts `nvidia-smi` + `libnvidia-ml.so` from NVIDIA's 595.71.05 tarball (+4 MB image); entrypoint runs `nvidia-smi -pm 1` after bind. Daemon-less successor to `nvidia-persistenced`. |
 | 6 | HDMI audio function binds to `snd_hda_intel`, sits in D0 with no purpose | Continuous power draw + potential ASPM/PM perturbation on the eGPU PCI tree | **CLOSED 2026-05-12** — new udev rule `80-nvidia-driver-injector-disable-audio.rules` sets `driver_override="nvidia-driver-injector-disabled"` on the audio function (`10de:22e8`) and unbinds it. |
-| 7 | No `depends_on` healthcheck linking workload → injector | Workload can crash-loop while injector still warming up | OPEN — to be documented in workload-side compose examples |
+| 7 | No `depends_on` healthcheck linking workload → injector | Workload can crash-loop while injector still warming up | **CLOSED for Path B (2026-05-24)** — k3s DaemonSet writes node label `nvidia.driver/state=ready` after successful load; consumers gate `nodeSelector` on it. See [`consumer-contract.md`](consumer-contract.md). Path A retains the documented `depends_on` pattern. |
 | 8 | `/dev/nvidia-uvm*` perm drift to 666 root:root | Wider-than-intended access (still constrained by ICD disable + gpu group on `/dev/nvidia0`) | OPEN — `nvidia-modprobe -u -c 0` mknod creates with default perms; udev rule fires too late. Worked-around by container's chmod/chgrp at startup. |
 
-Gaps 1-6 closed; Gap 7 is the remaining workload-side polish;
-Gap 8 is a perm-drift edge case worth chasing in a future session.
+Gaps 1-7 closed (Gap 7 closed for Path B via the node-label contract; Path A
+retains the documented `depends_on` pattern); Gap 8 is a perm-drift edge case
+worth chasing in a future session.
 
 ## Out-of-scope for this repo
 

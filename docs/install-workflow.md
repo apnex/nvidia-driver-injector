@@ -6,15 +6,33 @@ this doc is the reference.
 
 For the underlying three-layer design, see [`architecture.md`](architecture.md).
 For teardown / uninstall, see [`teardown-workflow.md`](teardown-workflow.md).
+For the producer / consumer contract used by the k3s path, see
+[`consumer-contract.md`](consumer-contract.md).
 
-## Prerequisites
+## Two install paths
+
+| Path | When | Substrate | Status |
+|---|---|---|---|
+| **Path A — docker-compose** | Single-host dev / test / operator ad-hoc | Docker only | Supported |
+| **Path B — k3s DaemonSet** | Production; clustered orchestration | k3s (or any Kubernetes) | **Recommended** |
+
+Both paths share Layer 1 (`scripts/apply.sh`). They diverge at Layer 2: Path A
+runs the injector as a docker-compose service; Path B runs it as a DaemonSet
+in k3s. Pick one. They are not meant to run side-by-side on the same node
+(both would race to load `nvidia.ko`).
+
+## Prerequisites (both paths)
 
 - **Hardware:** AORUS RTX 5090 eGPU, Thunderbolt-4-capable host (reference
   hardware: NUC 15 Pro+), TB4 cable.
 - **OS:** Linux, kernel 6.18+ (tested on Fedora 43 + kernel `6.19.14-200.fc43`
   and Fedora 44 + kernel `7.0.9-204.fc44`). The host scripts handle Fedora and
   Debian/Ubuntu package paths.
-- **Docker:** installed and running (`systemctl is-active docker`).
+- **Container runtime:**
+  - Path A: Docker installed and running (`systemctl is-active docker`).
+  - Path B: k3s installed (`systemctl is-active k3s`) **and**
+    `nvidia-container-toolkit` installed (provides `nvidia-ctk` +
+    `nvidia-container-runtime`).
 - **No active `aorus-5090-egpu` install on this host** — the two are
   alternative geometries. `apply.sh` refuses to install on top of one (override
   with `--force-coexist`; see [Migration](#migration-from-aorus-5090-egpu)).
@@ -22,9 +40,7 @@ For teardown / uninstall, see [`teardown-workflow.md`](teardown-workflow.md).
   user-configurable for TB / PCIe; see project memory
   `feedback_no_bios_options_nuc15`).
 
-## Fresh-host install
-
-### Step 0 — Connect + authorise the eGPU
+## Step 0 — Connect + authorise the eGPU (both paths)
 
 ```bash
 boltctl list
@@ -41,7 +57,7 @@ Authorisation is persistent across reboots and replugs. If `status: auth-error`
 or the device does not appear, fix Thunderbolt fundamentals first
 (`bolt.service` running, cable seated, eGPU powered, port working).
 
-### Step 1 — Clone the repo
+## Step 1 — Clone the repo (both paths)
 
 ```bash
 sudo git clone https://github.com/apnex/nvidia-driver-injector \
@@ -49,14 +65,14 @@ sudo git clone https://github.com/apnex/nvidia-driver-injector \
 cd /root/nvidia-driver-injector
 ```
 
-### Step 2 — Run Layer 1 host bring-up
+## Step 2 — Layer 1 host bring-up (both paths)
 
 ```bash
 sudo ./scripts/apply.sh
 ```
 
 Idempotent. Refuses to install on a host with `apnex/aorus-5090-egpu`
-artifacts (override: `--force-coexist`). The nine numbered steps in
+artifacts (override: `--force-coexist`). The ten numbered steps in
 `apply.sh` are:
 
 | # | What | Notes |
@@ -69,8 +85,9 @@ artifacts (override: `--force-coexist`). The nine numbered steps in
 | 5 | `nvidia-driver-injector-bridge-link-cap` binary + `.service` | Systemd unit ordered `Before=docker.service`; enabled |
 | 6 | udev rules | `79-…rules` (`/dev/nvidia*` group perms) + `80-…disable-audio.rules` (unbind eGPU HDMI audio function) |
 | 7 | Disable Vulkan / EGL / OpenCL ICDs | Compute-only posture; rename → `*.nvidia-driver-injector-disabled` |
-| 8 | Summary + reboot guidance | Flags reboot-needed if cmdline was modified |
-| 9 | Apply bridge-link-cap immediately | Skipped if reboot pending or eGPU not enumerated; lets `docker compose up` work without rebooting |
+| 8 | Apply bridge-link-cap immediately | Skipped if reboot pending or eGPU not enumerated; lets the injector start without rebooting |
+| 9 | **k3s integration** (Path B only) | If k3s is present: `nvidia-ctk runtime configure --runtime=containerd` + install cluster-side `RuntimeClass nvidia`. Skipped automatically on docker-only hosts; skip explicitly with `--skip-k3s` |
+| 10 | Summary + reboot guidance | Flags reboot-needed if cmdline was modified |
 
 Flags:
 
@@ -79,8 +96,9 @@ Flags:
   unless you understand why the two cannot share a host.
 - `--skip-cmdline` — leave the kernel cmdline alone.
 - `--skip-icd` — leave Vulkan / EGL / OpenCL ICDs alone.
+- `--skip-k3s` — leave containerd / RuntimeClass alone (Path A-only hosts).
 
-### Step 3 — Reboot if instructed
+## Step 3 — Reboot if instructed (both paths)
 
 If `apply.sh` changed the kernel cmdline, its summary will say so:
 
@@ -93,7 +111,14 @@ boot on TB-tunneled hardware, the `bridge-link-cap.service` needs to run
 `Before=docker.service`, and the `install /bin/false` modprobe.d guards
 need to be in place before any auto-load attempt.
 
-### Step 4 — Build + start the injector container
+---
+
+## Path A — docker-compose (dev / test / single-host)
+
+Continue here if you picked Path A. Production deployments should prefer
+[Path B](#path-b--k3s-daemonset-recommended-for-production) below.
+
+### Step 4A — Build + start the injector container
 
 ```bash
 docker compose build              # ~3-5 min cold, ~30s with cached layers
@@ -126,7 +151,7 @@ engage ✓ — persistence_mode + thermal subsystem engaged
 sleeping as container of intent — exit triggers restart policy
 ```
 
-### Step 5 — Verify
+### Step 5A — Verify
 
 Spot checks (each should print the expected one-liner):
 
@@ -142,18 +167,6 @@ ls -la /dev/nvidia0
 
 cat /sys/module/nvidia/parameters/NVreg_TbEgpuRecoverEnable
 # 1
-
-ps -ef | grep -E '\[tb-egpu-qwd-' | grep -v grep
-# [tb-egpu-qwd-0400]   ← bus-loss watchdog kthread, GPU at BDF 04:00
-
-ls /sys/bus/pci/devices/0000:04:00.0/ | grep ^tb_egpu_
-# tb_egpu_qwd_*  +  tb_egpu_recover_*   ← in-driver lever sysfs surface
-
-nvidia-smi --query-gpu=persistence_mode,power.draw --format=csv,noheader
-# Enabled, ~17-22 W     ← engaged P8 (not "Disabled, ~63 W" lazy state)
-
-readlink /sys/bus/pci/devices/0000:04:00.1/driver
-# empty                 ← HDMI audio function unbound (compute-only)
 ```
 
 For the comprehensive 40-check verification, run:
@@ -163,11 +176,7 @@ sudo ./scripts/status.sh
 # Expect: 38 OK, 2 WARN, 0 FAIL (or better)
 ```
 
-The two standing WARNs are benign and documented in the script — they cover
-the `/dev/nvidia-uvm` perm drift (Gap #8 in
-[`architecture.md`](architecture.md)) and one cosmetic detection edge case.
-
-### Step 6 — Bring up your workload (Layer 3, optional)
+### Step 6A — Bring up your workload (Layer 3)
 
 ```bash
 cd /path/to/your/workload          # e.g. /root/vllm
@@ -176,9 +185,93 @@ docker compose up -d
 
 The workload's compose ideally includes
 `depends_on: { driver-injector: { condition: service_healthy } }` to avoid
-crash-looping while the injector warms up. This pattern is **Gap #7** in
-[`architecture.md`](architecture.md) — open until the injector grows a
-healthcheck.
+crash-looping while the injector warms up.
+
+---
+
+## Path B — k3s DaemonSet (recommended for production)
+
+Continue here if you picked Path B. Path B leans on the producer / consumer
+contract documented in [`consumer-contract.md`](consumer-contract.md).
+
+### Step 4B — Build the injector image and import it to containerd
+
+```bash
+docker build -t apnex/nvidia-driver-injector:595.71.05-aorus.14 .
+docker save apnex/nvidia-driver-injector:595.71.05-aorus.14 \
+    | sudo k3s ctr images import -
+```
+
+Why the `ctr images import` step: `docker build` produces images in the docker
+daemon's cache; k3s reads from containerd's own cache. The DaemonSet's
+`imagePullPolicy: IfNotPresent` means a missing image fails the pod with
+`ErrImageNeverPull`, not a registry pull — so the image must be in
+containerd's cache.
+
+(Alternative: build directly with `nerdctl --namespace=k8s.io build`. Less
+moving parts but requires nerdctl on the host.)
+
+### Step 5B — Apply the DaemonSet
+
+```bash
+kubectl apply -f k8s/daemonset.yaml
+kubectl rollout status -n kube-system ds/nvidia-driver-injector
+```
+
+The DaemonSet creates:
+
+- `ServiceAccount/nvidia-driver-injector` (kube-system).
+- `ClusterRole/nvidia-driver-injector` — `get,patch` on `nodes` (for label
+  writes only; no broader cluster permissions).
+- `ClusterRoleBinding/nvidia-driver-injector`.
+- `DaemonSet/nvidia-driver-injector` — one pod per node, `privileged: true`,
+  `hostPID: true`, with the same bind mounts as the docker-compose path.
+
+### Step 6B — Verify
+
+```bash
+# Pod is up + READY (this just means the module loaded — same liveness
+# probe as Path A's docker healthcheck would be).
+kubectl get pods -n kube-system -l app.kubernetes.io/name=nvidia-driver-injector
+
+# Node label written by the entrypoint after successful load.
+kubectl get nodes -L nvidia.driver/state,nvidia.driver/version
+# NAME   STATUS   ROLES           STATE   VERSION
+# obpc   Ready    control-plane   ready   595.71.05-aorus.14
+
+# Module is loaded (same checks as Path A).
+cat /sys/module/nvidia/version
+# 595.71.05-aorus.14
+
+sudo ./scripts/status.sh
+# Expect: 38 OK, 2 WARN, 0 FAIL (or better)
+```
+
+If the node label says anything other than `state=ready` after the rollout
+completes, check `kubectl logs daemonset/nvidia-driver-injector -n
+kube-system` for the entrypoint's failure point.
+
+### Step 7B — Bring up your GPU consumer
+
+The producer side is now done. Consumer Deployments (vLLM, kate, anything new)
+read the contract in [`consumer-contract.md`](consumer-contract.md) and set
+four things:
+
+```yaml
+spec:
+  nodeSelector:        { nvidia.driver/state: ready }
+  runtimeClassName:    nvidia
+  containers:
+    - env:
+        - { name: NVIDIA_VISIBLE_DEVICES,     value: "all" }
+        - { name: NVIDIA_DRIVER_CAPABILITIES, value: "compute,utility" }
+```
+
+The vLLM and kate repos each own their own Deployment + Service manifests.
+This repo does not ship those — see the consumer contract for what the
+DaemonSet guarantees and what consumer YAML needs.
+
+---
 
 ## Migration from `apnex/aorus-5090-egpu`
 
@@ -194,10 +287,13 @@ cd /root/aorus-5090-egpu && sudo ./remove.sh
 # 3. Reboot to clean state (nvidia stays unloaded thanks to the stub).
 sudo reboot
 
-# 4. Install + start the injector.
+# 4. Install + start the injector (pick Path A or Path B as above).
 cd /root/nvidia-driver-injector
 sudo ./scripts/apply.sh
-docker compose up -d
+# then either:
+docker compose up -d                        # Path A
+# or:
+kubectl apply -f k8s/daemonset.yaml         # Path B
 ```
 
 The second reboot inside step 4 is almost never needed: `aorus-5090-egpu`
@@ -213,5 +309,4 @@ cmdline args already present" and skips the reboot prompt.
 - Automatic kernel-upgrade handling — after a kernel upgrade re-run
   `docker compose build` (cached patch layer reuses; only the conftest +
   module compile re-run). Not yet automated.
-- Cluster / Kubernetes — `k8s/daemonset.yaml` exists; treat the k8s
-  path as experimental until Layer 1 is also DaemonSet-ised.
+- Multi-cluster federation — out of scope for the single-host hardware.

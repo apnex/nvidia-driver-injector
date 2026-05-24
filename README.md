@@ -34,15 +34,30 @@ Full layered design with component-ownership table:
 
 ## Install
 
+Two supported paths share Layer 1 (`scripts/apply.sh`) and diverge at Layer 2:
+
 ```bash
 sudo git clone https://github.com/apnex/nvidia-driver-injector /root/nvidia-driver-injector
 cd /root/nvidia-driver-injector
 sudo ./scripts/apply.sh        # Layer 1; idempotent; reboot if it prompts
+
+# Path A — docker-compose (dev / single-host):
 docker compose up -d           # Layer 2; build (~3-5 min cold) + load
+
+# Path B — k3s DaemonSet (recommended for production):
+docker build -t apnex/nvidia-driver-injector:595.71.05-aorus.14 .
+docker save apnex/nvidia-driver-injector:595.71.05-aorus.14 | sudo k3s ctr images import -
+kubectl apply -f k8s/daemonset.yaml
+kubectl rollout status -n kube-system ds/nvidia-driver-injector
 ```
 
-Full step-by-step (Thunderbolt authorisation, what `apply.sh` does, flags,
-migration from `aorus-5090-egpu`): [`docs/install-workflow.md`](docs/install-workflow.md).
+Path B publishes a node label (`nvidia.driver/state=ready`) that GPU consumers
+gate `nodeSelector` on — full producer / consumer contract in
+[`docs/consumer-contract.md`](docs/consumer-contract.md).
+
+Full step-by-step for both paths (Thunderbolt authorisation, what `apply.sh`
+does, flags, migration from `aorus-5090-egpu`):
+[`docs/install-workflow.md`](docs/install-workflow.md).
 
 ## Use
 
@@ -90,18 +105,26 @@ so its CUDA-devel surface cannot bloat or destabilise the injector.
 
 ```bash
 # Layer 3 first (workload), then Layer 2 (this container), then Layer 1 (host).
-cd /path/to/your/workload && docker compose down
 
+# Path A — docker-compose:
+cd /path/to/your/workload && docker compose down
 cd /root/nvidia-driver-injector
-docker compose run --rm driver-injector uninstall   # rmmod nvidia*
+docker compose run --rm driver-injector uninstall   # rmmod nvidia* (safe-gated)
 docker compose down                                 # stop the container
 
-sudo ./scripts/remove.sh                            # reverse Layer 1
-# Add --revert-cmdline to strip kernel args; --purge for true blank-equivalent.
+# Path B — k3s DaemonSet:
+kubectl delete deploy/vllm -n default               # whatever consumes the GPU
+kubectl exec -n kube-system daemonset/nvidia-driver-injector -- /entrypoint.sh uninstall
+kubectl delete -f k8s/daemonset.yaml
+
+# Both paths: reverse Layer 1.
+sudo ./scripts/remove.sh
+# Add --revert-cmdline to strip kernel args; --purge for true blank-equivalent;
+# --skip-k3s to leave RuntimeClass + containerd config alone.
 ```
 
 Full teardown reference (every flag, every file removed, what's left behind on
-purpose): [`docs/teardown-workflow.md`](docs/teardown-workflow.md).
+purpose; Path A vs Path B for each shape): [`docs/teardown-workflow.md`](docs/teardown-workflow.md).
 
 ## Troubleshooting
 
@@ -173,16 +196,26 @@ Build inputs:
 
 Patch drift fails the image build, not the pod start.
 
-## Kubernetes
+## Kubernetes (Path B)
 
 ```bash
-kubectl label node <gpu-node> apnex.com.au/aorus-egpu=true
 kubectl apply -f k8s/daemonset.yaml
-kubectl logs -n kube-system -l app.kubernetes.io/name=nvidia-driver-injector -f
+kubectl rollout status -n kube-system ds/nvidia-driver-injector
+kubectl get nodes -L nvidia.driver/state,nvidia.driver/version
+# obpc   ready   595.71.05-aorus.14
 ```
 
-Full notes (node prerequisites, adjacent NVIDIA components, cleanup):
-[`k8s/README.md`](k8s/README.md).
+The DaemonSet ships its own ServiceAccount + ClusterRole + ClusterRoleBinding
+(scope: `get,patch` on `nodes` only). After a successful module load, the
+entrypoint writes `nvidia.driver/state=ready` and `nvidia.driver/version=<v>`
+on its node; GPU consumer Deployments (vLLM, kate, etc.) gate on those labels
+plus `runtimeClassName: nvidia`. See:
+
+- [`docs/install-workflow.md`](docs/install-workflow.md) §Path B
+- [`docs/consumer-contract.md`](docs/consumer-contract.md) — what consumers
+  must set + failure modes
+- [`docs/teardown-workflow.md`](docs/teardown-workflow.md) §Path B — graceful
+  unload, driver upgrade (delete-and-apply), and full uninstall
 
 ## Why this exists
 
