@@ -17,7 +17,7 @@ kubectl apply -f daemonset.yaml
 kubectl logs -n kube-system -l app.kubernetes.io/name=nvidia-driver-injector -f
 
 # 4. Verify on the node
-ssh <node> 'cat /sys/module/nvidia/version'   # should print 595.71.05-aorus.13
+ssh <node> 'cat /sys/module/nvidia/version'   # should print 595.71.05-aorus.14
 ```
 
 ## What this DaemonSet replaces

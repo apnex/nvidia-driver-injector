@@ -8,9 +8,11 @@ go deeper.
 
 | Doc | Read it when |
 |---|---|
-| [install-workflow.md](install-workflow.md) | You're installing the stack — full step-by-step, prerequisites, and the post-install verification suite. |
+| [install-workflow.md](install-workflow.md) | You're installing the stack — Layer 1 + Layer 2 step-by-step with verification. |
+| [teardown-workflow.md](teardown-workflow.md) | You're unloading the module (graceful pause), bumping the driver image (cutover + rollback), or removing the stack entirely (full uninstall, `--purge`). |
+| [testing.md](testing.md) | You want to disambiguate the three "test" flows — install verify, the diag container, repo gates. |
 | [architecture.md](architecture.md) | You want the three-layer design, the component-ownership table, and reboot-survival behaviour. |
-| [patches.md](patches.md) | You want to know what each of the 7 patch clusters (P1–P7) does, the bug it fixes, and how it maps to the C/E/A upstream geometry. |
+| [patches.md](patches.md) | You want to know what each patch cluster does, the bug it fixes, and how it maps to the C/E/A upstream geometry. |
 
 ## Deep dives
 

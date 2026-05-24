@@ -1,10 +1,17 @@
 # nvidia-driver-injector — architecture
 
-> **Status:** current as of 2026-05-12.
-> Most target-architecture gaps have been closed (see "Gaps vs the target architecture" at the end).
+> **Status:** current as of 2026-05-24.
+> Most target-architecture gaps have been closed (see "Gaps" at the end).
 > Layer 1 surface: 1 systemd service + 1 modprobe.d + 2 udev rules + kernel cmdline + ICD disable.
 > Layer 2: 1 container (`nvidia-driver-injector`), folds GPU engagement into its entrypoint.
 > Layer 3: workload (vLLM / OpenCode / etc.), independent compose stack.
+>
+> Companion: the [`diag/`](../diag/) container is a **separate** image
+> (`apnex/nvidia-driver-diag`) — own lifecycle, own failure domain.
+> Bandwidth + capability measurement only; never touches `nvidia.ko`.
+
+For the operator-facing install / use / test / remove journeys, start at the
+top-level [`README.md`](../README.md). This doc is the design reference.
 
 ## TL;DR
 
@@ -128,60 +135,19 @@ Everything else can be containerised.
 
 ## Workflows
 
-### Install (fresh host)
+The install + uninstall procedures are owned by their workflow docs.
+This section keeps only the architectural shape; for the operator-facing
+flows, follow these links:
 
-```bash
-# Layer 1 — host setup (one-time, idempotent)
-git clone https://github.com/apnex/nvidia-driver-injector /root/nvidia-driver-injector
-cd /root/nvidia-driver-injector
-sudo ./scripts/apply.sh           # use --no-act first to dry-run
-  # Refuses if apnex/aorus-5090-egpu artifacts are detected
-  # (override with --force-coexist; not recommended).
-  # Does:
-  #   - grubby --update-kernel cmdline edits (iommu=off, host_reset=false,
-  #     pci=resource_alignment=35@<auto-detected bridge bdf>, etc.)
-  #   - dnf/apt install kernel-devel-$(uname -r) if missing
-  #   - install /etc/modprobe.d/nvidia-driver-injector.conf with production
-  #     NVreg options (NVreg_TbEgpuRecoverEnable=1, DeviceFileMode=0660, ...)
-  #   - install + enable nvidia-driver-injector-bridge-link-cap.service
-  #     ordered Before=docker.service
-  #   - install /etc/udev/rules.d/79-nvidia-driver-injector.rules
-  #     (/dev/nvidia* group perms)
-  #   - install /etc/udev/rules.d/80-nvidia-driver-injector-disable-audio.rules
-  #     (unbind eGPU HDMI audio function — compute-only posture)
-  #   - rename Vulkan/EGL/OpenCL ICDs to .nvidia-driver-injector-disabled
-  #   - prompt for reboot if cmdline changed
-
-# Layer 2 — driver injector container (persistent)
-docker compose up -d
-
-# Layer 3 — workload (this lives in your workload repo, e.g. /root/vllm)
-cd /root/vllm && docker compose up -d
-```
-
-### Uninstall (full teardown)
-
-```bash
-# Layer 3 → Layer 2 → Layer 1, in reverse order
-cd /root/vllm && docker compose down
-
-cd /root/nvidia-driver-injector
-docker compose run --rm driver-injector uninstall   # rmmod nvidia*
-docker compose down
-
-sudo ./scripts/remove.sh
-  # Reverses apply.sh idempotently. Removes:
-  #   - bridge-link-cap.service + binary
-  #   - /etc/modprobe.d/nvidia-driver-injector.conf
-  #   - /etc/udev/rules.d/79-nvidia-driver-injector.rules
-  #   - /etc/udev/rules.d/80-nvidia-driver-injector-disable-audio.rules
-  #   - re-enables Vulkan/EGL/OpenCL ICDs
-  #   - legacy: cleans up any pre-fold gpu-engage host artifacts
-  # Does NOT revert kernel cmdline by default
-  # (use --revert-cmdline if desired; reboot needed after).
-  # Leaves the gpu UNIX group + kernel-devel package alone
-  # (may be in use by other things on the host).
-```
+- **Install** — [`install-workflow.md`](install-workflow.md) (Layer 1 via
+  `scripts/apply.sh`, then Layer 2 via `docker compose up`, then your Layer
+  3 workload).
+- **Uninstall** — [`teardown-workflow.md`](teardown-workflow.md) (Layer 3
+  workload down, then Layer 2 `uninstall` subcommand + `compose down`, then
+  Layer 1 via `scripts/remove.sh` with optional `--revert-cmdline` /
+  `--purge`).
+- **Driver upgrade (tag bump)** —
+  [`teardown-workflow.md` §Driver upgrade](teardown-workflow.md#driver-upgrade-cutover).
 
 ### Reboot survival
 

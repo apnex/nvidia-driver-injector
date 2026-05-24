@@ -54,7 +54,7 @@ spec:
       hostNetwork: true
       containers:
         - name: driver
-          image: apnex/nvidia-driver-injector:595.71.05-aorus.13
+          image: apnex/nvidia-driver-injector:595.71.05-aorus.14
           imagePullPolicy: IfNotPresent
           # Privileged — must load kernel modules + write PCI sysfs.
           # This is the same security posture as NVIDIA's own driver pods.

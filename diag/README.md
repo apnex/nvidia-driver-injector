@@ -1,11 +1,16 @@
 # nvidia-driver-diag
 
-Companion **diagnostic** container for `nvidia-driver-injector` — bundles
+Companion **diagnostic** container for the
+[`nvidia-driver-injector`](../README.md) — bundles
 [`nvbandwidth`](https://github.com/NVIDIA/nvbandwidth) and `deviceQuery`
 (from [`cuda-samples`](https://github.com/NVIDIA/cuda-samples)) in a
 distro-neutral CUDA image so the **injector container stays
 single-purpose** (kernel-module load) and **host-installed CUDA binaries
 never break** across distro updates.
+
+This doc is the diag-container reference. For the broader test landscape
+(install verification, repo gates), see
+[`../docs/testing.md`](../docs/testing.md).
 
 ## Purpose
 

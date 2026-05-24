@@ -36,7 +36,7 @@ fail_() { printf '  %s[FAIL]%s %s\n'   "$C_FAIL" "$C_RESET" "$*"; fail_count=$((
 info()  { printf '  %s[INFO]%s %s\n'   "$C_INFO" "$C_RESET" "$*"; }
 section() { printf '\n%s== %s ==%s\n' "$C_BOLD" "$*" "$C_RESET"; }
 
-# Auto-detect the GPU + parent bridge (matches install-host.sh logic)
+# Auto-detect the GPU + parent bridge (matches apply.sh logic)
 EGPU_VENDOR_ID="0x10de"; EGPU_DEVICE_ID="0x2b85"
 GPU_BDF=""; BRIDGE_BDF=""
 for d in /sys/bus/pci/devices/*; do
