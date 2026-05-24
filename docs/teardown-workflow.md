@@ -231,6 +231,35 @@ kubectl delete -f k8s/daemonset.yaml
 sudo ./scripts/remove.sh
 ```
 
+### After standard uninstall — what to expect
+
+Standard `remove.sh` (no `--purge`) removes Layer 1 config + Layer 2
+container but **leaves the patched `nvidia.ko` on disk** at
+`/lib/modules/<kver>/extra/` (where the injector container wrote it
+at runtime — apply.sh didn't put it there, so by symmetry remove.sh
+doesn't take it away). With the modprobe.d `install /bin/false`
+guard also gone, **the next nvidia-tool invocation auto-reloads the
+on-disk module**:
+
+```bash
+nvidia-smi    # → triggers auto-load of /lib/modules/<kver>/extra/nvidia.ko
+```
+
+After auto-reload the driver is LIVE again but **without the Layer 1
+guards**: `/dev/nvidia*` perms revert to driver defaults (no udev
+`gpu` group); no `bridge-link-cap.service`; no DaemonSet → no node
+label → consumers can't schedule against the contract; no NVreg
+options (so `NVreg_TbEgpuRecoverEnable=0` — recovery is OFF).
+
+If you want the host in a true "no nvidia driver" state, use
+`--purge` (described below) which additionally removes the on-disk
+`.ko` files. Alternatively for a no-reboot variant:
+
+```bash
+sudo rmmod nvidia_uvm nvidia
+sudo rm -f /lib/modules/$(uname -r)/extra/nvidia*.ko
+```
+
 `scripts/remove.sh` reverses `apply.sh` idempotently. The seven numbered steps
 are:
 
@@ -262,7 +291,10 @@ artifacts if they exist (folded into the entrypoint on 2026-05-12).
   - Removes `/lib/modules/<kver>/extra/nvidia*.ko*` (patched on-disk module
     left over from prior installs; without this the vendor `softdep` line in
     `/usr/lib/modprobe.d/nvidia.conf` will auto-load the stale binary on
-    next boot, without our modprobe.d guards).
+    next boot **OR on any nvidia-tool invocation** (`nvidia-smi`, a CUDA
+    app, anything that requests `/dev/nvidia*` triggers the autoload —
+    not just boot), now that our modprobe.d `install /bin/false` guard
+    is also gone.
   - Restores `*.aorus-disabled` ICDs (legacy from a prior `aorus-5090-egpu`
     install that was never cleaned up).
   - Removes `nvidia-ctk` containerd config drop-ins
