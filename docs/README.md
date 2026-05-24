@@ -22,9 +22,12 @@ go deeper.
 
 ## For maintainers
 
-| Doc | Topic |
-|---|---|
-| [style-guide.md](style-guide.md) | Documentation style rules — apply uniformly to new docs; reference by rule ID in commit messages. Forward-applicable to consumer repos (vLLM, kate, …). |
+Cross-project style + methodology rules this repo follows live in
+[apnex/mission-kit][mk]. When editing docs here, apply the relevant
+mission-kit entries (S1, S2, S3, …) and reference IDs in commit
+messages where it aids review.
+
+[mk]: https://github.com/apnex/mission-kit
 
 ## Internal — refactor history & upstream plan
 
