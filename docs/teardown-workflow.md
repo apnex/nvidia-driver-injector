@@ -78,6 +78,66 @@ kubectl get pods --all-namespaces -o json \
 sudo fuser /dev/nvidia*       # list holders
 ```
 
+## Deep unload — `purge` subcommand
+
+`uninstall` rmmods but **leaves the patched `.ko` on disk** at
+`/lib/modules/<kver>/extra/`. Any later nvidia-tool invocation
+(`nvidia-smi`, a CUDA app, anything requesting `/dev/nvidia*`) will
+trigger the kernel's autoload mechanism — which finds the on-disk
+`.ko` and loads it back in. If you want the driver truly gone from
+the kernel **without rebooting**, use `purge`:
+
+```bash
+# Path A (docker compose):
+docker compose run --rm driver-injector purge
+
+# Path A (raw docker — if compose isn't around):
+docker run --rm --privileged --pid=host \
+    -v /sys:/sys -v /dev:/dev -v /lib/modules:/lib/modules \
+    apnex/nvidia-driver-injector:<tag> purge
+
+# Path B (k3s / k8s):
+kubectl exec -n kube-system ds/nvidia-driver-injector -- /entrypoint.sh purge
+
+# Path B fallback (no docker, no kubectl exec — k3s ctr direct):
+sudo k3s ctr run --rm --privileged --net-host \
+    --mount type=bind,src=/lib/modules,dst=/lib/modules,options=rbind:rw \
+    --mount type=bind,src=/sys,dst=/sys,options=rbind:rw \
+    --mount type=bind,src=/dev,dst=/dev,options=rbind:rw \
+    docker.io/apnex/nvidia-driver-injector:<tag> \
+    nvidia-driver-injector-purge \
+    /entrypoint.sh purge
+```
+
+What `purge` does (on top of the `uninstall` sequence above):
+
+6. After the modules are gone, `rm /lib/modules/<kver>/extra/nvidia*.ko*`.
+7. Logs `purge ✓ — host autoload of nvidia driver is now blocked`.
+
+After `purge`, the driver is gone until the next container `load`. No
+reboot. No kernel cmdline change. No Layer 1 host-config touched.
+
+**When to choose `uninstall` vs `purge`:**
+
+- `uninstall` — you intend to re-load shortly (driver upgrade, brief
+  diagnostic). Cheap; .ko stays cached on disk for the next load.
+- `purge` — you intend the driver to stay gone (decommission, deeper
+  test, before a `remove.sh` to avoid the auto-reload surprise the
+  `remove.sh` doc note describes).
+
+**When to choose `purge` vs `remove.sh --purge`:**
+
+- `entrypoint.sh purge` — **Layer 2 only**. Driver out of kernel,
+  .ko off disk. Host config (modprobe.d, systemd, udev) untouched.
+  No reboot. Use when you want the kernel clean of this driver right
+  now without disturbing host-level config.
+- `remove.sh --purge` — **all-in-one fresh-host reset**. Layer 1
+  reverse + cmdline revert + restore legacy ICDs + remove the on-disk
+  .ko. **Reboot required.** Use when validating the canonical fresh-
+  install workflow end-to-end.
+
+The two are independent; they serve different operator scenarios.
+
 ## Driver upgrade (cutover)
 
 Tag-bump sequence. Each step has a known failure mode and stops the chain
@@ -251,14 +311,17 @@ guards**: `/dev/nvidia*` perms revert to driver defaults (no udev
 label → consumers can't schedule against the contract; no NVreg
 options (so `NVreg_TbEgpuRecoverEnable=0` — recovery is OFF).
 
-If you want the host in a true "no nvidia driver" state, use
-`--purge` (described below) which additionally removes the on-disk
-`.ko` files. Alternatively for a no-reboot variant:
+If you want the host in a true "no nvidia driver" state, two options:
 
-```bash
-sudo rmmod nvidia_uvm nvidia
-sudo rm -f /lib/modules/$(uname -r)/extra/nvidia*.ko
-```
+1. **No reboot needed** — use the container's `purge` subcommand BEFORE
+   deleting the DaemonSet (see §"Deep unload — `purge` subcommand"
+   above). This is the recommended path when you only want the kernel
+   clean of the driver; Layer 1 host config stays in place.
+
+2. **Full fresh-host reset** — use `remove.sh --purge` (described
+   below). Reverts kernel cmdline + removes the on-disk `.ko` +
+   restores legacy ICDs. **Reboot required.** Use when validating the
+   canonical fresh-install path end-to-end.
 
 `scripts/remove.sh` reverses `apply.sh` idempotently. The seven numbered steps
 are:

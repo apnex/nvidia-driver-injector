@@ -17,13 +17,26 @@
 #     - Verify all gone; exit 0.
 #     Module state is host state — this is the only graceful unload path.
 #     `docker compose down` does NOT trigger this (correct asymmetry).
+#     LEAVES the on-disk .ko at /lib/modules/<kver>/extra/ — the next
+#     nvidia-tool invocation may auto-reload it.
+#
+#   purge — uninstall + remove the on-disk .ko files:
+#     - Runs cmd_uninstall first (same safety checks).
+#     - Then removes /lib/modules/<kver>/extra/nvidia*.ko.
+#     After purge, kernel autoload has nothing to load — driver is truly
+#     gone until the next container `load`. No reboot required.
+#     Distinct from `scripts/remove.sh --purge` (which is the all-in-one
+#     fresh-host reset path: Layer 1 reverse + cmdline revert + reboot).
 #
 # Invocation:
 #   docker compose up -d                                  # load (default)
 #   docker compose run --rm driver-injector uninstall     # graceful unload
+#   docker compose run --rm driver-injector purge         # unload + rm .ko
 #   docker run --rm --privileged --pid=host \
 #     -v /sys:/sys -v /dev:/dev -v /lib/modules:/lib/modules \
-#     apnex/nvidia-driver-injector:<tag> uninstall
+#     apnex/nvidia-driver-injector:<tag> uninstall|purge
+#   kubectl exec -n kube-system ds/nvidia-driver-injector -- \
+#     /entrypoint.sh uninstall|purge                      # in-cluster
 
 set -euo pipefail
 
@@ -185,6 +198,70 @@ cmd_uninstall() {
 }
 
 # ============================================================================
+# Subcommand: purge
+# ============================================================================
+# Graceful unload PLUS removal of the on-disk patched .ko files. The
+# container's load path writes nvidia.ko + nvidia-uvm.ko to
+# /lib/modules/<kver>/extra/ via the bind-mount; by symmetry, this
+# subcommand takes them back off. After purge, the kernel's autoload
+# mechanism has nothing on disk to load — running `nvidia-smi` or any
+# other nvidia-tool will NOT bring the driver back.
+#
+# Distinct from `uninstall`:
+#   uninstall — rmmod only. The .ko stays on disk; any later nvidia-tool
+#               invocation will auto-reload it (since host modprobe.d
+#               guards may or may not be in place).
+#   purge     — rmmod + rm. Driver truly gone until next container `load`.
+#
+# Distinct from `remove.sh --purge`:
+#   This subcommand operates on Layer 2 (kernel module state) ONLY,
+#   without rebooting and without touching Layer 1 host config. Use it
+#   when you want the driver out of the kernel now — e.g., before a
+#   diagnostic boot, or before deleting the DaemonSet entirely.
+#   `remove.sh --purge` is the all-in-one fresh-host reset path that
+#   additionally reverts kernel cmdline + restores ICDs + requires a
+#   reboot.
+cmd_purge() {
+    log "=========================================="
+    log "  PURGE — graceful unload + on-disk module removal"
+    log "=========================================="
+
+    # Step 1: graceful rmmod (delegate to cmd_uninstall — same safety
+    # checks: refuse if /dev/nvidia* held; reverse-dependency order).
+    # cmd_uninstall calls fail() on any error, which exits non-zero.
+    cmd_uninstall
+
+    # Step 2: remove on-disk .ko files.
+    log ""
+    log "removing on-disk module files ..."
+    local kver
+    kver="$(uname -r)"
+    local extra_dir="/lib/modules/${kver}/extra"
+    if [[ ! -d "$extra_dir" ]]; then
+        log "purge ✓ — ${extra_dir} doesn't exist (nothing to remove)"
+        return 0
+    fi
+    local removed=0
+    for ko in "$extra_dir"/nvidia*.ko*; do
+        if [[ -f "$ko" ]]; then
+            if rm -f "$ko"; then
+                log "  rm ${ko}"
+                removed=$((removed + 1))
+            else
+                fail "rm ${ko} failed (read-only bind-mount? need :rw on /lib/modules)"
+            fi
+        fi
+    done
+    if [[ "$removed" -gt 0 ]]; then
+        log "purge ✓ — ${removed} on-disk .ko file(s) removed"
+        log "host autoload of nvidia driver is now blocked (nothing on disk to load)"
+    else
+        log "purge ✓ — no nvidia*.ko files found at ${extra_dir}"
+    fi
+    return 0
+}
+
+# ============================================================================
 # Subcommand dispatch
 # ============================================================================
 SUBCOMMAND="${1:-load}"
@@ -196,8 +273,12 @@ case "$SUBCOMMAND" in
         cmd_uninstall
         exit $?
         ;;
+    purge)
+        cmd_purge
+        exit $?
+        ;;
     *)
-        fail "unknown subcommand: '${SUBCOMMAND}' (expected: load | uninstall)"
+        fail "unknown subcommand: '${SUBCOMMAND}' (expected: load | uninstall | purge)"
         ;;
 esac
 
