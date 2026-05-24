@@ -503,7 +503,7 @@ The gate is **two-tier** — the PRs do not all carry the same risk:
   defined soak on the live F44 / kernel-7.0 stack **under real workload**, green
   throughout. Milestone: vLLM back as the daily compute path, **≥ 14 days** of
   genuine workload, all criteria held —
-  - `status.sh` at 38/2/0 or better
+  - `status.sh` at 40/0/0 (Path A) or 39/0/0 (Path B) or better
   - `tb_egpu_recover_surrenders` = 0
   - every `tb_egpu_qwd_detections` increment either 0 or individually explained
   - no unexplained host hard-lock

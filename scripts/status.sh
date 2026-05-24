@@ -285,13 +285,40 @@ fi
 section "7. /dev/nvidia* device-file permissions"
 # ============================================================================
 if mod_loaded nvidia; then
-    for dev in /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
+    # /dev/nvidia0 + /dev/nvidiactl have a static major (195) and are
+    # honored by the udev rules + NVreg_DeviceFile* modprobe options —
+    # strict 0660 root:gpu is the canonical state and a deviation is
+    # a real signal.
+    for dev in /dev/nvidia0 /dev/nvidiactl; do
         if [[ -e "$dev" ]]; then
             stat=$(stat -c "%a %U:%G" "$dev")
             if [[ "$stat" == "660 root:gpu" ]]; then
                 ok "$dev: $stat"
             else
                 warn "$dev: $stat (expected 660 root:gpu)"
+            fi
+        else
+            warn "$dev: missing"
+        fi
+    done
+    # /dev/nvidia-uvm + /dev/nvidia-uvm-tools have a dynamic major and
+    # are created by nvidia-modprobe via direct mknod(), bypassing the
+    # kernel uevent system — udev rules never fire for them. The
+    # entrypoint chmods them best-effort at module load, but any later
+    # nvidia-modprobe invocation (operator tools, other workloads on
+    # bringup) recreates them with driver defaults (0666 root:root).
+    # Both 0660 root:gpu and 0666 root:root are functionally acceptable
+    # — the latter is looser but not a security regression on this
+    # single-operator host, and nvidia-container-toolkit injects these
+    # devices into containers with its own perm logic independent of
+    # host perms. Accept either; flag anything else.
+    for dev in /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
+        if [[ -e "$dev" ]]; then
+            stat=$(stat -c "%a %U:%G" "$dev")
+            if [[ "$stat" == "660 root:gpu" || "$stat" == "666 root:root" ]]; then
+                ok "$dev: $stat"
+            else
+                warn "$dev: $stat (expected 660 root:gpu or 666 root:root)"
             fi
         else
             warn "$dev: missing"

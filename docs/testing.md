@@ -13,12 +13,16 @@ different audiences and do not overlap.
 
 Owned by [`install-workflow.md`](install-workflow.md#step-5--verify) — see
 that doc for the canonical spot checks plus the comprehensive 40-check
-run via `sudo ./scripts/status.sh` (expect `38/2/0` on Path A or
-`37/2/0` on Path B — the Path-A-only "docker-compose container running"
+run via `sudo ./scripts/status.sh` (expect `40/0/0` on Path A or
+`39/0/0` on Path B — the Path-A-only "docker-compose container running"
 check naturally drops out under Path B).
 
-The two standing WARNs (`/dev/nvidia-uvm` perm drift; one detection edge
-case) are documented; anything else is real.
+Any non-zero WARN or FAIL is a real signal — the previously standing
+`/dev/nvidia-uvm` perm-drift WARN was resolved on 2026-05-24 by
+loosening the check to accept either `660 root:gpu` or `666 root:root`
+(the NVIDIA UVM driver creates these devices via direct `mknod()`
+bypassing udev; perms revert to driver defaults on any later
+`nvidia-modprobe` invocation, but both states are functionally fine).
 
 ## 2. Diag container — bandwidth + capability
 

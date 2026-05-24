@@ -173,7 +173,7 @@ For the comprehensive 40-check verification, run:
 
 ```bash
 sudo ./scripts/status.sh
-# Expect: 38 OK, 2 WARN, 0 FAIL (or better)
+# Expect: 40 OK, 0 WARN, 0 FAIL (or better)
 ```
 
 ### Step 6A — Bring up your workload (Layer 3)
@@ -250,8 +250,8 @@ cat /sys/module/nvidia/version
 # 595.71.05-aorus.14
 
 sudo ./scripts/status.sh
-# Expect: 37 OK, 2 WARN, 0 FAIL (or better)
-# (Path A reports 38; Path B is one fewer because the
+# Expect: 39 OK, 0 WARN, 0 FAIL (or better)
+# (Path A reports 40; Path B is one fewer because the
 #  "docker-compose container running" check naturally drops out.)
 ```
 

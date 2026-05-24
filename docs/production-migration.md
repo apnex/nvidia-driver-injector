@@ -106,9 +106,10 @@ project's permanent floor.
    (→ `595.71.05-aorus.14`); container build + GSP-firmware step unchanged.
 
 6. **Soak — the Gate.** Per `upstream-plan.md` Gate, soaked tier: vLLM as the
-   daily compute path, **≥ 14 days**, all criteria green — `status.sh` 38/2/0
-   or better, `tb_egpu_recover_surrenders` = 0, every `tb_egpu_qwd_detections`
-   increment 0-or-explained, no unexplained host hard-lock.
+   daily compute path, **≥ 14 days**, all criteria green — `status.sh` 40/0/0
+   (Path A) or 39/0/0 (Path B) or better, `tb_egpu_recover_surrenders` = 0,
+   every `tb_egpu_qwd_detections` increment 0-or-explained, no unexplained
+   host hard-lock.
 
 7. **Cut over.** New image → production once the soak is green.
 
