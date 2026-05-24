@@ -79,6 +79,14 @@ sudo git clone https://github.com/apnex/nvidia-driver-injector \
 cd /root/nvidia-driver-injector
 ```
 
+Skip the clone if the repo is already present (e.g., this is a
+re-install after a prior `remove.sh`). Just refresh and `cd`:
+
+```bash
+sudo git -C /root/nvidia-driver-injector pull
+cd /root/nvidia-driver-injector
+```
+
 ## Step 2 — Layer 1 host bring-up (both paths)
 
 ```bash
@@ -235,8 +243,11 @@ kubectl rollout status -n kube-system ds/nvidia-driver-injector
 **First rollout takes 1-2 minutes.** The entrypoint builds the `.ko` from
 source against the host kernel-devel, modprobes it, then writes the node
 label. If `kubectl rollout status` hasn't returned after 3 minutes,
-`kubectl logs -n kube-system ds/nvidia-driver-injector` will show where
-it's stuck.
+inspect the pod's entrypoint progress:
+
+```bash
+kubectl logs -n kube-system ds/nvidia-driver-injector
+```
 
 The DaemonSet creates:
 
@@ -270,8 +281,11 @@ sudo ./scripts/status.sh
 ```
 
 If the node label says anything other than `state=ready` after the rollout
-completes, check `kubectl logs daemonset/nvidia-driver-injector -n
-kube-system` for the entrypoint's failure point.
+completes, inspect the entrypoint logs to see where it stopped:
+
+```bash
+kubectl logs -n kube-system ds/nvidia-driver-injector
+```
 
 ### Step 7B — Bring up your GPU consumer
 
@@ -328,7 +342,11 @@ cmdline args already present" and skips the reboot prompt.
 - HuggingFace credentials, model downloads, OpenCode config — belong in
   the workload repo.
 - Multi-GPU setups — single-GPU only.
-- Automatic kernel-upgrade handling — after a kernel upgrade re-run
-  `docker compose build` (cached patch layer reuses; only the conftest +
-  module compile re-run). Not yet automated.
+- Automatic kernel-upgrade handling — not yet automated. After a kernel
+  upgrade, re-run the image build manually (cached patch layer reuses;
+  only the conftest + module compile re-run):
+
+  ```bash
+  sudo docker compose build
+  ```
 - Multi-cluster federation — out of scope for the single-host hardware.
