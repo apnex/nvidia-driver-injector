@@ -10,7 +10,6 @@ Tested on Fedora 43–44, kernels 6.19–7.0.
 Two supported paths share `Layer 1` host bring-up and diverge at `Layer 2` (how the driver container is scheduled).
 
 `Layer 1` is the same on both paths:
-
 ```bash
 sudo git clone https://github.com/apnex/nvidia-driver-injector /root/nvidia-driver-injector
 cd /root/nvidia-driver-injector
@@ -30,7 +29,6 @@ Cold build takes ~3-5 min against the host's `/lib/modules/$(uname -r)/build`; s
 ### Path B — k3s DaemonSet (recommended for production)
 
 Build the image and import it into k3s's containerd (replace `<your-tag>` with the `image:` tag from `docker-compose.yml`):
-
 ```bash
 docker build -t apnex/nvidia-driver-injector:<your-tag> .
 docker save apnex/nvidia-driver-injector:<your-tag> | sudo k3s ctr images import -
@@ -158,7 +156,6 @@ Full layered design with component-ownership table: [`docs/architecture.md`](doc
 `driver_override` on the GPU's PCI device is blocking auto-bind — typically left over from a `scripts/remove.sh` run or an earlier `aorus-5090-egpu` install.
 
 The entrypoint clears any non-`nvidia` override automatically; upgrade your image, or manually:
-
 ```bash
 echo > /sys/bus/pci/devices/0000:04:00.0/driver_override
 docker compose restart
@@ -171,7 +168,6 @@ The kernel cmdline is missing `thunderbolt.host_reset=false` or `pci=resource_al
 BAR1 sizing happens once at boot and cannot be changed at runtime on TB-tunneled hardware.
 
 Re-run `Layer 1` host bring-up, then reboot:
-
 ```bash
 sudo ./scripts/apply.sh
 ```
