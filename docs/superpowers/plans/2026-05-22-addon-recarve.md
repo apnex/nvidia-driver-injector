@@ -135,7 +135,7 @@ Expected: `test-manifest-lib.sh: 10 run, 0 failed`, `test-compose.sh: 8 run, 0 f
 
 ```bash
 git add tools/lib/manifest.sh tests/test-manifest-lib.sh
-git commit -m "$(printf 'feat: manifest_lint requires fork:<branch> source on all rows\n\nThe addon layer moves onto the fork stack; addon rows are now\nfork:a* like base rows.\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: manifest_lint requires fork:<branch> source on all rows\n\nThe addon layer moves onto the fork stack; addon rows are now\nfork:a* like base rows.')"
 ```
 
 ---
@@ -199,7 +199,7 @@ Expected: `BASE UNCHANGED` — the layer-agnostic loop still produces byte-ident
 
 ```bash
 git add tools/regen-base-patches.sh
-git commit -m "$(printf 'feat: regen exports the addon layer as well as base\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: regen exports the addon layer as well as base')"
 ```
 
 ---
@@ -468,7 +468,7 @@ Expected: `LINT_OK` (11 rows: 6 base + 5 addon, all `fork:*`).
 
 ```bash
 git add patches/manifest
-git commit -m "$(printf 'feat: add the five addon rows to the patch manifest\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: add the five addon rows to the patch manifest')"
 ```
 
 ---
@@ -509,7 +509,7 @@ Expected: `IDEMPOTENT`.
 ```bash
 cd /root/nvidia-driver-injector
 git add patches/addon/ patches/base/.regen-state
-git commit -m "$(printf 'feat: generate patches/addon from the fork addon stack\n\nFive addon patches (A1-A5) exported from apnex/open-gpu-kernel-modules.\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: generate patches/addon from the fork addon stack\n\nFive addon patches (A1-A5) exported from apnex/open-gpu-kernel-modules.')"
 ```
 
 ---
@@ -616,7 +616,7 @@ In `production-migration.md`, update §3 to point at `docs/superpowers/specs/202
 cd /root/nvidia-driver-injector
 bash tests/run.sh && tools/compose-patchset.sh --patches-dir patches | wc -l
 git add docs/
-git commit -m "$(printf 'docs: reconcile upstream-plan/patches/migration with the carved addon layer\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'docs: reconcile upstream-plan/patches/migration with the carved addon layer')"
 ```
 Expected: tests pass, compose emits `11`.
 

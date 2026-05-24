@@ -1,11 +1,25 @@
-# Production migration — Step 3
+# Production migration — Step 3 *(COMPLETE — historical record)*
 
-**Status:** in progress — drafted 2026-05-22. The plan for moving the
-injector's production driver onto the C/E/A geometry. Phase-3 steps 1–2 (carve
-the base set; adopt C/E/A in the docs) are done; this doc is **Step 3**. The
-dynamic-patch-composition mechanism and the addon re-carve are implemented
-(see the design specs under `docs/superpowers/specs/`); sequence step 4 onward
-(image rebuild, soak, cutover) remains.
+**Status:** **COMPLETE 2026-05-24.** Drafted 2026-05-22. The plan for moving
+the injector's production driver onto the C/E/A geometry. All sequence steps
+1-7 are done:
+
+- Steps 1-3 (carve, re-carve, reconcile) — done sub-cycle 1-4.
+- Step 4 (manifest-driven `patches/base/` + `patches/addon/`) — merged 2026-05-22.
+- Step 5 (image rebuild as `595.71.05-aorus.14`) — done 2026-05-24.
+- Step 6 (soak gate) — soak STARTED 2026-05-24; 14-day window is in progress.
+- Step 7 (cutover) — Path B (k3s DaemonSet) cutover done 2026-05-24 14:06; superseded the
+  Path A (docker-compose) production path established at 11:00. Step 8 (upstream PRs)
+  remains gated on soak completion per the no-premature-upstream-filing policy.
+
+For the canonical install/upgrade/teardown workflows, see
+[`install-workflow.md`](install-workflow.md) and
+[`teardown-workflow.md`](teardown-workflow.md) — those are the operator-facing
+docs; this file is the migration-narrative record.
+
+Original Step-3 plan follows for provenance.
+
+---
 
 ## Goal
 

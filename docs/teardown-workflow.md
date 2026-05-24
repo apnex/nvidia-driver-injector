@@ -149,7 +149,8 @@ kubectl rollout status -n kube-system ds/nvidia-driver-injector
 # 7. Verify.
 kubectl get nodes -L nvidia.driver/version
 # expect: VERSION = 595.71.05-aorus.<N+1>
-sudo scripts/status.sh                               # expect: 38/2/0 or better
+sudo scripts/status.sh                               # expect: 37/2/0 or better
+                                                     # (Path B is one fewer than Path A's 38)
 ```
 
 **Why delete-and-apply rather than rolling update:** the DaemonSet's image

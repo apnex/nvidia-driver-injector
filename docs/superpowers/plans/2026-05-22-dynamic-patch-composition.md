@@ -124,7 +124,7 @@ Expected: prints nothing for tests (none yet), `exit=0`.
 
 ```bash
 git add tests/lib.sh tests/run.sh
-git commit -m "$(printf 'test: add minimal shell test harness\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'test: add minimal shell test harness')"
 ```
 
 ---
@@ -235,7 +235,7 @@ Expected: `5 run, 0 failed`.
 
 ```bash
 git add tools/lib/manifest.sh tests/test-manifest-lib.sh
-git commit -m "$(printf 'feat: add manifest parsing + lint library\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: add manifest parsing + lint library')"
 ```
 
 ---
@@ -282,7 +282,7 @@ Expected: `LINT_OK`.
 
 ```bash
 git add patches/manifest
-git commit -m "$(printf 'feat: add patch manifest with the six base rows\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: add patch manifest with the six base rows')"
 ```
 
 ---
@@ -465,7 +465,7 @@ Expected: `8 run, 0 failed`.
 
 ```bash
 git add tools/compose-patchset.sh tests/test-compose.sh
-git commit -m "$(printf 'feat: add compose-patchset build-time composer\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: add compose-patchset build-time composer')"
 ```
 
 ---
@@ -591,7 +591,7 @@ Expected: `regen: fork repo not found at /nonexistent` and `exit=1`.
 
 ```bash
 git add tools/regen-base-patches.sh
-git commit -m "$(printf 'feat: add regen-base-patches fork-stack extractor\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: add regen-base-patches fork-stack extractor')"
 ```
 
 ---
@@ -638,7 +638,7 @@ Expected: `IDEMPOTENT` — re-running regen reproduces the six `*.patch` files b
 ```bash
 cd /root/nvidia-driver-injector
 git add patches/base/
-git commit -m "$(printf 'feat: generate patches/base from the fork base stack\n\nSix base patches exported from apnex/open-gpu-kernel-modules:\nC1-C5 + E1, against the 595.71.05 tag.\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: generate patches/base from the fork base stack\n\nSix base patches exported from apnex/open-gpu-kernel-modules:\nC1-C5 + E1, against the 595.71.05 tag.')"
 ```
 
 ---
@@ -731,7 +731,7 @@ If it fails: the failure is in the base patches, not the tool — capture the bu
 
 ```bash
 git add tools/validate-patchset.sh
-git commit -m "$(printf 'feat: add validate-patchset compile gate\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: add validate-patchset compile gate')"
 ```
 
 ---
@@ -766,7 +766,7 @@ Expected: `patches/` top level contains `base`, `legacy`, `manifest` (no `0001-0
 
 ```bash
 git add -A patches/
-git commit -m "$(printf 'refactor: retire flat patches/0001-0007 into patches/legacy\n\nThe build now composes patches/base + manifest. The P1-P7 set is\nkept in legacy/ until the production soak proves the new set.\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'refactor: retire flat patches/0001-0007 into patches/legacy\n\nThe build now composes patches/base + manifest. The P1-P7 set is\nkept in legacy/ until the production soak proves the new set.')"
 ```
 
 ---
@@ -830,7 +830,7 @@ Expected: `6`.
 
 ```bash
 git add Dockerfile
-git commit -m "$(printf 'feat: apply the composed patch set in the image build\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: apply the composed patch set in the image build')"
 ```
 
 ---

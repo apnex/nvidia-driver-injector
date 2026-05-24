@@ -190,7 +190,6 @@ git commit -m "$(cat <<'EOF'
 
 <Optional longer body citing review file path and Evidence excerpt.>
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 delta_N_sha="$(git rev-parse HEAD)"
@@ -286,7 +285,6 @@ Intent file authored against v2 normative shape; review file complete
 with structured deltas all resolved; fork branch advanced to v2-tip
 <v2_tip_sha>; composed patchset compiles; tests green.
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -400,7 +398,6 @@ feat: add patch-review template for sub-cycle 2
 Skeleton for per-patch v2 review files. Not lint-checked in this cycle
 per the design spec. Authors copy this to docs/patch-reviews/<id>.md.
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -692,7 +689,6 @@ feat: regenerate patch-index with all 11 v2 reviews populated
 All 11 fork-branch patches reviewed; intent files at status: reviewed;
 docs/patch-index.md now shows real content for every row.
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 ```

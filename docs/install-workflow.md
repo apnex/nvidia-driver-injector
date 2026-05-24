@@ -86,7 +86,7 @@ artifacts (override: `--force-coexist`). The ten numbered steps in
 | 6 | udev rules | `79-…rules` (`/dev/nvidia*` group perms) + `80-…disable-audio.rules` (unbind eGPU HDMI audio function) |
 | 7 | Disable Vulkan / EGL / OpenCL ICDs | Compute-only posture; rename → `*.nvidia-driver-injector-disabled` |
 | 8 | Apply bridge-link-cap immediately | Skipped if reboot pending or eGPU not enumerated; lets the injector start without rebooting |
-| 9 | **k3s integration** (Path B only) | If k3s is present: `nvidia-ctk runtime configure --runtime=containerd` + install cluster-side `RuntimeClass nvidia`. Skipped automatically on docker-only hosts; skip explicitly with `--skip-k3s` |
+| 9 | **k3s integration** (Path B only) | If k3s is present: `nvidia-ctk runtime configure --runtime=containerd` + install cluster-side `RuntimeClass nvidia`. Skipped automatically on docker-only hosts; skip explicitly with `--skip-k3s`. **Note:** `nvidia-ctk` prints `It is recommended that containerd daemon be restarted` — this targets the system containerd at `/etc/containerd/`, which k3s does not read; k3s uses its own containerd config under `/var/lib/rancher/k3s/agent/etc/containerd/` and step 9 verifies the nvidia handler is already present there. Benign for k3s. |
 | 10 | Summary + reboot guidance | Flags reboot-needed if cmdline was modified |
 
 Flags:
@@ -218,6 +218,12 @@ kubectl apply -f k8s/daemonset.yaml
 kubectl rollout status -n kube-system ds/nvidia-driver-injector
 ```
 
+**First rollout takes 1-2 minutes.** The entrypoint builds the `.ko` from
+source against the host kernel-devel, modprobes it, then writes the node
+label. If `kubectl rollout status` hasn't returned after 3 minutes,
+`kubectl logs -n kube-system ds/nvidia-driver-injector` will show where
+it's stuck.
+
 The DaemonSet creates:
 
 - `ServiceAccount/nvidia-driver-injector` (kube-system).
@@ -244,7 +250,9 @@ cat /sys/module/nvidia/version
 # 595.71.05-aorus.14
 
 sudo ./scripts/status.sh
-# Expect: 38 OK, 2 WARN, 0 FAIL (or better)
+# Expect: 37 OK, 2 WARN, 0 FAIL (or better)
+# (Path A reports 38; Path B is one fewer because the
+#  "docker-compose container running" check naturally drops out.)
 ```
 
 If the node label says anything other than `state=ready` after the rollout

@@ -215,7 +215,6 @@ Precursor for <patch-id>-I<N>. v1 does not yet satisfy this claim;
 implementation follows in a subsequent commit on fork branch
 <source-branch>.
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 intent_commit_sha="$(git rev-parse HEAD)"
@@ -239,7 +238,6 @@ git commit -m "$(cat <<'EOF'
 
 <Optional body citing catalog file path and Value excerpt.>
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 improvement_N_sha="$(git rev-parse HEAD)"
@@ -307,7 +305,6 @@ Catalog: docs/patch-improvements/<patch-id>.md.
 Improvements landed: <count> code-side, <count> intent-side.
 Fork tip advanced to <v2_tip_sha>; composed patchset compiles; tests green.
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -416,7 +413,6 @@ upstream commits in the 2026-05-02 → 2026-05-23 window. Findings
 tagged per affected patch; feeds the per-patch triangulation in
 subsequent tasks.
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -531,7 +527,6 @@ Skeleton for per-patch v3 improvement catalogs. Not lint-checked
 (human judgment, mirroring sub-cycle 2's review-file pattern).
 Authors copy to docs/patch-improvements/<id>.md.
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -897,7 +892,6 @@ Aggregated dedup / naming / performance / quality findings across the
 11 per-patch catalogs. Landed atomic-sweep improvements: <count>.
 Deferred / rejected: <count>.
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 ```

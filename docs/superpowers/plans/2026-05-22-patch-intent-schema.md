@@ -130,7 +130,7 @@ Confirm the file exists and the first 20 lines render readably (the HTML comment
 ```bash
 cd /root/nvidia-driver-injector
 git add docs/patch-intents/_template.md
-git commit -m "$(printf 'feat: add canonical patch-intent template\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: add canonical patch-intent template')"
 ```
 
 ---
@@ -399,7 +399,7 @@ Expected: `test-intent-lint.sh: 1 run, 0 failed`. (The lint has no rules yet, so
 ```bash
 cd /root/nvidia-driver-injector
 git add tools/lib/intent.sh tools/intent-lint.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: add intent.sh parsing lib + intent-lint scaffold + tests\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: add intent.sh parsing lib + intent-lint scaffold + tests')"
 ```
 
 ---
@@ -510,7 +510,7 @@ Expected: `test-intent-lint.sh: 2 run, 0 failed`, all other test files unchanged
 ```bash
 cd /root/nvidia-driver-injector
 git add tools/intent-lint.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: intent-lint rule 1 — frontmatter has all 7 required fields\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: intent-lint rule 1 — frontmatter has all 7 required fields')"
 ```
 
 ---
@@ -597,7 +597,7 @@ Expected: `test-intent-lint.sh: 3 run, 0 failed`, `exit=0`.
 
 ```bash
 git add tools/intent-lint.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: intent-lint rule 2 — id matches filename stem\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: intent-lint rule 2 — id matches filename stem')"
 ```
 
 ---
@@ -679,7 +679,7 @@ Append inside the per-file loop, after Rule 2:
 
 ```bash
 git add tools/intent-lint.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: intent-lint rule 3 — layer matches manifest row\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: intent-lint rule 3 — layer matches manifest row')"
 ```
 
 ---
@@ -759,7 +759,7 @@ Append inside the per-file loop, after Rule 3:
 
 ```bash
 git add tools/intent-lint.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: intent-lint rule 4 — source-branch matches manifest fork:<branch>\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: intent-lint rule 4 — source-branch matches manifest fork:<branch>')"
 ```
 
 ---
@@ -838,7 +838,7 @@ Append inside the per-file loop, after Rule 4:
 
 ```bash
 git add tools/intent-lint.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: intent-lint rule 5 — upstream-candidacy n/a iff addon\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: intent-lint rule 5 — upstream-candidacy n/a iff addon')"
 ```
 
 ---
@@ -916,7 +916,7 @@ Append inside the per-file loop, after Rule 5:
 
 ```bash
 git add tools/intent-lint.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: intent-lint rule 6 — related-patches all resolve\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: intent-lint rule 6 — related-patches all resolve')"
 ```
 
 ---
@@ -995,7 +995,7 @@ Append inside the per-file loop, after Rule 6:
 
 ```bash
 git add tools/intent-lint.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: intent-lint rule 7 — required sections present, in order\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: intent-lint rule 7 — required sections present, in order')"
 ```
 
 ---
@@ -1069,7 +1069,7 @@ Append inside the per-file loop, after Rule 7:
 
 ```bash
 git add tools/intent-lint.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: intent-lint rule 8 — Requirements has at least one Requirement\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: intent-lint rule 8 — Requirements has at least one Requirement')"
 ```
 
 ---
@@ -1153,7 +1153,7 @@ Append inside the per-file loop, after Rule 8:
 
 ```bash
 git add tools/intent-lint.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: intent-lint rule 9 — Requirement has UPPERCASE RFC 2119 keyword\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: intent-lint rule 9 — Requirement has UPPERCASE RFC 2119 keyword')"
 ```
 
 ---
@@ -1232,7 +1232,7 @@ Append inside the per-file loop, after Rule 9:
 
 ```bash
 git add tools/intent-lint.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: intent-lint rule 10 — each Requirement has a Scenario\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: intent-lint rule 10 — each Requirement has a Scenario')"
 ```
 
 ---
@@ -1310,7 +1310,7 @@ Append inside the per-file loop, after Rule 10:
 
 ```bash
 git add tools/intent-lint.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: intent-lint rule 11 — top heading id matches frontmatter id\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: intent-lint rule 11 — top heading id matches frontmatter id')"
 ```
 
 ---
@@ -1479,7 +1479,7 @@ Expected: `test-intent-lint.sh: 13 run, 0 failed` (12 lint cases + 1 renderer te
 
 ```bash
 git add tools/render-patch-index.sh tests/test-intent-lint.sh
-git commit -m "$(printf 'feat: add render-patch-index.sh — builds docs/patch-index.md\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: add render-patch-index.sh — builds docs/patch-index.md')"
 ```
 
 ---
@@ -1609,7 +1609,7 @@ Spot-check that `docs/patch-intent-schema.md`'s rule list (R1–R11) matches the
 ```bash
 cd /root/nvidia-driver-injector
 git add docs/patch-intent-schema.md docs/superpowers/specs/2026-05-22-patch-intent-schema-design.md
-git commit -m "$(printf 'feat: canonical patch-intent schema reference (version 1.0)\n\nUndated, versioned engineering artefact. The dated brainstorming spec\nremains as the design decision record.\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: canonical patch-intent schema reference (version 1.0)\n\nUndated, versioned engineering artefact. The dated brainstorming spec\nremains as the design decision record.')"
 ```
 
 ---
@@ -1651,7 +1651,7 @@ Expected: `test-compose.sh: 8 run, 0 failed`, `test-manifest-lib.sh: 10 run, 0 f
 ```bash
 cd /root/nvidia-driver-injector
 git add docs/patch-index.md
-git commit -m "$(printf 'feat: initial generated docs/patch-index.md (11 intent files pending)\n\nThe deep-review cycle populates each intent file; this index regenerates\nfrom them via tools/render-patch-index.sh.\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat: initial generated docs/patch-index.md (11 intent files pending)\n\nThe deep-review cycle populates each intent file; this index regenerates\nfrom them via tools/render-patch-index.sh.')"
 ```
 
 - [ ] **Step 5: Confirm clean tree**
