@@ -125,10 +125,24 @@ Layer 1  Host config                  - cmdline / modprobe.d / udev / bridge cap
 Layer 0  Hardware                     - AORUS 5090 over TB, NUC 15 Pro+
 ```
 
-Layer 0 is the hardware — out of scope for this repo.\
-Layer 1 is the host config, set up once by `scripts/apply.sh`.\
-Layer 2 is the driver-injector container at this repo's root: it builds the patched `nvidia.ko` against the host's `/lib/modules/$(uname -r)/build`, loads it via `modprobe`, materialises `/dev/nvidia*`, and engages persistence mode.\
-Layer 3 is the workload, whatever consumes `/dev/nvidia*`.
+Layer 0 is the hardware.
+
+- Out of scope for this repo.
+
+Layer 1 is the host config.
+
+- Set up once by `scripts/apply.sh`.
+
+Layer 2 is the driver-injector container at this repo's root.
+
+- Builds the patched `nvidia.ko` against the host's `/lib/modules/$(uname -r)/build`.
+- Loads it via `modprobe`.
+- Materialises `/dev/nvidia*`.
+- Engages persistence mode.
+
+Layer 3 is the workload.
+
+- Consumes `/dev/nvidia*`.
 
 Full layered design with component-ownership table: [`docs/architecture.md`](docs/architecture.md).
 
