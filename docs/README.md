@@ -20,6 +20,12 @@ go deeper.
 |---|---|
 | [bridge-link-cap-mechanism.md](bridge-link-cap-mechanism.md) | Why the PCIe bridge link-speed cap (Lever H17) is needed, and how it's applied `Before=docker.service`. |
 
+## For maintainers
+
+| Doc | Topic |
+|---|---|
+| [style-guide.md](style-guide.md) | Documentation style rules — apply uniformly to new docs; reference by rule ID in commit messages. Forward-applicable to consumer repos (vLLM, kate, …). |
+
 ## Internal — refactor history & upstream plan
 
 Refactor history and the forward plan. Useful if you're working on the patches

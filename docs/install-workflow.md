@@ -29,10 +29,24 @@ in k3s. Pick one. They are not meant to run side-by-side on the same node
   and Fedora 44 + kernel `7.0.9-204.fc44`). The host scripts handle Fedora and
   Debian/Ubuntu package paths.
 - **Container runtime:**
-  - Path A: Docker installed and running (`systemctl is-active docker`).
-  - Path B: k3s installed (`systemctl is-active k3s`) **and**
-    `nvidia-container-toolkit` installed (provides `nvidia-ctk` +
-    `nvidia-container-runtime`).
+  - **Path A** — Docker installed and running. Verify:
+    ```bash
+    systemctl is-active docker
+    ```
+  - **Path B** — Kubernetes cluster (any distribution — k3s, kind,
+    kubeadm, RKE2, EKS, GKE, …) with kubectl authenticated against
+    it. Verify:
+    ```bash
+    kubectl get nodes
+    ```
+    Expect at least one node with STATUS=Ready. Reference setup
+    used by this project: k3s on a single host. The Path B steps
+    below assume `kubectl` works without flags from your shell —
+    how that's configured (kubeconfig path, sudo, RBAC) is out of
+    scope.
+
+    Also requires `nvidia-container-toolkit` installed on the host
+    (provides `nvidia-ctk` + `nvidia-container-runtime`).
 - **No active `aorus-5090-egpu` install on this host** — the two are
   alternative geometries. `apply.sh` refuses to install on top of one (override
   with `--force-coexist`; see [Migration](#migration-from-aorus-5090-egpu)).

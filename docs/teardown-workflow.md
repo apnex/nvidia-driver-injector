@@ -226,8 +226,8 @@ cd /root/nvidia-driver-injector
 kubectl exec -n kube-system daemonset/nvidia-driver-injector -- /entrypoint.sh uninstall
 kubectl delete -f k8s/daemonset.yaml
 
-# Layer 1 — host config. remove.sh also removes the cluster-side
-# RuntimeClass/nvidia (under --skip-k3s, leave it alone).
+# Layer 1 — host config. Default leaves cluster-side RuntimeClass/nvidia
+# alone (use --purge to remove it; --skip-k3s to skip the k3s step entirely).
 sudo ./scripts/remove.sh
 ```
 
