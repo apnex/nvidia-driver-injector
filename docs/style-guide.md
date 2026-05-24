@@ -1,8 +1,11 @@
 # Documentation style — applied entries
 
 The canonical doc-style rules this project follows live in the
-**mission-kit** repo (a separate cross-project knowledge base — see
-the repo's `README.md` for the full hard-rules + entry shape).
+**[apnex/mission-kit][mk]** repo (a separate cross-project knowledge
+base — see the repo's `README.md` for the full hard-rules + entry
+shape).
+
+[mk]: https://github.com/apnex/mission-kit
 
 This file is the *pointer*. It enumerates which mission-kit entries
 this project has adopted, so the project's docs stay anchored to a
