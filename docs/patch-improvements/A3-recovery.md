@@ -4,8 +4,10 @@ review-date: 2026-05-23
 reviewer: Claude Opus 4.7
 v1-tip-sha: f57a38b2f45b7f757e1982734e587336bb25606a
 v2-tip-sha: f57a38b2f45b7f757e1982734e587336bb25606a
+v3-tip-sha: 60dfe4c7f2bcb4fdae4be1d4073f432ebfba4f40
 status: accepted
 intent-updates: []
+sub-cycle-4-landed: [A3-recovery-I1]
 ---
 
 # A3-recovery — improvement triage
@@ -595,24 +597,37 @@ machine) plus C4 (err_handlers registration only).
      revisit trigger; option (d) is the right middle ground.
 - **Intent impact:** none in v3 (the contract is already
   documented in both intents per v2-D3); future task may refine.
-- **Triage decision:** **defer**
-- **Resolution:** **deferred to Task 14 (cross-patch surface-lens
-  audit) or a future architectural cleanup initiative.** The v1
-  shape is internally consistent, production-validated, and the
-  contract is documented symmetrically in both A2's and A3's
-  intents. **Default-reject discipline applied per the plan's
-  bloat-budget guidance for A3** (cascade tax: force-push 4 fork
-  branches for an architectural cleanup with no production
-  value — clear net loss). **Explicit revisit trigger:** (i) a
-  third addon needs to write at A2's detection latch, or (ii)
-  an "atomic rename" initiative on the addon layer consolidates
-  the addon TUs. Until either trigger fires, v1 is the
-  documented contract. A4's reviewer (Task 12) should NOT
-  introduce additional cross-cluster edits at A2's detection
-  latch; if A4 needs to fire telemetry there, the right move
-  is to hoist BOTH A3's `qwd-detect` call AND the new A4 call
-  into A2 in one cascade-triggering change (per the trigger
-  condition above).
+- **Triage decision:** **defer** (sub-cycle 3) → **landed in
+  sub-cycle 4 via option (a)**
+- **Resolution (sub-cycle 3):** **deferred to Task 14 (cross-patch
+  surface-lens audit) or a future architectural cleanup
+  initiative.** The v1 shape was internally consistent,
+  production-validated, and the contract was documented
+  symmetrically in both A2's and A3's intents. **Default-reject
+  discipline applied per the plan's bloat-budget guidance for A3**
+  (cascade tax: force-push 4 fork branches for an architectural
+  cleanup with no production value — clear net loss). **Explicit
+  revisit trigger:** (i) a third addon needs to write at A2's
+  detection latch, or (ii) an "atomic rename" initiative on the
+  addon layer consolidates the addon TUs.
+- **Resolution (sub-cycle 4):** **landed via option (a)** —
+  hoisted INTO A2. Revisit trigger (ii) fired when sub-cycle 4
+  bundled A1-D1 (the atomic-sweep rename of A1-owned recover_*
+  primitives) with this hoist, amortising the otherwise-prohibitive
+  4-branch cascade cost across two improvements that share the
+  cascade exactly once. **Implementation mechanism: option (1)**
+  per the sub-cycle 4 deferral catalog — A1 already declares
+  `tb_egpu_dump_aer_trigger_event` in `nv-tb-egpu-pcie.h`, and
+  A2's `nv-tb-egpu-qwd.h` already includes that header
+  transitively. A2 makes the call directly at its detection
+  latch with zero new header plumbing. Fork-branch commit
+  `353a859e` on `a2-bus-loss-watchdog` (which lands the call
+  in A2's own TU); A3 fork-branch tip becomes `60dfe4c7` (the
+  rebased A3 commit with the cross-TU hunk into
+  `nv-tb-egpu-qwd.c` gone). A3's `.patch` shrinks by the 8 lines
+  of the qwd cross-TU hunk; A2's `.patch` grows by ~7 lines (call
+  + rewritten comment). See "Improvements landed (sub-cycle 4)"
+  below.
 
 ### A3-recovery-I2 — Re-examine D1: bridge-link-cap preservation is an L4 userspace dependency, not in-driver code
 
@@ -1433,19 +1448,23 @@ machine) plus C4 (err_handlers registration only).
 - **v2-D3** — qwd-detect dump-call ownership confirmed in A2's
   TU (closes A2-D1) → v3 disposition: **upheld with deeper
   re-examination as I1 (HEADLINE) — defer with explicit revisit
-  trigger.** Aorus archaeology
+  trigger; subsequently LANDED in sub-cycle 4.** Aorus archaeology
   (`patches/0014-Lever-Q-watchdog-kthread.patch` does NOT
   include the dump call; the dump function is defined in
   `patches/0023-mode-b-telemetry-S1-S2-S3.patch` — A1's
   canonical ancestor — but the LEGACY code already had A3-style
   patches into A2's TU; the carve preserved the cross-TU edit).
   The recarve principle is documented as not-absolute in the
-  carve design spec; the v1 shape is internally consistent and
+  carve design spec; the v1 shape was internally consistent and
   production-validated. **Recommendation: defer (option d) with
   explicit revisit trigger** (a third addon needs to write at
   A2's detection latch, or an atomic-rename initiative on the
-  addon layer consolidates the addon TUs). Surfaced as I1 +
-  I4; deferred.
+  addon layer consolidates the addon TUs). Sub-cycle 4 fired
+  trigger (ii) when the A1-D1 atomic rename was bundled with
+  this hoist into a paired-cascade to amortise the 4-branch
+  force-push cost. Landed via option (a) per I1's sub-cycle 4
+  resolution (hoisted INTO A2 via mechanism option (1) —
+  A1's header forward-decl already in scope).
 
 - **v2-D4** — no must-fix sentinel → v3 disposition: **upheld
   (zero-delta sentinel holds for A3).** The v3 triangulation
@@ -1473,11 +1492,63 @@ machine) plus C4 (err_handlers registration only).
   catalog closeout commit (no precursor; cosmetic per Step 11
   guidance).**
 
-(No code-side improvements landed — v2 already meets v3
-quality bar at the code level; zero-delta sentinel holds at
-`f57a38b2f45b7f757e1982734e587336bb25606a`. The architectural
-question surfaced as I1 (HEADLINE) is deferred per
-default-reject + cascade-tax + explicit-revisit-trigger.)
+(No code-side improvements landed in sub-cycle 3 — v2 already met
+v3 quality bar at the code level; zero-delta sentinel held at
+`f57a38b2f45b7f757e1982734e587336bb25606a` until sub-cycle 4
+opened the architectural question.)
+
+## Improvements landed (sub-cycle 4)
+
+- **`A3-recovery-I1`** — cross-cluster
+  `tb_egpu_dump_aer_trigger_event` call hoisted out of A3's
+  patch into A2's commit. Revisit-trigger (ii) per the I1
+  sub-cycle 3 deferral catalog ("atomic-rename initiative on
+  the addon layer consolidates the addon TUs") fired when
+  sub-cycle 4 bundled A1-D1 (the atomic-sweep rename of
+  A1-owned `tb_egpu_recover_*` primitives to `tb_egpu_pcie_*`)
+  with this hoist. Both improvements share the 4-branch
+  force-push cascade exactly once, amortising the cascade cost
+  asymmetry that made each improvement individually unattractive
+  for a single-improvement sub-cycle.
+
+  Mechanism: option (1) per the deferral catalog — A1's
+  `nv-tb-egpu-pcie.h` already declares
+  `tb_egpu_dump_aer_trigger_event`, and A2's `nv-tb-egpu-qwd.h`
+  already includes that header (for the
+  `struct tb_egpu_qwd_aer_snapshot` definition that A2 embeds
+  in `struct tb_egpu_qwd`). A2 calls the function directly
+  at its detection latch with zero new header plumbing. The
+  comment block in A2's TU is also rewritten from "addon A3
+  patches in the call to tb_egpu_dump_aer_trigger_event() at
+  this site" to "filled by the addon-A1 helper below" — A2 is
+  now fully self-contained at the call site.
+
+  Effect:
+  - A2's fork-branch tip advances from `cd1fe088` →
+    `353a859e` (a new commit landing the hoisted call).
+  - A3's fork-branch tip advances from `f57a38b2` →
+    `60dfe4c7` (rebase + cross-TU hunk into
+    `nv-tb-egpu-qwd.c` GONE; A3 stays in its own TUs:
+    `nv-tb-egpu-recover.{c,h}`, `nv-pci.c`, `nv-linux.h`,
+    `nv.c`, `nvidia-sources.Kbuild`).
+  - A3's `.patch` no longer touches `nv-tb-egpu-qwd.c` at all.
+  - A2's `.patch` grows by ~7 lines (the call + the rewritten
+    comment); A3's `.patch` shrinks by 8 lines (the cross-TU
+    hunk eliminated). Net: cleaner separation, zero
+    cross-cluster edits at A2's detection latch.
+  - Cascade-rebase on A4 (`8d85e1db` → `cddf8b9a`) and A5
+    (`9d62f2e6` → `5fab2573`) propagates the A1-D1 symbol
+    rename only — no behavioural changes.
+  - Range-diff on each rebased branch confirms semantic-only
+    changes (no inadvertent drift).
+
+  Force-push to `apnex/open-gpu-kernel-modules` on 5 branches
+  (A1, A2, A3, A4, A5) under the
+  `feedback_force_push_fork_carve_out` policy carve-out: cascade
+  required for the paired improvement's correctness; range-diff
+  confirms zero semantic drift; reflog preserves old SHAs; zero
+  open PRs affected; blast radius limited to external readers
+  re-fetching on next pull.
 
 ## Intent updates landed
 

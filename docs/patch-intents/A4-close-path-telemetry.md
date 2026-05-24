@@ -22,7 +22,7 @@ zero OR the close that brings `nvl->usage_count` / the UVM fd count
 back to zero), the driver SHALL additionally capture a minimal
 hardware-health snapshot — PMC_BOOT_0 (via a `ioremap`+`ioread32` on
 BAR0) and WPR2 (via [[A1-pcie-primitives]]'s
-`tb_egpu_recover_read_wpr2`) — plus a one-word `wpr2_up:` health
+`tb_egpu_pcie_read_wpr2`) — plus a one-word `wpr2_up:` health
 verdict, so an operator can answer "was the GPU alive and clean at
 last-close?" by reading dmesg alone. The persistent capability A4
 grants the driver is "every close-path event leaves evidence — a
@@ -129,7 +129,7 @@ side of A4). The function SHALL:
    `pmc_ok = false` otherwise (with `pmc_boot_0` left at its
    initial `0xdeadbeef` sentinel).
 4. Call [[A1-pcie-primitives]]'s
-   `tb_egpu_recover_read_wpr2(bar0_phys, &wpr2_raw)` to capture
+   `tb_egpu_pcie_read_wpr2(bar0_phys, &wpr2_raw)` to capture
    WPR2 via A1's own self-contained `ioremap`+`ioread32`+`iounmap`
    helper; record the return code in `wpr2_rc`.
 5. Emit exactly one `NV_DBG_ERRORS` log line of the form
@@ -137,7 +137,7 @@ side of A4). The function SHALL:
    with the PMC and WPR2 value placeholders preceded by either
    `"0x"` (success) or `"MAPFAIL:"` (the respective read failed)
    and the trailing `wpr2_up:` reading `"YES"` when
-   `(wpr2_raw & TB_EGPU_RECOVER_WPR2_VAL_MASK) != 0` and `"no"`
+   `(wpr2_raw & TB_EGPU_PCIE_WPR2_VAL_MASK) != 0` and `"no"`
    otherwise.
 
 The function MUST be passive — no register writes, no DMA, no state
@@ -151,21 +151,21 @@ than crashing or returning early.
 - **GIVEN** a probed eGPU with a valid BAR0 and the GPU responding
   to MMIO
 - **AND** WPR2 is clear (raw value masked with
-  `TB_EGPU_RECOVER_WPR2_VAL_MASK` is zero)
+  `TB_EGPU_PCIE_WPR2_VAL_MASK` is zero)
 - **WHEN** `tb_egpu_close_diag_pdev(pdev, "post-shutdown")` runs
 - **THEN** exactly one `NV_DBG_ERRORS` line MUST be emitted of the
   form
   `"tb_egpu [CLOSE]: site=post-shutdown   pdev=0000:08:00.0 bar0=0x... PMC_BOOT_0=0x... WPR2=0x00000000 wpr2_up:no\n"`
 - **AND** the temporary `ioremap` mapping for PMC_BOOT_0 MUST be
   released via `iounmap` before the function returns
-- **AND** A1's `tb_egpu_recover_read_wpr2` SHALL be the only WPR2
+- **AND** A1's `tb_egpu_pcie_read_wpr2` SHALL be the only WPR2
   reader (A4 MUST NOT duplicate the WPR2 ioremap logic)
 
 #### Scenario: WPR2-stuck last-close emits a "wpr2_up:YES" snapshot line
 - **GIVEN** a probed eGPU close-path fires during a
   WPR2-stuck failure mode (post-rmInit-FAIL recovery in flight via
   [[A3-recovery]])
-- **AND** `(wpr2_raw & TB_EGPU_RECOVER_WPR2_VAL_MASK) != 0`
+- **AND** `(wpr2_raw & TB_EGPU_PCIE_WPR2_VAL_MASK) != 0`
 - **WHEN** `tb_egpu_close_diag_pdev(pdev, "close-entry")` runs
 - **THEN** the snapshot line MUST emit `wpr2_up:YES`
 - **AND** the line MUST be unambiguously attributable to the close
@@ -303,7 +303,7 @@ and supersede the legacy hardcoded `pci_get_domain_bus_and_slot(0,
   event, not a heartbeat).
 - This patch does NOT introduce any new PCIe / AER / WPR2 read
   primitive. WPR2 is read exclusively via
-  [[A1-pcie-primitives]]'s `tb_egpu_recover_read_wpr2`; A4 only
+  [[A1-pcie-primitives]]'s `tb_egpu_pcie_read_wpr2`; A4 only
   adds the small PMC_BOOT_0 `ioremap`+`ioread32` block local to
   the close-path callsite. The full AER / LnkSta / DPC dump
   primitive (`tb_egpu_dump_aer_trigger_event`) is intentionally
@@ -432,15 +432,15 @@ lines align in dmesg and post-mortem grep is straightforward.
     `NVIDIA_UVM_SOURCES += nvidia-uvm/nv-tb-egpu-uvm.c` after
     `uvm_linux.c`.
 - **A1 ABI consumed:** A4 calls A1's
-  `tb_egpu_recover_read_wpr2(bar0_phys, &raw)` once from
+  `tb_egpu_pcie_read_wpr2(bar0_phys, &raw)` once from
   `tb_egpu_close_diag_pdev` to capture WPR2; uses A1's
-  `TB_EGPU_RECOVER_WPR2_VAL_MASK` constant to derive the
+  `TB_EGPU_PCIE_WPR2_VAL_MASK` constant to derive the
   `wpr2_up:` verdict. A4 does NOT call A1's
   `tb_egpu_dump_aer_trigger_event` — that primitive is reserved
   for [[A3-recovery]] and the watchdog (per A1's documented
   contract A4 holds the option to call with `out = NULL` but v1
   exercises only the small WPR2 helper). A4 does NOT call A1's
-  topology walker (`tb_egpu_recover_walk_to_root_port`), DPC
+  topology walker (`tb_egpu_pcie_walk_to_root_port`), DPC
   reader, or full AER reader — those primitives are reserved for
   the investigation-grade dump surface that the
   addon-recarve audit trimmed out of A4.
@@ -469,7 +469,9 @@ lines align in dmesg and post-mortem grep is straightforward.
 - **Fork branch:** `a4-close-path-telemetry` on
   `apnex/open-gpu-kernel-modules` (sits on top of `a3-recovery`;
   the cumulative diff carries C1-C5 + E1 + A1 + A2 + A3 + A4 at
-  tip `8d85e1db85675b6bec81dd63f4f63a950c258123`).
+  tip `cddf8b9ad3cc999ae3ede135d46b0c7258985cdc` (sub-cycle 4
+  paired cascade; previously
+  `8d85e1db85675b6bec81dd63f4f63a950c258123`)).
 - **Cross-module surface:** A4 introduces two
   `EXPORT_SYMBOL_GPL` symbols (`tb_egpu_close_diag_pdev`,
   `tb_egpu_get_gpu_pdev`) — these are the only

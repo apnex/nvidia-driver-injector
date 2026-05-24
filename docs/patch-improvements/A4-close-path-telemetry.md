@@ -4,8 +4,10 @@ review-date: 2026-05-23
 reviewer: Claude Opus 4.7
 v1-tip-sha: 8d85e1db85675b6bec81dd63f4f63a950c258123
 v2-tip-sha: 8d85e1db85675b6bec81dd63f4f63a950c258123
+v3-tip-sha: cddf8b9ad3cc999ae3ede135d46b0c7258985cdc
 status: accepted
 intent-updates: []
+sub-cycle-4-cascade: A1-D1
 ---
 
 # A4-close-path-telemetry — improvement triage
@@ -1051,7 +1053,20 @@ existing invariants (I1/I6/I7/I8/I9/I10), 1 as confirmation that
 a prior cross-patch reconciliation commit (`e8fb311`) is durable
 (I11). The fork-branch tip
 `v1-tip-sha == v2-tip-sha == 8d85e1db85675b6bec81dd63f4f63a950c258123`
-holds.)
+held until sub-cycle 4's paired A1-D1 cascade.)
+
+## Improvements landed (sub-cycle 4)
+
+(No A4-owned improvements landed. A4's fork-branch tip advances
+from `8d85e1db` → `cddf8b9a` as a pure cascade-rebase under
+the sub-cycle 4 paired A1-D1 + A3-D3 force-push cascade. The only
+delta vs the v2 tip is A4's two references to A1's renamed
+primitives — `tb_egpu_recover_read_wpr2` → `tb_egpu_pcie_read_wpr2`
+and `TB_EGPU_RECOVER_WPR2_VAL_MASK` →
+`TB_EGPU_PCIE_WPR2_VAL_MASK`, both in `nv-tb-egpu-close.c` and
+mirrored in `nv-tb-egpu-close.h` documentation — propagated in
+lockstep with A1's rename commit. Range-diff vs original is
+semantic-only.)
 
 ## Intent updates landed
 
