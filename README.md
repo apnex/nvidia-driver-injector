@@ -155,7 +155,8 @@ Full layered design with component-ownership table: [`docs/architecture.md`](doc
 
 ### `NVRM: probe routine was not called for 1 device(s)`
 
-`driver_override` on the GPU's PCI device is blocking auto-bind — typically left over from a `scripts/remove.sh` run or an earlier `aorus-5090-egpu` install.\
+`driver_override` on the GPU's PCI device is blocking auto-bind — typically left over from a `scripts/remove.sh` run or an earlier `aorus-5090-egpu` install.
+
 The entrypoint clears any non-`nvidia` override automatically; upgrade your image, or manually:
 
 ```bash
@@ -167,7 +168,8 @@ docker compose restart
 
 The container exits at the BAR1-verify step with `BAR1 too small: <N> bytes (need ≥ 34359738368 = 32 GiB)`.\
 The kernel cmdline is missing `thunderbolt.host_reset=false` or `pci=resource_alignment=35@<bridge_bdf>`.\
-BAR1 sizing happens once at boot and cannot be changed at runtime on TB-tunneled hardware.\
+BAR1 sizing happens once at boot and cannot be changed at runtime on TB-tunneled hardware.
+
 Re-run `Layer 1` host bring-up, then reboot:
 
 ```bash
