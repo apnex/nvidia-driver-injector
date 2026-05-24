@@ -42,6 +42,8 @@ The full producer / consumer contract is in [`docs/consumer-contract.md`](docs/c
 
 Full step-by-step for both paths (Thunderbolt authorisation, what `apply.sh` does, all flags, migration from `aorus-5090-egpu`) is in [`docs/install-workflow.md`](docs/install-workflow.md).
 
+---
+
 ## Use
 
 The injector is infrastructure — you don't interact with it directly.
@@ -60,6 +62,8 @@ Workload Deployments gate on the producer/consumer contract — see [`docs/consu
 
 Day-2 operations (logs, graceful unload, driver upgrade) live in [`docs/teardown-workflow.md`](docs/teardown-workflow.md).
 
+---
+
 ## Test
 
 Three distinct things called "test":
@@ -71,6 +75,8 @@ Three distinct things called "test":
 | **Repo gates (for contributors)** | [`docs/testing.md`](docs/testing.md) | `bash tests/run.sh` + `tools/validate-patchset.sh` |
 
 The diag container is a **separate** image (`apnex/nvidia-driver-diag:1.0`) with its own lifecycle — isolated by design so its CUDA-devel surface cannot bloat or destabilise the injector.
+
+---
 
 ## Remove
 
@@ -108,23 +114,28 @@ sudo ./scripts/remove.sh
 The no-reboot "really gone" variant uses the container's `purge` subcommand instead.
 Full teardown reference (every flag, every file removed, what's left behind on purpose, the two-tool model): [`docs/teardown-workflow.md`](docs/teardown-workflow.md).
 
+---
+
 ## Architecture
 
 ```
-Layer 3  Workload  (vLLM / OpenCode / …)         — separate compose stack
-Layer 2  Driver injector container               — this repo
-Layer 1  Host config  (cmdline / modprobe.d / udev / bridge cap)
-Layer 0  Hardware     (AORUS 5090 over TB, NUC 15 Pro+)
+Layer 3  Workload                     - vLLM / OpenCode / … (separate compose stack)
+Layer 2  Driver injector container    - this repo
+Layer 1  Host config                  - cmdline / modprobe.d / udev / bridge cap
+Layer 0  Hardware                     - AORUS 5090 over TB, NUC 15 Pro+
 ```
 
-`scripts/apply.sh` (run once on the host) sets up Layer 1.
-The container at this repo's root runs Layer 2: builds the patched `nvidia.ko` against the host's `/lib/modules/$(uname -r)/build`, loads it via `modprobe`, materialises `/dev/nvidia*`, and engages persistence mode.
-Layer 3 is whatever consumes `/dev/nvidia*`.
+Layer 0 is the hardware — out of scope for this repo.
+Layer 1 is the host config, set up once by `scripts/apply.sh`.
+Layer 2 is the driver-injector container at this repo's root: it builds the patched `nvidia.ko` against the host's `/lib/modules/$(uname -r)/build`, loads it via `modprobe`, materialises `/dev/nvidia*`, and engages persistence mode.
+Layer 3 is the workload, whatever consumes `/dev/nvidia*`.
 
 Full layered design with component-ownership table: [`docs/architecture.md`](docs/architecture.md).
 
 > **`apnex/aorus-5090-egpu`** is the frozen predecessor — same patches, deployed via host systemd services instead of a container.
 > Alternative geometries; pick one, do not stack.
+
+---
 
 ## Troubleshooting
 
@@ -167,6 +178,8 @@ The eGPU is not enumerated on the PCI bus.
 Check the TB cable, eGPU power, and `boltctl list` for authorisation.
 The clean exit is by design — the container is meant to be left as `restart: unless-stopped` and pick the GPU up when it appears.
 
+---
+
 ## Building the image
 
 ```bash
@@ -188,6 +201,8 @@ Build inputs:
 
 Patch drift fails the image build, not the pod start.
 
+---
+
 ## Why this exists
 
 NVIDIA's open kernel module, unmodified, commits a Thunderbolt-attached Blackwell GPU to a permanent lost state on a single transient PCIe read — and the resulting failure cascade hard-locks the host.
@@ -195,6 +210,8 @@ The patched build here mitigates it; the upstream-bound subset is being prepared
 
 Shipping the driver as a container makes its lifecycle declarative: the image rebuilds + loads the module against whatever kernel the host is running, so kernel upgrades don't mean a hand rebuild.
 Same pattern as NVIDIA's [GPU Operator](https://github.com/NVIDIA/gpu-operator) driver DaemonSet.
+
+---
 
 ## License
 
