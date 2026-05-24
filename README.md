@@ -78,11 +78,11 @@ The diag container is a **separate** image (`apnex/nvidia-driver-diag:1.0`) with
 ## Remove
 
 Reverse the install order: Layer 3 (workload) → Layer 2 (this container) → Layer 1 (host).
+Stop your GPU consumers first (anything holding `/dev/nvidia*`) using their own teardown — the commands below tear down only the injector.
 
 ### Path A — docker-compose
 
 ```bash
-cd /path/to/your/workload && docker compose down
 cd /root/nvidia-driver-injector
 docker compose run --rm driver-injector uninstall
 docker compose down
@@ -91,7 +91,6 @@ docker compose down
 ### Path B — k3s DaemonSet
 
 ```bash
-kubectl delete deploy/vllm -n default --ignore-not-found
 kubectl exec -n kube-system daemonset/nvidia-driver-injector -- /entrypoint.sh uninstall
 kubectl delete -f k8s/daemonset.yaml
 ```
