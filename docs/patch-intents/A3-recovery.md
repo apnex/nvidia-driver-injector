@@ -503,7 +503,7 @@ one mandatory log line (slot_reset's PMC_BOOT_0 read decides
 RECOVERED-or-DISCONNECT and emits the corresponding line) plus the
 per-cycle uevent (`RECOVERING` → `READY` or `PERMANENT_FAIL`). The
 `tb_egpu_recover_surrenders` counter is read by the standing soak
-gate (per the production-migration plan §5) — a non-zero value in a
+gate (per the upstream-plan Gate §5) — a non-zero value in a
 soak window blocks promotion.
 
 ## Provenance

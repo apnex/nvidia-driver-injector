@@ -468,9 +468,9 @@ or earlier-patch files).
   counters stay at zero. The TODO comment in the source ("flip
   to 1 once production soak passes") acknowledges this. The
   default may be flipped to 1 once the v2 → production cutover
-  completes (per `docs/production-migration.md`). No delta —
+  completes (per `docs/upstream-plan.md`). No delta —
   the v1 default is correct and the operator surface is
-  documented in production-migration.
+  documented in upstream-plan.
 - **The probe-time WPR2 check's success path increments
   `fire_count` but does NOT call the trigger.** This is by
   design — the boot-persistence hypothesis was falsified

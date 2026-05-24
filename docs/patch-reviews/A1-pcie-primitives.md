@@ -37,7 +37,7 @@ already used the de-branded `C5` `os_pci_*` API in its recovery
 state machine — the P1-P7 refactor on 2026-05-12
 (`project_patch_refactor_2026_05_12`) had already rewritten the
 coupling between recovery and the disconnect-state primitives.
-`production-migration.md` §3 anticipated a redesign here ("re-express
+`upstream-plan.md` §3 anticipated a redesign here ("re-express
 A1/A2 against the de-branded C5 bridge"); exploration during the
 recarve falsified that — the API call sites were already correct, so
 the recarve was extraction, not redesign. The genuinely

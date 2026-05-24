@@ -462,10 +462,10 @@ no direct in-driver patch ancestor):
   modprobe.d line itself should be removed from the project repo
   (`scripts/host-files/etc/modprobe.d/nvidia-driver-injector.conf:54-55`).
 - **Proposed state:** Add a Scope-boundary clause clarifying that
-  the modprobe.d removal is a **post-soak production-migration
+  the modprobe.d removal is a **post-soak upstream-plan Gate
   step**, not part of E1's patch surface. E1 lands the in-driver
   fix; the modprobe.d retirement waits on `≥14-day soak +
-  cutover` per `docs/production-migration.md` (the C+E+A
+  cutover` per `docs/upstream-plan.md` (the C+E+A
   geometry's standard cutover gate).
 - **Value:** Forward-looking clarity for the operator. A future
   maintainer reading E1's intent might assume the modprobe.d line
@@ -474,7 +474,7 @@ no direct in-driver patch ancestor):
   fallbacks.
 - **Cost:** ~3 lines added to v2 intent's Scope boundary.
   Re-opens intent's `reviewed` lint state. The cross-reference
-  to `docs/production-migration.md` couples E1's intent to
+  to `docs/upstream-plan.md` couples E1's intent to
   project-operational documentation, which the upstream-bound
   Core+E layer should be agnostic of. Project-operational state
   belongs in addon-layer documentation (or in the modprobe.d
@@ -485,13 +485,13 @@ no direct in-driver patch ancestor):
 - **Resolution:** deferred — the retirement-timeline concern is
   **operational/addon**, not upstream-Core. Documenting it in E1's
   upstream-bound intent would mix concerns. The
-  `production-migration.md` cutover gate is the right home; if
+  `upstream-plan.md` cutover gate is the right home; if
   the operator reads E1's Scope boundary and infers immediate
   removal, the modprobe.d file's own banner comment can be
   updated to add "kept until production cutover" — that's
   addon-layer state. **Disposition for follow-up:** Task 14's
   cross-patch surface audit should add a one-liner to
-  `production-migration.md` (or the modprobe.d banner) when
+  `upstream-plan.md` (or the modprobe.d banner) when
   reconciling addon-layer state; the E1 catalog tracks the gap
   for posterity.
 
