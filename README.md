@@ -44,28 +44,21 @@ Full step-by-step for both paths (Thunderbolt authorisation, what `apply.sh` doe
 
 ## Use
 
-The injector runs as `restart: unless-stopped` and outlives its own logs.
-Day-to-day, you treat `/dev/nvidia*` as available and bring up your workload:
+The injector is infrastructure — you don't interact with it directly.
+Once installed, your workload uses the GPU as normal.
 
-```bash
-cd /path/to/your/workload
-docker compose up -d
-```
+### Path A — docker-compose
 
-The injector logs are reference, not interactive:
+`/dev/nvidia*` is available on the host.
+Container workloads consume the GPU via the standard `nvidia-container-toolkit` injection (already configured by `apply.sh`).
 
-```bash
-docker compose logs -f driver-injector
-```
+### Path B — k3s DaemonSet
 
-`docker compose down` stops the container but leaves the kernel module loaded — module state is host state.
-For graceful unload (driver upgrade, node decommission, wedged-module recovery), use the `uninstall` subcommand:
+Workload Deployments gate on the producer/consumer contract — see [`docs/consumer-contract.md`](docs/consumer-contract.md) for the required `nodeSelector`, `runtimeClassName`, and env settings.
 
-```bash
-docker compose run --rm driver-injector uninstall
-```
+---
 
-Driver upgrade (image-tag bump) and rollback procedures are in [`docs/teardown-workflow.md`](docs/teardown-workflow.md).
+Day-2 operations (logs, graceful unload, driver upgrade) live in [`docs/teardown-workflow.md`](docs/teardown-workflow.md).
 
 ## Test
 
