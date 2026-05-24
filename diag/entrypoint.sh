@@ -124,8 +124,12 @@ cmd_version() {
     local build_date='unknown'
     [[ -r /etc/diag-build-date ]] && build_date="$(cat /etc/diag-build-date)"
 
-    local cuda_ver='unknown'
-    if [[ -r /usr/local/cuda/version.json ]]; then
+    # CUDA_VERSION is set as an env var by the nvidia/cuda base image
+    # (verified on cuda:13.0.0-base-ubuntu24.04). The version.json file
+    # is only present in -devel images, not -base; we used to read it
+    # and report "unknown" on -base. Prefer env, fall back to file.
+    local cuda_ver="${CUDA_VERSION:-unknown}"
+    if [[ "$cuda_ver" = 'unknown' && -r /usr/local/cuda/version.json ]]; then
         local parsed
         parsed="$(awk -F'"' '/"version"/ {print $4; exit}' /usr/local/cuda/version.json 2>/dev/null || true)"
         [[ -n "$parsed" ]] && cuda_ver="$parsed"
