@@ -1,0 +1,27 @@
+# nvidia-driver-diag — convenience compose for the diagnostic container.
+#
+# Usage:
+#   sudo docker compose -f diag/docker-compose.yml build
+#   sudo docker compose -f diag/docker-compose.yml run --rm diag suite
+#   sudo docker compose -f diag/docker-compose.yml run --rm diag nvbandwidth -l
+#
+# This compose is independent of the injector's docker-compose.yml at the
+# repo root — the two containers have separate lifecycles by design (a
+# diag-container failure must NOT cascade to the injector container that
+# owns the live nvidia.ko on the host).
+
+services:
+  diag:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: apnex/nvidia-driver-diag:1.0
+    runtime: nvidia
+    environment:
+      # All GPUs visible (single-GPU host, in practice this is GPU 0).
+      NVIDIA_VISIBLE_DEVICES: all
+      # `compute` for CUDA kernels; `utility` for nvidia-smi.
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    # No volumes, no privileged, no host PID — this container is
+    # read-only by intent. All GPU access goes through the NVIDIA
+    # Container Toolkit's runtime-injected libcuda / libnvidia-ml.

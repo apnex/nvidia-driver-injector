@@ -1,0 +1,101 @@
+============================================================
+ nvidia-driver-diag suite — 2026-05-24T01:37:35Z
+============================================================
+nvidia-driver-diag image version : 1.0
+image build date (UTC)           : 2026-05-24T01:31:44Z
+nvbandwidth                      : v0.9  (upstream tag v0.9)
+deviceQuery                      : cuda-samples v13.0
+CUDA runtime                     : unknown
+
+------------------------------------------------------------
+ GPU + driver (nvidia-smi)
+------------------------------------------------------------
+name, driver_version, pstate, pcie.link.gen.current, pcie.link.width.current, memory.total [MiB]
+NVIDIA GeForce RTX 5090, 595.71.05, P8, 1, 4, 32607 MiB
+
+------------------------------------------------------------
+ nvbandwidth — canonical CE baseline
+------------------------------------------------------------
+nvbandwidth Version: v0.9
+Built from Git version: 1aa9e81
+
+CUDA Runtime Version: 13020
+CUDA Driver Version: 13020
+Driver Version: 595.71.05
+
+86a6a67f579d
+Device 0: NVIDIA GeForce RTX 5090 (00000000:04:00)
+
+Running host_to_device_memcpy_ce.
+memcpy CE CPU(row) -> GPU(column) bandwidth (GB/s)
+           0
+ 0      2.84
+
+SUM host_to_device_memcpy_ce 2.84
+
+Running device_to_host_memcpy_ce.
+memcpy CE CPU(row) <- GPU(column) bandwidth (GB/s)
+           0
+ 0      3.29
+
+SUM device_to_host_memcpy_ce 3.29
+
+Running host_to_device_bidirectional_memcpy_ce.
+memcpy CE CPU(row) <-> GPU(column) bandwidth (GB/s)
+           0
+ 0      2.72
+
+SUM host_to_device_bidirectional_memcpy_ce 2.72
+
+NOTE: The reported results may not reflect the full capabilities of the platform.
+Performance can vary with software drivers, hardware clocks, and system topology.
+
+
+------------------------------------------------------------
+ deviceQuery — capabilities
+------------------------------------------------------------
+deviceQuery Starting...
+
+ CUDA Device Query (Runtime API) version (CUDART static linking)
+
+Detected 1 CUDA Capable device(s)
+
+Device 0: "NVIDIA GeForce RTX 5090"
+  CUDA Driver Version / Runtime Version          13.2 / 13.0
+  CUDA Capability Major/Minor version number:    12.0
+  Total amount of global memory:                 32111 MBytes (33670758400 bytes)
+  (170) Multiprocessors, (128) CUDA Cores/MP:    21760 CUDA Cores
+  GPU Max Clock rate:                            2407 MHz (2.41 GHz)
+  Memory Clock rate:                             14001 Mhz
+  Memory Bus Width:                              512-bit
+  L2 Cache Size:                                 100663296 bytes
+  Maximum Texture Dimension Size (x,y,z)         1D=(131072), 2D=(131072, 65536), 3D=(16384, 16384, 16384)
+  Maximum Layered 1D Texture Size, (num) layers  1D=(32768), 2048 layers
+  Maximum Layered 2D Texture Size, (num) layers  2D=(32768, 32768), 2048 layers
+  Total amount of constant memory:               65536 bytes
+  Total amount of shared memory per block:       49152 bytes
+  Total shared memory per multiprocessor:        102400 bytes
+  Total number of registers available per block: 65536
+  Warp size:                                     32
+  Maximum number of threads per multiprocessor:  1536
+  Maximum number of threads per block:           1024
+  Max dimension size of a thread block (x,y,z): (1024, 1024, 64)
+  Max dimension size of a grid size    (x,y,z): (2147483647, 65535, 65535)
+  Maximum memory pitch:                          2147483647 bytes
+  Texture alignment:                             512 bytes
+  Concurrent copy and kernel execution:          Yes with 2 copy engine(s)
+  Run time limit on kernels:                     No
+  Integrated GPU sharing Host Memory:            No
+  Support host page-locked memory mapping:       Yes
+  Alignment requirement for Surfaces:            Yes
+  Device has ECC support:                        Disabled
+  Device supports Unified Addressing (UVA):      Yes
+  Device supports Managed Memory:                Yes
+  Device supports Compute Preemption:            Yes
+  Supports Cooperative Kernel Launch:            Yes
+  Device PCI Domain ID / Bus ID / location ID:   0 / 4 / 0
+  Compute Mode:
+     < Default (multiple host threads can use ::cudaSetDevice() with device simultaneously) >
+
+deviceQuery, CUDA Driver = CUDART, CUDA Driver Version = 13.2, CUDA Runtime Version = 13.0, NumDevs = 1
+Result = PASS

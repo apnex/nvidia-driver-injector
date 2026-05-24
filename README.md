@@ -340,6 +340,31 @@ For container-optimised OSes that lack `kernel-devel` (Talos, Bottlerocket,
 CoreOS), a multi-image precompiled-per-kernel variant would be a future
 addition.
 
+## Companion: `diag/` (GPU bandwidth + capability diagnostics)
+
+A separate diagnostic container lives at [`diag/`](diag/) — bundles
+[`nvbandwidth`](https://github.com/NVIDIA/nvbandwidth) (the canonical
+PCIe / TB4 bandwidth benchmark) and `deviceQuery` (GPU capability
+report). Intentionally **isolated** from this injector container so the
+diagnostic toolchain's much larger CUDA-devel surface (boost-devel +
+nvcc + cuda-samples) does not bloat the load-bearing module-injection
+image, and a diag-container failure cannot cascade to the live nvidia.ko
+on the host. Same repo, same `docker compose` UX, **independent semver**
+(`apnex/nvidia-driver-diag:1.0`).
+
+```bash
+# Build (one-off)
+sudo docker compose -f diag/docker-compose.yml build
+
+# Canonical baseline — H2D + D2H + H2D-bidirectional + deviceQuery
+sudo docker compose -f diag/docker-compose.yml run --rm diag suite
+```
+
+See [`diag/README.md`](diag/README.md) for the full subcommand set and
+the inaugural baseline reading at
+[`diag/baseline-2026-05-24-aorus.14.txt`](diag/baseline-2026-05-24-aorus.14.txt)
+(H2D = 2.84 GB/s, D2H = 3.29 GB/s — TB4-saturated, matches expectation).
+
 ## Troubleshooting
 
 ### `NVRM: probe routine was not called for 1 device(s)`
