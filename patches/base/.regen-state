@@ -1,4 +1,4 @@
-# regen-base-patches.sh state -- generated 2026-05-24T00:00:00Z
+# regen-base-patches.sh state -- generated 2026-05-24T00:38:45Z
 # base tag: 595.71.05 (51edebee79919b54f498c19a0be31982cd97646e)
 C1-kbuild-version-mk  c1-kbuild-version-mk  51cfd01e9cfe62d3559fcd127a29e68d727803cb
 C2-aer-internal-unmask  c2-aer-internal-unmask  403d5daf8d80da79991534b3c9d2ef70ac91b63a
