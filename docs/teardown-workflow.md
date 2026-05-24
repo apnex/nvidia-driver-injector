@@ -217,8 +217,9 @@ sudo ./scripts/remove.sh
 ### Path B (k3s DaemonSet)
 
 ```bash
-# Layer 3 — your GPU consumer(s).
-kubectl delete deploy/vllm -n default   # or whichever Deployment(s) consume the GPU
+# Layer 3 — your GPU consumer(s). Use --ignore-not-found so the step
+# is a no-op if no consumer is currently running.
+kubectl delete deploy/vllm -n default --ignore-not-found
 
 # Layer 2 — graceful unload then delete the DaemonSet.
 cd /root/nvidia-driver-injector
@@ -240,7 +241,7 @@ are:
 | 3 | modprobe.d | Remove `/etc/modprobe.d/nvidia-driver-injector.conf` |
 | 4 | udev rules | Remove `/etc/udev/rules.d/{79,80}-nvidia-driver-injector*.rules` |
 | 5 | Re-enable ICDs | Rename `*.nvidia-driver-injector-disabled` back to original Vulkan / EGL / OpenCL ICD paths |
-| 6 | k3s teardown | Delete cluster-side `RuntimeClass nvidia` (and, under `--purge`, remove `nvidia-ctk` containerd drop-ins). Skip with `--skip-k3s` |
+| 6 | k3s teardown | Under `--purge` only: delete cluster-side `RuntimeClass nvidia` + remove `nvidia-ctk` containerd drop-ins. Default leaves both alone (RuntimeClass may pre-exist from other tools; `apply.sh` only creates-if-missing). Skip entirely with `--skip-k3s` |
 | 7 | Reload + optional cmdline revert | `systemctl daemon-reload`, `udevadm control --reload-rules`; cmdline only if `--revert-cmdline` |
 
 It also cleans up the legacy `nvidia-driver-injector-gpu-engage.service`

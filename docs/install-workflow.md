@@ -85,7 +85,7 @@ artifacts (override: `--force-coexist`). The ten numbered steps in
 | 5 | `nvidia-driver-injector-bridge-link-cap` binary + `.service` | Systemd unit ordered `Before=docker.service`; enabled |
 | 6 | udev rules | `79-…rules` (`/dev/nvidia*` group perms) + `80-…disable-audio.rules` (unbind eGPU HDMI audio function) |
 | 7 | Disable Vulkan / EGL / OpenCL ICDs | Compute-only posture; rename → `*.nvidia-driver-injector-disabled` |
-| 8 | Apply bridge-link-cap immediately | Skipped if reboot pending or eGPU not enumerated; lets the injector start without rebooting |
+| 8 | Apply bridge-link-cap immediately | `systemctl start nvidia-driver-injector-bridge-link-cap.service` (so the service shows as `active (exited)` in status.sh's `is-active` check). Skipped if reboot pending or eGPU not enumerated; lets the injector start without rebooting |
 | 9 | **k3s integration** (Path B only) | If k3s is present: `nvidia-ctk runtime configure --runtime=containerd` + install cluster-side `RuntimeClass nvidia`. Skipped automatically on docker-only hosts; skip explicitly with `--skip-k3s`. **Note:** `nvidia-ctk` prints `It is recommended that containerd daemon be restarted` — this targets the system containerd at `/etc/containerd/`, which k3s does not read; k3s uses its own containerd config under `/var/lib/rancher/k3s/agent/etc/containerd/` and step 9 verifies the nvidia handler is already present there. Benign for k3s. |
 | 10 | Summary + reboot guidance | Flags reboot-needed if cmdline was modified |
 

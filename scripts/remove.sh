@@ -210,25 +210,31 @@ done
 # ===========================================================================
 # Step 6: k3s / Kubernetes integration teardown
 # ===========================================================================
-# Mirror apply.sh step 9. We always remove the cluster-side RuntimeClass
-# (cheap; safe; consumers referencing it will fail loudly rather than silently
-# scheduling onto a node that no longer has the runtime configured). The
-# containerd-config revert is opt-in via --purge — the nvidia runtime
-# handler is benign on a host that doesn't use it, and tearing it down can
-# disrupt OTHER GPU consumers if you keep nvidia-container-toolkit around.
-step "6/7 k3s teardown (RuntimeClass + optional containerd revert)"
+# Mirror apply.sh step 9. RuntimeClass removal is opt-in via --purge —
+# apply.sh creates the RuntimeClass idempotently (only if missing), so
+# the cluster may have had `RuntimeClass nvidia` from another tool BEFORE
+# apply.sh ever ran. Removing it by default would nuke shared infra. The
+# containerd-config revert is also --purge-only — the nvidia runtime
+# handler is benign on a host that doesn't use it, and tearing it down
+# can disrupt OTHER GPU consumers if you keep nvidia-container-toolkit
+# around.
+step "6/7 k3s teardown (RuntimeClass + containerd revert; both --purge-only)"
 
 if [[ "$SKIP_K3S" -eq 1 ]]; then
     yellow "  --skip-k3s set; leaving RuntimeClass + containerd config alone"
 elif ! command -v k3s >/dev/null 2>&1 && ! systemctl list-unit-files k3s.service 2>/dev/null | grep -q '^k3s\.service'; then
     yellow "  k3s not present; nothing to tear down"
+elif [[ "$PURGE" -ne 1 ]]; then
+    yellow "  RuntimeClass/nvidia + containerd drop-ins left alone (default)"
+    yellow "  (apply.sh creates RuntimeClass idempotently; may pre-date apply.sh"
+    yellow "   from other tools — use --purge to remove)"
 else
     if command -v kubectl >/dev/null 2>&1; then
         kubeconfig="/etc/rancher/k3s/k3s.yaml"
         if [[ -r "$kubeconfig" ]]; then
             if KUBECONFIG="$kubeconfig" kubectl get runtimeclass nvidia >/dev/null 2>&1; then
                 act "KUBECONFIG=${kubeconfig} kubectl delete runtimeclass nvidia"
-                green "    RuntimeClass/nvidia removed"
+                green "    RuntimeClass/nvidia removed (--purge)"
             else
                 yellow "    RuntimeClass/nvidia not present — already absent"
             fi

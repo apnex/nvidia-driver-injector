@@ -174,7 +174,13 @@ cmd_uninstall() {
 
     log "uninstall ✓ — all nvidia* modules unloaded from host kernel"
     log "host state restored to pre-injector baseline"
-    log "(re-run 'docker compose up' to reload)"
+    # KUBERNETES_SERVICE_HOST is set when running inside a k8s pod
+    # (Path B); absent means we're on docker compose (Path A).
+    if [[ -n "${KUBERNETES_SERVICE_HOST:-}" ]]; then
+        log "(re-apply 'kubectl apply -f k8s/daemonset.yaml' to reload)"
+    else
+        log "(re-run 'docker compose up' to reload)"
+    fi
     return 0
 }
 

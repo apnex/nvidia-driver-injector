@@ -313,8 +313,13 @@ step "8/10 apply bridge-link-cap now (without rebooting)"
 
 if [[ "${CMDLINE_CHANGED:-0}" -eq 0 && "$NO_ACT" -eq 0 ]]; then
     if /usr/local/sbin/nvidia-driver-injector-bridge-link-cap status 2>/dev/null | grep -q '^bridge='; then
-        green "  applying bridge-link-cap now (so the next docker run sees a capped link)"
-        /usr/local/sbin/nvidia-driver-injector-bridge-link-cap apply
+        green "  starting bridge-link-cap.service (applies cap; leaves service active=exited)"
+        # Use `systemctl start` rather than running the binary directly so
+        # the service's runtime state reflects reality after a fresh
+        # install. status.sh checks `is-active` on the service; running
+        # the binary directly leaves the service in inactive(dead) until
+        # the next boot, producing a false-FAIL on the post-install verify.
+        systemctl start nvidia-driver-injector-bridge-link-cap.service
     else
         yellow "  GPU not currently enumerated; cap will apply at next boot"
     fi
