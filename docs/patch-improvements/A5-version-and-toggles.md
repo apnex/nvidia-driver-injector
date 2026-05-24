@@ -4,8 +4,10 @@ review-date: 2026-05-23
 reviewer: Claude Opus 4.7
 v1-tip-sha: 9d62f2e6445a8899643f2f04ee8397e16ec6be16
 v2-tip-sha: 9d62f2e6445a8899643f2f04ee8397e16ec6be16
+v3-tip-sha: 5fab257398d8b11b2b129eac472d108964000a03
 status: accepted
 intent-updates: []
+sub-cycle-4-cascade: A1-D1
 ---
 
 # A5-version-and-toggles — improvement triage
@@ -435,7 +437,16 @@ holds.
 
 (none — all four v3-considered improvements are defer or reject;
 A5 is build-system metadata where the default-reject discipline
-applies strongly. Zero-delta v3 outcome; fork branch unchanged.)
+applies strongly. Zero-delta v3 outcome at the A5-owned tier.)
+
+## Improvements landed (sub-cycle 4)
+
+(No A5-owned improvements landed. A5's fork-branch tip advances
+from `9d62f2e6` → `5fab2573` as a pure cascade-rebase under
+the sub-cycle 4 paired A1-D1 + A3-D3 force-push cascade. A5
+references no A1 or A3 internal primitives (only the
+`CONFIG_NV_TB_EGPU` Kbuild gate and `NV_VERSION_STRING` value);
+the range-diff vs original is 1:1 identical for A5's own commit.)
 
 ## Intent updates landed
 

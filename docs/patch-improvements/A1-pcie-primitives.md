@@ -4,8 +4,10 @@ review-date: 2026-05-23
 reviewer: Claude Opus 4.7
 v1-tip-sha: 8097786cdeeacd371b5309c2b78c8a1f9627a939
 v2-tip-sha: 124e9c5eb8a433bcf78a2c2753c612eaf29c3a31
+v3-tip-sha: fe6ad92f6b770d5240db7783b40303278ac0d8ea
 status: accepted
 intent-updates: [Requirement-2-DPC-offsets]
+sub-cycle-4-landed: [A1-pcie-primitives-I1]
 ---
 
 # A1-pcie-primitives — improvement triage
@@ -268,15 +270,24 @@ in the addon-recarve campaign
   lines 351-365).
 - **Intent impact:** none (rename is mechanical; signature
   contracts unchanged).
-- **Triage decision:** defer
-- **Resolution:** deferred per spec — sub-cycle 3's task 9
-  bindings explicitly state "the atomic-sweep rename is OUT OF
-  SCOPE for sub-cycle 3 per the spec." Re-examined per M6;
+- **Triage decision:** defer (sub-cycle 3) → **landed in sub-cycle 4**
+- **Resolution (sub-cycle 3):** deferred per spec — sub-cycle 3's
+  task 9 bindings explicitly state "the atomic-sweep rename is OUT
+  OF SCOPE for sub-cycle 3 per the spec." Re-examined per M6;
   aorus archaeology surfaces no new evidence to flip the
   disposition. The infix is harmless for behavior (every symbol
-  is uniquely prefixed `tb_egpu_*`). The rename remains
-  available for Task 14's cross-patch consistency audit or a
-  post-soak follow-on.
+  is uniquely prefixed `tb_egpu_*`). The rename remained available
+  for Task 14's cross-patch consistency audit or a post-soak
+  follow-on.
+- **Resolution (sub-cycle 4):** **landed** as fork-branch commit
+  `fe6ad92f` on `a1-pcie-primitives` (bundled with A3-D3 in the
+  paired-cascade sub-cycle 4 to amortise the 4-branch force-push
+  cost). Six A1-owned symbols renamed atomically; tb-egpu-pcie.h
+  and tb-egpu-pcie.c only. A3's own `tb_egpu_recover_*` symbols
+  (the recovery state machine) stay as-is — those names continue
+  to be accurate. Cascade-rebases on A2-A5 update the consumer
+  references in lockstep. See "Improvements landed (sub-cycle 4)"
+  below.
 
 ### A1-pcie-primitives-I2 — Re-examine D2: `CONFIG_NV_TB_EGPU` source-list gate on A1's foundation translation unit
 
@@ -544,9 +555,10 @@ in the addon-recarve campaign
 ## Re-examination of sub-cycle 2 deferrals
 
 - **v2-D1** — `tb_egpu_recover_*` infix rename → v3
-  disposition: **upheld (deferred)**. Per sub-cycle 3 spec, the
-  atomic-sweep rename is OUT OF SCOPE; the rename remains
-  available for Task 14 or a post-soak follow-on. Aorus
+  disposition: **upheld (deferred)**, then **landed in sub-cycle
+  4** (paired-cascade with A3-D3). Per sub-cycle 3 spec, the
+  atomic-sweep rename was OUT OF SCOPE for sub-cycle 3; the
+  rename was held available for a post-soak follow-on. Aorus
   archaeology
   (`patches/0023-mode-b-telemetry-S1-S2-S3.patch` lines 245-247
   for the walker, lines 250-258 for the DPC reader, lines
@@ -555,9 +567,10 @@ in the addon-recarve campaign
   infix on any of these — the infix entered the namespace
   during the 2026-05-12 P1-P6 refactor's de-brand from
   `aorus_*` to `tb_egpu_*` plus the file rename to
-  `nv-lever-m-recover.c`. The `_recover_` carry is therefore
+  `nv-lever-m-recover.c`. The `_recover_` carry was therefore
   a 2-step legacy artifact (the file rename, then the
-  carve out of that file). Surfaced as I1; deferred.
+  carve out of that file). Surfaced as I1; landed as fork-branch
+  commit `fe6ad92f` on `a1-pcie-primitives` in sub-cycle 4.
 - **v2-D2** — `CONFIG_NV_TB_EGPU` source-list gate on A1 →
   v3 disposition: **upheld (deferred to A5)**. Aorus
   archaeology
@@ -592,6 +605,29 @@ in the addon-recarve campaign
   `PCI_EXP_DPC_STATUS = +0x08`). Code commit on
   `a1-pcie-primitives` fork branch; intent precursor commit on
   `feature/v3-patch-improvements` injector branch.
+
+## Improvements landed (sub-cycle 4)
+
+- **`A1-pcie-primitives-I1`** — atomic-sweep rename of A1-owned
+  `tb_egpu_recover_*` primitives to `tb_egpu_pcie_*`
+  (`tb_egpu_recover_read_wpr2` → `tb_egpu_pcie_read_wpr2`;
+  `tb_egpu_recover_walk_to_root_port` →
+  `tb_egpu_pcie_walk_to_root_port`;
+  `tb_egpu_recover_read_dpc_state` →
+  `tb_egpu_pcie_read_dpc_state`;
+  `tb_egpu_recover_read_aer_full` →
+  `tb_egpu_pcie_read_aer_full`;
+  `TB_EGPU_RECOVER_WPR2_REG_OFFSET` →
+  `TB_EGPU_PCIE_WPR2_REG_OFFSET`;
+  `TB_EGPU_RECOVER_WPR2_VAL_MASK` →
+  `TB_EGPU_PCIE_WPR2_VAL_MASK`). Fork-branch commit `fe6ad92f`
+  on `a1-pcie-primitives` (rebases tip from `124e9c5e` →
+  `fe6ad92f`). Bundled with A3-D3 (the cross-cluster `dump_aer`
+  call hoist) in the paired-cascade sub-cycle 4 to amortise the
+  4-branch force-push cost; both improvements landed in lockstep.
+  A3's own `tb_egpu_recover_*` symbols (recovery state machine,
+  state struct, gate enums, slot_reset callbacks) stay as-is —
+  those names continue to be accurate.
 
 ## Intent updates landed
 

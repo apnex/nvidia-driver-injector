@@ -4,8 +4,10 @@ review-date: 2026-05-23
 reviewer: Claude Opus 4.7
 v1-tip-sha: cd1fe0888e7b2d135b0bb27214e32d31c9b382c3
 v2-tip-sha: cd1fe0888e7b2d135b0bb27214e32d31c9b382c3
+v3-tip-sha: 353a859e5c5768b7ebc2d258596d2f3cb336e4a1
 status: accepted
 intent-updates: []
+sub-cycle-4-landed: [A3-recovery-I1-paired-call-site-landing]
 ---
 
 # A2-bus-loss-watchdog — improvement triage
@@ -757,6 +759,30 @@ campaign (`project_addon_recarve_merged_2026_05_22`).
 
 (no improvements landed — v2 already meets v3 quality bar; zero-delta
 sentinel holds at `cd1fe0888e7b2d135b0bb27214e32d31c9b382c3`)
+
+## Improvements landed (sub-cycle 4)
+
+- **`A3-recovery-I1` paired call-site landing.** In sub-cycle 4
+  the cross-cluster `tb_egpu_dump_aer_trigger_event` call that A3
+  previously inserted into A2's translation unit was hoisted into
+  A2's own commit (per the A3-D3 deferral revisit-trigger
+  "atomic-rename initiative", fired via the paired A1-D1 cascade).
+  A2's fork-branch tip advances to `353a859e` — the
+  zero-delta sentinel from sub-cycle 3 is intentionally
+  invalidated because A2 now owns the call-site permanently at
+  its detection latch (no A3 source-side reach into
+  `nv-tb-egpu-qwd.c`). Mechanism: A2's header already includes
+  A1's `nv-tb-egpu-pcie.h` (which declares
+  `tb_egpu_dump_aer_trigger_event`), so the call lands with zero
+  new header plumbing. A2's `.patch` grows by ~6 lines; the
+  cumulative A2+A3 file contents shrink by 1 line (the new
+  comment block "filled by the addon-A1 helper below" is one
+  line shorter than the old "addon A3 patches in" comment block).
+  Pure naming change to A1's exports
+  (`tb_egpu_recover_*` → `tb_egpu_pcie_*` per A1-D1) propagates
+  through this rebase but A2 itself references no A1 primitives
+  directly — only the `tb_egpu_dump_aer_trigger_event` symbol,
+  which never carried the `_recover_` infix.
 
 ## Intent updates landed
 

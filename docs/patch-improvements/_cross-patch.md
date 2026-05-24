@@ -166,6 +166,107 @@ passes after the sweep (Rule 6 resolves all listed targets).
 `validate-patchset.sh` passes (frontmatter is not load-bearing for
 compose-or-compile).
 
+## Sub-cycle 4 landed (XPATCH-S2 paired-cascade)
+
+Sub-cycle 4 bundles two architectural-cleanup improvements that were
+individually deferred from sub-cycle 3 with explicit revisit triggers,
+because each alone was too cost-asymmetric for a single-improvement
+sub-cycle (each triggers a 4-branch force-push cascade through A2-A5
+on the fork). Bundling amortises the cascade cost exactly once.
+
+### Improvements in the bundle
+
+1. **A1-pcie-primitives-I1 (A1-D1)** — atomic-sweep rename of A1-owned
+   `tb_egpu_recover_*` primitives to `tb_egpu_pcie_*`:
+   - `TB_EGPU_RECOVER_WPR2_REG_OFFSET` → `TB_EGPU_PCIE_WPR2_REG_OFFSET`
+   - `TB_EGPU_RECOVER_WPR2_VAL_MASK` → `TB_EGPU_PCIE_WPR2_VAL_MASK`
+   - `tb_egpu_recover_read_wpr2` → `tb_egpu_pcie_read_wpr2`
+   - `tb_egpu_recover_walk_to_root_port` →
+     `tb_egpu_pcie_walk_to_root_port`
+   - `tb_egpu_recover_read_dpc_state` → `tb_egpu_pcie_read_dpc_state`
+   - `tb_egpu_recover_read_aer_full` → `tb_egpu_pcie_read_aer_full`
+
+   A3's own `tb_egpu_recover_*` symbols (the recovery state machine,
+   state struct, gate enums, slot_reset callbacks) stay as-is — those
+   names continue to be accurate. Fork-branch commit `fe6ad92f` on
+   `a1-pcie-primitives`; consumer references in A3/A4 updated in
+   lockstep during cascade-rebase.
+
+2. **A3-recovery-I1 (A3-D3)** — hoist `tb_egpu_dump_aer_trigger_event`
+   call OUT of A2's translation unit. A3 previously inserted the call
+   into `nv-tb-egpu-qwd.c` (A2's TU) — the exact cross-cluster edit
+   pattern the 2026-05-22 addon-recarve campaign was designed to
+   eliminate. Mechanism: option (1) per the I1 deferral catalog — A1
+   already declares the function in `nv-tb-egpu-pcie.h` (consumed by
+   A2 transitively via `nv-tb-egpu-qwd.h`); A2 makes the call directly
+   at its detection latch with zero new header plumbing. Fork-branch
+   commit `353a859e` on `a2-bus-loss-watchdog` (lands the call in A2's
+   own TU); A3's rebased commit `60dfe4c7` drops the cross-TU hunk
+   entirely.
+
+### Why bundle
+
+Each improvement standalone hits the same 4-branch cascade
+(A1→A5 or A2→A5). The cascade cost is fixed-per-execution, not
+proportional to improvement count, so bundling halves the cumulative
+cascade tax for the same surface payoff.
+
+### Effect on patches
+
+- `patches/addon/A1-pcie-primitives.patch`: 0-net-line rename only —
+  same diff stat, different symbol spellings inside lines.
+- `patches/addon/A2-bus-loss-watchdog.patch`: grows by ~7 lines (the
+  call + the rewritten "filled by addon-A1 helper" comment).
+- `patches/addon/A3-recovery.patch`: shrinks by ~8 lines (the
+  cross-TU hunk into `nv-tb-egpu-qwd.c` GONE; A3 stays in its own
+  TUs: `nv-tb-egpu-recover.{c,h}`, `nv-pci.c`, `nv-linux.h`, `nv.c`,
+  `nvidia-sources.Kbuild`). The renamed A1 symbol consumers
+  (`tb_egpu_recover_read_wpr2` → `tb_egpu_pcie_read_wpr2`, etc.)
+  remain at 4 call sites with the new names.
+- `patches/addon/A4-close-path-telemetry.patch`: 0-net-line — 2
+  symbol-rename references propagated from A1-D1.
+- `patches/addon/A5-version-and-toggles.patch`: 0-line change — A5
+  references no A1 or A3 internal primitives.
+
+### Fork-branch tip advances
+
+| Branch                  | sub-cycle 3 tip | sub-cycle 4 tip |
+|-------------------------|-----------------|-----------------|
+| a1-pcie-primitives      | `124e9c5e`      | `fe6ad92f`      |
+| a2-bus-loss-watchdog    | `cd1fe088`      | `353a859e`      |
+| a3-recovery             | `f57a38b2`      | `60dfe4c7`      |
+| a4-close-path-telemetry | `8d85e1db`      | `cddf8b9a`      |
+| a5-version-and-toggles  | `9d62f2e6`      | `5fab2573`      |
+
+### Range-diff verification
+
+Each cascaded branch verified semantic-only changes:
+- A1: original `124e9c5e` (I8) preserved 1:1; new commit `fe6ad92f`
+  contains only the rename.
+- A2: original `cd1fe088` preserved 1:1 (as `34397b21` after rebase
+  on new A1 base); new commit `353a859e` contains the hoist.
+- A3: original `f57a38b2` rebased to `60dfe4c7` with EXACTLY the
+  expected deltas — the cross-TU hunk into `nv-tb-egpu-qwd.c` gone,
+  and the A1 symbol references renamed.
+- A4: original `8d85e1db` rebased to `cddf8b9a` with only A1 symbol
+  references renamed.
+- A5: original `9d62f2e6` rebased to `5fab2573` 1:1 identical.
+
+### Force-push policy
+
+5 fork branches (A1, A2, A3, A4, A5) force-pushed to
+`apnex/open-gpu-kernel-modules` under the
+`feedback_force_push_fork_carve_out` policy carve-out:
+- Cascade is required for the paired improvement's correctness (A1's
+  symbol exports must match A3's consumers); range-diff confirms
+  zero semantic drift in A2-A5's own logic.
+- Reflog preserves old SHAs (`124e9c5e`, `cd1fe088`, `f57a38b2`,
+  `8d85e1db`, `9d62f2e6` all reachable via reflog for ≥30 days).
+- Zero open PRs (NVIDIA-upstream or against the apnex fork) affected;
+  the upstream PRs are scoped to C1-C5 + E1 — none of A1-A5 touched
+  by sub-cycle 4 is upstream-bound.
+- Blast radius: external readers re-fetch on next pull only.
+
 ## Atomic-sweep improvements (cross-patch deferred)
 
 ### XPATCH-S1 — A5↔C1 symmetric carve adjudication

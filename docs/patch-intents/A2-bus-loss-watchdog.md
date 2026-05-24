@@ -298,8 +298,8 @@ immediately after sleep returns.
   possible heartbeat that detects bus loss in the DMA-path
   context where Q-active is silent.
 - This patch does NOT consume [[A1-pcie-primitives]]'s
-  `TB_EGPU_RECOVER_WPR2_REG_OFFSET` or
-  `TB_EGPU_RECOVER_WPR2_VAL_MASK` constants because A2 does not
+  `TB_EGPU_PCIE_WPR2_REG_OFFSET` or
+  `TB_EGPU_PCIE_WPR2_VAL_MASK` constants because A2 does not
   read WPR2 at all. Those constants are for [[A3-recovery]]'s
   WPR2-stuck detection path. A2 defines its own dead-bus value
   `TB_EGPU_QWD_DEAD_BUS_VALUE = 0xFFFFFFFFu` because the dead-bus
@@ -391,10 +391,10 @@ state.
     `nv-tb-egpu-qwd.h` to get the snapshot type transitively;
     A2 MUST NOT re-define the struct (the header comment makes
     this explicit).
-  - Does NOT call `tb_egpu_recover_read_wpr2`,
-    `tb_egpu_recover_walk_to_root_port`,
-    `tb_egpu_recover_read_dpc_state`, or
-    `tb_egpu_recover_read_aer_full` — A2's heartbeat reads only
+  - Does NOT call `tb_egpu_pcie_read_wpr2`,
+    `tb_egpu_pcie_walk_to_root_port`,
+    `tb_egpu_pcie_read_dpc_state`, or
+    `tb_egpu_pcie_read_aer_full` — A2's heartbeat reads only
     `PMC_BOOT_0` directly; the AER/DPC/topology primitives are
     consumed by [[A3-recovery]] at the recovery dispatch site.
   - Does NOT call `tb_egpu_dump_aer_trigger_event` from A2's
@@ -402,8 +402,8 @@ state.
     `out = &nvl->qwd->last_aer` so the snapshot lands in A2's
     per-device storage). A2 provides storage; A3 provides the
     call.
-  - Does NOT consume `TB_EGPU_RECOVER_WPR2_REG_OFFSET` or
-    `TB_EGPU_RECOVER_WPR2_VAL_MASK` because A2 does not poll WPR2.
+  - Does NOT consume `TB_EGPU_PCIE_WPR2_REG_OFFSET` or
+    `TB_EGPU_PCIE_WPR2_VAL_MASK` because A2 does not poll WPR2.
 - **C5 ABI consumed:** A2 calls
   [[C5-crash-safety]]'s `os_pci_is_disconnected(nv->handle)` (skip
   read if already disconnected) and `os_pci_set_disconnected(nv->handle)`

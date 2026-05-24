@@ -34,19 +34,19 @@ permanent project-local infrastructure.
 
 ## Requirements
 
-### Requirement: Driver SHALL expose the `tb_egpu_recover_read_wpr2` BAR0 helper with a stable signature
+### Requirement: Driver SHALL expose the `tb_egpu_pcie_read_wpr2` BAR0 helper with a stable signature
 
-The driver SHALL provide `int tb_egpu_recover_read_wpr2(u64 bar0_phys, u32 *raw_out)`
+The driver SHALL provide `int tb_egpu_pcie_read_wpr2(u64 bar0_phys, u32 *raw_out)`
 declared in `kernel-open/nvidia/nv-tb-egpu-pcie.h` and defined in
 `kernel-open/nvidia/nv-tb-egpu-pcie.c`. The helper SHALL `ioremap` a
-single page covering `bar0_phys + TB_EGPU_RECOVER_WPR2_REG_OFFSET`
+single page covering `bar0_phys + TB_EGPU_PCIE_WPR2_REG_OFFSET`
 (`0x88a828`), `ioread32` the WPR2 status register at that offset, and
 `iounmap` the temporary mapping before returning. The helper MUST
 return `0` on success with the raw value stored through `*raw_out`,
 `-EINVAL` if `raw_out` is `NULL` or `bar0_phys == 0`, and `-ENOMEM` if
 the `ioremap` call fails. The mapping MUST NOT persist across the
 call; every invocation MUST be page-bounded and self-contained. The
-header MUST also expose the bit-mask `TB_EGPU_RECOVER_WPR2_VAL_MASK`
+header MUST also expose the bit-mask `TB_EGPU_PCIE_WPR2_VAL_MASK`
 (`0xfffffff0`) covering the `_VAL` DRF field (bits 31:4) so consumers
 can extract the live-WPR2 indication from the raw register value
 without re-deriving the mask.
@@ -55,7 +55,7 @@ without re-deriving the mask.
 - **GIVEN** a non-zero `bar0_phys` reachable as MMIO
 - **AND** a valid non-NULL `raw_out` pointer
 - **WHEN** the consumer (e.g. `A3-recovery`'s WPR2 polling loop) calls
-  `tb_egpu_recover_read_wpr2(bar0_phys, &raw)`
+  `tb_egpu_pcie_read_wpr2(bar0_phys, &raw)`
 - **THEN** the call MUST return `0`
 - **AND** `raw` MUST hold the 32-bit value read from
   `bar0_phys + 0x88a828`
@@ -64,7 +64,7 @@ without re-deriving the mask.
 
 #### Scenario: WPR2 read rejects bad inputs and ioremap failures
 - **GIVEN** either `bar0_phys == 0` or `raw_out == NULL`
-- **WHEN** the consumer calls `tb_egpu_recover_read_wpr2(...)`
+- **WHEN** the consumer calls `tb_egpu_pcie_read_wpr2(...)`
 - **THEN** the call MUST return `-EINVAL`
 - **AND** when `raw_out != NULL` the function MUST first set `*raw_out
   = 0` (so a caller that ignores the return code does not read stale
@@ -80,12 +80,12 @@ The driver SHALL provide four passive sample helpers in
 load-bearing for downstream consumers — every prototype MUST be
 treated as a stable contract for the lifetime of the addon stack:
 
-- `struct pci_dev *tb_egpu_recover_walk_to_root_port(struct pci_dev *start)`
+- `struct pci_dev *tb_egpu_pcie_walk_to_root_port(struct pci_dev *start)`
   — iterates `pci_upstream_bridge()` from `start` until
   `pci_pcie_type(p) == PCI_EXP_TYPE_ROOT_PORT`, bounded to at most
   8 hops; MUST return the matching `pci_dev *` on success, or
   `NULL` if no root port is reached within the hop budget.
-- `void tb_egpu_recover_read_dpc_state(struct pci_dev *pdev, bool *present_out, u16 *dpc_status_out, u16 *dpc_ctl_out)`
+- `void tb_egpu_pcie_read_dpc_state(struct pci_dev *pdev, bool *present_out, u16 *dpc_status_out, u16 *dpc_ctl_out)`
   — reads the DPC extended capability; MUST zero all three output
   values before any other action, MUST set `*present_out = false`
   and return immediately if `pdev == NULL` or the DPC cap is
@@ -95,7 +95,7 @@ treated as a stable contract for the lifetime of the addon stack:
   `<linux/pci_regs.h>`; `+0x04` is `PCI_EXP_DPC_CAP` and is
   deliberately not read — its bits are static capability
   declarations rather than incident-analysis state).
-- `void tb_egpu_recover_read_aer_full(struct pci_dev *pdev, int *pos_out, u32 *uesta, u32 *uemsk, u32 *uesvrt, u32 *cesta, u32 *cemsk, u32 hdrlog[4], u32 *rootcmd, u32 *rootsta, u32 *errsrc)`
+- `void tb_egpu_pcie_read_aer_full(struct pci_dev *pdev, int *pos_out, u32 *uesta, u32 *uemsk, u32 *uesvrt, u32 *cesta, u32 *cemsk, u32 hdrlog[4], u32 *rootcmd, u32 *rootsta, u32 *errsrc)`
   — reads the AER extended capability; MUST zero every output
   before any other action; MUST tolerate `pdev == NULL` (returns
   with all-zero outputs and `*pos_out = 0`); MUST tolerate any
@@ -124,7 +124,7 @@ in `nv-tb-egpu-pcie.h`); A1 only writes the fields when
 #### Scenario: Topology walker reaches the host root port within the hop budget
 - **GIVEN** a GPU `pci_dev *start` reachable via at most 7 upstream
   bridges to the host root port
-- **WHEN** the consumer calls `tb_egpu_recover_walk_to_root_port(start)`
+- **WHEN** the consumer calls `tb_egpu_pcie_walk_to_root_port(start)`
 - **THEN** the call MUST return the `pci_dev *` whose
   `pci_pcie_type` is `PCI_EXP_TYPE_ROOT_PORT`
 - **AND** the call MUST NOT walk past the root port (the walk stops
@@ -134,7 +134,7 @@ in `nv-tb-egpu-pcie.h`); A1 only writes the fields when
 - **GIVEN** a starting `pci_dev` whose host root port is more than 8
   hops up the upstream chain (pathological topology — does not
   occur on any supported hardware but the bound is load-bearing)
-- **WHEN** the consumer calls `tb_egpu_recover_walk_to_root_port(start)`
+- **WHEN** the consumer calls `tb_egpu_pcie_walk_to_root_port(start)`
 - **THEN** the call MUST return `NULL`
 - **AND** the call MUST NOT spin or recurse — the walker MUST
   terminate after at most 8 hops
@@ -142,7 +142,7 @@ in `nv-tb-egpu-pcie.h`); A1 only writes the fields when
 #### Scenario: AER read tolerates absent capability without crashing
 - **GIVEN** a `pci_dev` whose extended-cap chain has no AER
   capability
-- **WHEN** the consumer calls `tb_egpu_recover_read_aer_full(pdev,
+- **WHEN** the consumer calls `tb_egpu_pcie_read_aer_full(pdev,
   &pos, ...)`
 - **THEN** every output MUST be zeroed (`*pos = 0`,
   `*uesta = *uemsk = ... = 0`)
@@ -200,7 +200,7 @@ own locking discipline.
   attributable
 
 #### Scenario: WPR2 helper does not retain any mapping across calls
-- **GIVEN** a consumer calls `tb_egpu_recover_read_wpr2(bar0_phys,
+- **GIVEN** a consumer calls `tb_egpu_pcie_read_wpr2(bar0_phys,
   &raw)` repeatedly in a polling loop
 - **WHEN** each call completes
 - **THEN** the temporary `ioremap` mapping MUST be released via
@@ -212,7 +212,7 @@ own locking discipline.
 
 - This patch deliberately does NOT introduce any watchdog kthread or
   per-poll register read at any cadence. The polling loop that
-  consumes `tb_egpu_recover_read_wpr2` and tracks the dead-bus
+  consumes `tb_egpu_pcie_read_wpr2` and tracks the dead-bus
   signature lives in [[A2-bus-loss-watchdog]]; A1 only provides the
   read helper.
 - This patch does NOT implement reset-and-reinit recovery or any
@@ -271,9 +271,9 @@ own locking discipline.
 | Trigger-event dump fires with valid `gpu_pdev` — main block | `pr_info` | Multi-line block tagged `"tb_egpu trigger [event=%s]:\n  GPU(%s)    LnkSta=0x%04x DevSta=0x%04x  AER UESta=0x%08x UEMsk=0x%08x UESvrt=0x%08x CESta=0x%08x CEMsk=0x%08x\n             AER HdrLog=%08x_%08x_%08x_%08x\n  Bridge(%s) LnkSta=0x%04x DevSta=0x%04x  AER UESta=0x%08x UEMsk=0x%08x UESvrt=0x%08x CESta=0x%08x CEMsk=0x%08x\n  Root(%s)   LnkSta=0x%04x DevSta=0x%04x  AER UESta=0x%08x UEMsk=0x%08x CESta=0x%08x CEMsk=0x%08x\n             RootCmd=0x%08x RootSta=0x%08x ErrorSrc=0x%08x\n  DPC: %s\n"` (the `DPC` placeholder resolves to `"(see follow-up)"` if DPC is present on the root port, else `"absent"`) |
 | Trigger-event dump follow-up — DPC detail (only when DPC is present) | `pr_info` | `"tb_egpu trigger [event=%s]: DPC Status=0x%04x Ctl=0x%04x\n"` |
 
-The four non-dump primitives (`tb_egpu_recover_read_wpr2`,
-`tb_egpu_recover_walk_to_root_port`, `tb_egpu_recover_read_dpc_state`,
-`tb_egpu_recover_read_aer_full`) intentionally emit no log output —
+The four non-dump primitives (`tb_egpu_pcie_read_wpr2`,
+`tb_egpu_pcie_walk_to_root_port`, `tb_egpu_pcie_read_dpc_state`,
+`tb_egpu_pcie_read_aer_full`) intentionally emit no log output —
 they are passive readers consumed inside hot polling loops and
 err_handler callbacks where per-call logging would either flood the
 log or distort the failure mode under investigation. The
@@ -310,10 +310,10 @@ silent-recovery log (those live in [[A3-recovery]] and
 - **Function signatures (load-bearing for downstream consumers —
   see [[A2-bus-loss-watchdog]], [[A3-recovery]],
   [[A4-close-path-telemetry]] reviews):**
-  - `int tb_egpu_recover_read_wpr2(u64 bar0_phys, u32 *raw_out)`
-  - `struct pci_dev *tb_egpu_recover_walk_to_root_port(struct pci_dev *start)`
-  - `void tb_egpu_recover_read_dpc_state(struct pci_dev *pdev, bool *present_out, u16 *dpc_status_out, u16 *dpc_ctl_out)`
-  - `void tb_egpu_recover_read_aer_full(struct pci_dev *pdev, int *pos_out, u32 *uesta, u32 *uemsk, u32 *uesvrt, u32 *cesta, u32 *cemsk, u32 hdrlog[4], u32 *rootcmd, u32 *rootsta, u32 *errsrc)`
+  - `int tb_egpu_pcie_read_wpr2(u64 bar0_phys, u32 *raw_out)`
+  - `struct pci_dev *tb_egpu_pcie_walk_to_root_port(struct pci_dev *start)`
+  - `void tb_egpu_pcie_read_dpc_state(struct pci_dev *pdev, bool *present_out, u16 *dpc_status_out, u16 *dpc_ctl_out)`
+  - `void tb_egpu_pcie_read_aer_full(struct pci_dev *pdev, int *pos_out, u32 *uesta, u32 *uemsk, u32 *uesvrt, u32 *cesta, u32 *cemsk, u32 hdrlog[4], u32 *rootcmd, u32 *rootsta, u32 *errsrc)`
   - `void tb_egpu_dump_aer_trigger_event(struct pci_dev *gpu_pdev, const char *trigger, struct tb_egpu_qwd_aer_snapshot *out)`
 - **Public struct (consumer-embedded):**
   `struct tb_egpu_qwd_aer_snapshot { u32 gpu_aer_uesta; u32 gpu_aer_cesta; u32 br_aer_uesta; u32 br_aer_cesta; u32 root_aer_uesta; u32 root_aer_cesta; u32 root_rootsta; u16 dpc_status; u8 valid; }`
@@ -321,11 +321,11 @@ silent-recovery log (those live in [[A3-recovery]] and
   (e.g. A2's `struct tb_egpu_qwd` per the header's file-level
   comment). A1 is the only writer of the fields; consumers are
   the only readers.
-- **Public constants:** `TB_EGPU_RECOVER_WPR2_REG_OFFSET = 0x88a828u`
+- **Public constants:** `TB_EGPU_PCIE_WPR2_REG_OFFSET = 0x88a828u`
   (NV_HUBMMU0_PRI_BASE + NV_HUBMMU_PRI_MMU_WPR2_ADDR_HI for
   Blackwell GB100/GB202 per published headers
   `src/common/inc/swref/published/blackwell/gb100/{hwproject.h,
-  dev_hubmmu_base.h}`); `TB_EGPU_RECOVER_WPR2_VAL_MASK =
+  dev_hubmmu_base.h}`); `TB_EGPU_PCIE_WPR2_VAL_MASK =
   0xfffffff0u` (bits 31:4 — the `_VAL` DRF field).
 - **Symbol-naming note:** the helpers all use the
   `tb_egpu_recover_*` prefix (with the single exception of

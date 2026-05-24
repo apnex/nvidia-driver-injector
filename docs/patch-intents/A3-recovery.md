@@ -46,8 +46,8 @@ the failure is beyond its software reach."
 When `rm_init_adapter` returns failure in `nv_start_device`, the driver
 SHALL call `tb_egpu_recover_trigger_post_rminit_fail(nvl)` BEFORE the
 existing failure path runs. The trigger SHALL read WPR2 via
-[[A1-pcie-primitives]]'s `tb_egpu_recover_read_wpr2(bar0_phys, &raw)`
-and mask the raw value with `TB_EGPU_RECOVER_WPR2_VAL_MASK`; if the
+[[A1-pcie-primitives]]'s `tb_egpu_pcie_read_wpr2(bar0_phys, &raw)`
+and mask the raw value with `TB_EGPU_PCIE_WPR2_VAL_MASK`; if the
 masked value is non-zero (WPR2 stuck) — or if
 `NVreg_TbEgpuRecoverTestForceTrigger == 1` overrides the WPR2-clear
 branch — the trigger SHALL run the pre-schedule gate function and on
@@ -62,8 +62,8 @@ the trigger fired, deferred, or surrendered.
 #### Scenario: WPR2 stuck after rmInit failure schedules recovery
 - **GIVEN** `rm_init_adapter` returns failure in `nv_start_device`
 - **AND** `NVreg_TbEgpuRecoverEnable == 1`
-- **AND** `tb_egpu_recover_read_wpr2(bar0_phys, &raw)` returns
-  `raw & TB_EGPU_RECOVER_WPR2_VAL_MASK != 0`
+- **AND** `tb_egpu_pcie_read_wpr2(bar0_phys, &raw)` returns
+  `raw & TB_EGPU_PCIE_WPR2_VAL_MASK != 0`
 - **AND** the H1 attempt cap is not yet exhausted (the gate returns
   `GATE_OK`)
 - **AND** the H2 rate-limit has elapsed since `last_fire_jiffies`
@@ -82,7 +82,7 @@ the trigger fired, deferred, or surrendered.
 #### Scenario: WPR2 clear after rmInit failure does not trigger recovery
 - **GIVEN** `rm_init_adapter` returns failure
 - **AND** `NVreg_TbEgpuRecoverEnable == 1`
-- **AND** the WPR2 raw value masked with `TB_EGPU_RECOVER_WPR2_VAL_MASK`
+- **AND** the WPR2 raw value masked with `TB_EGPU_PCIE_WPR2_VAL_MASK`
   is `0`
 - **AND** `NVreg_TbEgpuRecoverTestForceTrigger == 0`
 - **WHEN** the trigger runs
@@ -546,17 +546,22 @@ soak window blocks promotion.
 - **Fork branch:** `a3-recovery` on `apnex/open-gpu-kernel-modules`
   (sits on top of the cumulative `a2-bus-loss-watchdog` base; the
   cumulative diff carries C1-C5 + E1 + A1 + A2 + A3 at tip
-  `f57a38b2f45b7f757e1982734e587336bb25606a`).
+  `60dfe4c7f2bcb4fdae4be1d4073f432ebfba4f40` (sub-cycle 4 paired
+  cascade; previously `f57a38b2f45b7f757e1982734e587336bb25606a`
+  at sub-cycle 3 close).
 - **A1 ABI consumed:** A3 calls A1's
-  `tb_egpu_recover_read_wpr2(bar0_phys, &raw)` verbatim from both
+  `tb_egpu_pcie_read_wpr2(bar0_phys, &raw)` verbatim from both
   the probe-time check and the post-rmInit-FAIL trigger; masks the
-  result with A1's `TB_EGPU_RECOVER_WPR2_VAL_MASK` constant; and
+  result with A1's `TB_EGPU_PCIE_WPR2_VAL_MASK` constant; and
   calls A1's `tb_egpu_dump_aer_trigger_event(pci_dev, "<event>", out)`
   three times from `nv-pci.c` (event tags `"error-handler"`,
-  `"mmio-enabled"`, `"cor-error"`) and once from `nv-tb-egpu-qwd.c`
-  (event tag `"qwd-detect"` — see D1 below for the cross-cluster
-  patching question). The topology walker, DPC reader, and full
-  AER reader from A1's surface are NOT directly called by A3 in v1;
+  `"mmio-enabled"`, `"cor-error"`). The `"qwd-detect"` call site
+  (formerly inserted into `nv-tb-egpu-qwd.c` by A3's patch as a
+  cross-cluster edit) was hoisted INTO A2's commit in sub-cycle 4
+  per A3-recovery-I1 (see catalog "Improvements landed (sub-cycle 4)"
+  section). A3 no longer reaches into A2's TU. The topology walker,
+  DPC reader, and full AER reader from A1's surface are NOT
+  directly called by A3 in v1;
   they are reachable through `tb_egpu_dump_aer_trigger_event` which
   composes them internally.
 - **A2 ABI consumed:** A3 patches into A2's translation unit
