@@ -141,18 +141,24 @@ spec:
             - { name: etc-modprobe,  mountPath: /etc/modprobe.d,  readOnly: true }
             - { name: etc-group,     mountPath: /etc/group,       readOnly: true }
             - { name: lib-firmware,  mountPath: /lib/firmware }
-          # Liveness: nvidia module still loaded? Restart the pod (which
-          # re-runs the entrypoint) if not. 120s initial delay covers the
-          # cold-build path (~60-90s on this host).
-          livenessProbe:
+          # PC-1: startupProbe ONLY (no livenessProbe).
+          # NVIDIA gpu-operator PR #1317 explicitly retired lsmod-based
+          # livenessProbes because they cause undesirable container restarts
+          # that leave the driver daemonset in a bad state. Match their
+          # pattern: gate startup, then trust the FS readiness oracle
+          # (PC-3 /run/nvidia/injector/state) for runtime state.
+          startupProbe:
             exec:
               command:
                 - /bin/sh
                 - -c
-                - '[ -e /sys/module/nvidia/version ]'
-            initialDelaySeconds: 180
-            periodSeconds: 60
-            failureThreshold: 3
+                - '[ -f /run/nvidia/injector/state ] && grep -q ''"phase":"ready"'' /run/nvidia/injector/state'
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            # 120 × 10s = 1200s = 20 min budget for cold modprobe + init.
+            # Matches NVIDIA driver container's startupProbe budget.
+            failureThreshold: 120
           # Readiness: same check, faster cadence. Pod READY is what kubelet
           # surfaces as the DaemonSet `numberReady` count; consumers should
           # rely on the node LABEL (set by the entrypoint after the full
