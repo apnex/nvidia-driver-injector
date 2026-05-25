@@ -40,9 +40,43 @@
 
 set -euo pipefail
 
+# --- PC-4: structured exit codes ---
+# CONTRACT: exit code values are STABLE. Never reuse a number across
+# versions. Adding a new failure mode means adding a new number.
+# Consumers (kubelet's lastState.terminated.exitCode, must-gather.sh,
+# monitoring) treat these as a stable enum. Some codes are reserved
+# for future fail-sites (PC-1 startupProbe, PC-3 readiness file) and
+# may not yet appear in a fail() call — SC2034 here is intentional.
+# shellcheck disable=SC2034
+readonly EXIT_OK=0
+# shellcheck disable=SC2034
+readonly EXIT_NO_GPU=10              # PCI gate found no NVIDIA device
+readonly EXIT_BAR1_TOO_SMALL=11      # device present but BAR1 < 32 GiB
+readonly EXIT_KERNEL_BUILD_MISSING=20 # /lib/modules/$(uname -r)/build absent
+readonly EXIT_MODPROBE_FAILED=30     # modprobe nvidia returned non-zero
+readonly EXIT_GSP_FW_LOAD=31         # nvidia-smi reports firmware error
+# shellcheck disable=SC2034
+readonly EXIT_PERSISTENCE_FAILED=40  # nvidia-smi -pm 1 returned non-zero
+# shellcheck disable=SC2034
+readonly EXIT_DEVICE_MISSING=50      # /dev/nvidia* didn't materialise in time
+readonly EXIT_DKMS_SCRUB_FAILED=60   # PC-7 scrub couldn't remove .ko.xz
+readonly EXIT_UNKNOWN=99             # catch-all for not-yet-enumerated cases
+
 log()  { printf '[nvidia-driver-injector] %s\n' "$*"; }
 warn() { printf '[nvidia-driver-injector] WARN: %s\n' "$*" >&2; }
-fail() { printf '[nvidia-driver-injector] FAIL: %s\n' "$*" >&2; exit 1; }
+
+# fail() — replaces bare `exit 1` calls.
+# Emits structured exit code AND writes a /dev/kmsg marker so the failure
+# survives the container restart and is visible via dmesg/journalctl -k.
+fail() {
+    local code="$1"; shift
+    local msg="$*"
+    printf '[nvidia-driver-injector] FAIL (%s): %s\n' "$code" "$msg" >&2
+    # /dev/kmsg is rate-limited; <3> is KERN_ERR priority.
+    printf '<3>nvidia-driver-injector FAIL code=%s: %s\n' "$code" "$msg" \
+        > /dev/kmsg 2>/dev/null || true
+    exit "$code"
+}
 
 # ============================================================================
 # Node-label writer (k3s / Kubernetes consumer contract)
@@ -154,14 +188,14 @@ cmd_uninstall() {
         if [[ -n "$holders" ]] && echo "$holders" | grep -qE '[0-9]+'; then
             warn "GPU has active users; refusing to rmmod:"
             echo "$holders" | sed 's/^/    /' >&2
-            fail "stop GPU consumers (vLLM, ollama, nvidia-persistenced, …) and retry"
+            fail "$EXIT_UNKNOWN" "stop GPU consumers (vLLM, ollama, nvidia-persistenced, …) and retry"
         fi
     else
         # fuser not in image → fall back to checking refcount.
         local rc
         rc="$(cat /sys/module/nvidia/refcnt 2>/dev/null || echo 0)"
         if [[ "$rc" != "0" ]]; then
-            fail "/sys/module/nvidia/refcnt = ${rc} (≠ 0) — module in use; refusing rmmod"
+            fail "$EXIT_UNKNOWN" "/sys/module/nvidia/refcnt = ${rc} (≠ 0) — module in use; refusing rmmod"
         fi
     fi
 
@@ -171,7 +205,7 @@ cmd_uninstall() {
         if grep -q "^${m} " /proc/modules; then
             log "rmmod ${m} ..."
             if ! rmmod "$m"; then
-                fail "rmmod ${m} failed — kernel state may be inconsistent.
+                fail "$EXIT_UNKNOWN" "rmmod ${m} failed — kernel state may be inconsistent.
        Check 'dmesg | tail' and 'lsof /dev/nvidia*'.
        Recovery: reboot the host, or run apply.sh from aorus-5090-egpu repo."
             fi
@@ -181,7 +215,7 @@ cmd_uninstall() {
     # Verify post-rmmod
     for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do
         if grep -q "^${m} " /proc/modules; then
-            fail "post-rmmod verify: ${m} still loaded (refcount race?)"
+            fail "$EXIT_UNKNOWN" "post-rmmod verify: ${m} still loaded (refcount race?)"
         fi
     done
 
@@ -248,7 +282,7 @@ cmd_purge() {
                 log "  rm ${ko}"
                 removed=$((removed + 1))
             else
-                fail "rm ${ko} failed (read-only bind-mount? need :rw on /lib/modules)"
+                fail "$EXIT_UNKNOWN" "rm ${ko} failed (read-only bind-mount? need :rw on /lib/modules)"
             fi
         fi
     done
@@ -278,7 +312,7 @@ case "$SUBCOMMAND" in
         exit $?
         ;;
     *)
-        fail "unknown subcommand: '${SUBCOMMAND}' (expected: load | uninstall | purge)"
+        fail "$EXIT_UNKNOWN" "unknown subcommand: '${SUBCOMMAND}' (expected: load | uninstall | purge)"
         ;;
 esac
 
@@ -332,8 +366,17 @@ DKMS_ARTIFACTS="$(find "$KMOD_DIR" -maxdepth 1 -name 'nvidia*.ko.xz' 2>/dev/null
 if [[ -n "$DKMS_ARTIFACTS" ]]; then
     log "PC-7: scrubbing DKMS artifacts to prevent vanilla shadowing:"
     printf '%s\n' "$DKMS_ARTIFACTS" | sed 's/^/  /'
-    printf '%s\n' "$DKMS_ARTIFACTS" | xargs rm -f
-    depmod -a "$(uname -r)"
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        if ! rm -f "$f"; then
+            fail "$EXIT_DKMS_SCRUB_FAILED" "could not remove DKMS artifact: $f
+       (is /lib/modules bind-mounted rw? does the container have CAP_DAC_OVERRIDE?)"
+        fi
+    done <<< "$DKMS_ARTIFACTS"
+    if ! depmod -a "$(uname -r)"; then
+        fail "$EXIT_DKMS_SCRUB_FAILED" "depmod -a $(uname -r) failed after DKMS scrub
+       (module index inconsistent; modprobe may load stale entries)"
+    fi
     log "PC-7: scrub complete"
 else
     log "PC-7: no DKMS artifacts found (clean)"
@@ -378,7 +421,7 @@ read -r bar1_start bar1_end <<< "$resource_line"
 bar1_size=$(( bar1_end - bar1_start + 1 ))
 
 if [[ $bar1_size -lt $EXPECTED_BAR1_BYTES ]]; then
-    fail "BAR1 too small: ${bar1_size} bytes (need ≥ ${EXPECTED_BAR1_BYTES} = 32 GiB).
+    fail "$EXIT_BAR1_TOO_SMALL" "BAR1 too small: ${bar1_size} bytes (need ≥ ${EXPECTED_BAR1_BYTES} = 32 GiB).
        Host likely missing 'thunderbolt.host_reset=false' or
        'pci=resource_alignment=35@<bridge_bdf>' kernel cmdline.
        See https://github.com/apnex/aorus-5090-egpu for host-side prerequisites."
@@ -390,7 +433,7 @@ log "BAR1 verify ✓ — $((bar1_size / 1024 / 1024 / 1024)) GiB"
 # ============================================================================
 
 if [[ ! -d "$KSRC" ]]; then
-    fail "${KSRC} not found — host needs kernel-devel installed AND /lib/modules
+    fail "$EXIT_KERNEL_BUILD_MISSING" "kernel build dir absent: ${KSRC} — host needs kernel-devel installed AND /lib/modules
        bind-mounted into the container. Re-run with:
        docker run ... -v /lib/modules:/lib/modules:ro ..."
 fi
@@ -408,7 +451,7 @@ make modules \
     > /tmp/build.log 2>&1 || {
     warn "module build failed; tail of /tmp/build.log:"
     tail -40 /tmp/build.log >&2
-    fail "build failed"
+    fail "$EXIT_MODPROBE_FAILED" "module build failed (see /tmp/build.log tail above)"
 }
 log "build ✓"
 
@@ -437,7 +480,7 @@ KO_UVM="/src/nvidia-open-gpu-kernel-modules/kernel-open/nvidia-uvm.ko"
 KO_MODESET="/src/nvidia-open-gpu-kernel-modules/kernel-open/nvidia-modeset.ko"
 KO_DRM="/src/nvidia-open-gpu-kernel-modules/kernel-open/nvidia-drm.ko"
 
-[[ -f "$KO_NVIDIA" ]] || fail "expected ${KO_NVIDIA} not found after build"
+[[ -f "$KO_NVIDIA" ]] || fail "$EXIT_MODPROBE_FAILED" "expected ${KO_NVIDIA} not found after build"
 
 # ----------------------------------------------------------------------------
 # Firmware path — re-supply + symlink.
@@ -503,7 +546,7 @@ if [[ -n "$fw_version" ]]; then
     for fw in gsp_ga10x.bin gsp_tu10x.bin; do
         [[ -s "$fw_stash/$fw" ]] || continue   # not carried in this image
         if [[ ! -s "$fw_link/$fw" ]]; then
-            fail "GSP firmware not in place: ${fw_link}/${fw} does not resolve.
+            fail "$EXIT_GSP_FW_LOAD" "GSP firmware not in place: ${fw_link}/${fw} does not resolve.
        The kernel will request nvidia/${fw_version}/${fw} at device init and
        fail with -ENOENT. Verify /lib/firmware is bind-mounted rw and that
        step (a) above re-supplied the blob from ${fw_stash}."
@@ -551,7 +594,7 @@ load_module() {
     fi
 
     log "insmod ${ko_path} ..."
-    insmod "$ko_path" || fail "insmod ${ko_path} failed"
+    insmod "$ko_path" || fail "$EXIT_MODPROBE_FAILED" "insmod ${ko_path} failed"
 }
 
 load_module "nvidia"     "$KO_NVIDIA"
