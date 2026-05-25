@@ -213,14 +213,15 @@ sudo scripts/status.sh                               # expect: 39/0/0 or better
                                                      # (Path B is one fewer than Path A's 40)
 ```
 
-**Why delete-and-apply rather than rolling update:** the DaemonSet's image
-change DOES trigger a normal rolling update — but the pod is a "container of
-intent" that sleeps forever once the module is loaded, so kubelet sees no
-reason to terminate it on its own. The safe pattern is: explicit `uninstall`
-(which removes labels first → unloads modules), then delete the DaemonSet,
-then apply with the new tag. Skipping the `uninstall` step leaves the OLD
-module loaded in the host kernel while the NEW pod tries to insert
-freshly-built modules with the same name.
+**Why delete-and-apply rather than rolling update:** the DaemonSet declares
+`updateStrategy: OnDelete` (PC-10), so a manifest change — image tag bump,
+env var edit, anything — does **not** auto-cycle the pod. This is intentional:
+driver reloads must be deliberate (admin runs `kubectl delete pod`), not a
+side effect of editing an unrelated field. The safe upgrade pattern is:
+explicit `uninstall` (which removes labels first → unloads modules), then
+delete the DaemonSet, then apply with the new tag. Skipping the `uninstall`
+step leaves the OLD module loaded in the host kernel while the NEW pod tries
+to insert freshly-built modules with the same name.
 
 ### Rollback (both paths)
 
