@@ -118,7 +118,7 @@ write_state() {
     fi
     # Build JSON with jq if available, fallback to printf.
     if command -v jq >/dev/null 2>&1; then
-        jq -n \
+        jq -nc \
             --arg phase "$phase" \
             --arg ts "$now" \
             --arg ver "$driver_ver" \
