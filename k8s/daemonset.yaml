@@ -192,12 +192,10 @@ spec:
         - { name: etc-modprobe, hostPath: { path: /etc/modprobe.d } }
         - { name: etc-group,    hostPath: { path: /etc/group, type: File } }
         - { name: lib-firmware, hostPath: { path: /lib/firmware } }
+  # PC-10: OnDelete prevents auto-replace of injector pods on DS manifest
+  # changes. Driver reloads must be deliberate (admin runs kubectl delete
+  # pod), not a side effect of editing an env var. NVIDIA gpu-operator
+  # uses this exact strategy for its driver DS (G2 audit:
+  # assets/state-driver/0500_daemonset.yaml + controllers/object_controls.go).
   updateStrategy:
-    # Rolling update is largely cosmetic for this DaemonSet — the container is
-    # a "container of intent" that sleeps forever once the module is loaded,
-    # and kernel-module state is host state. For a driver-version bump, the
-    # documented path is `kubectl delete daemonset` + `kubectl apply` with the
-    # new image tag; see docs/teardown-workflow.md §Driver upgrade.
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 1
+    type: OnDelete
