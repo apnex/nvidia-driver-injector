@@ -10,6 +10,14 @@
 #   sudo /root/nvidia-driver-injector/tools/must-gather.sh
 #
 # Output: /tmp/nvidia-injector-must-gather-<UTC-ts>.tar.gz
+#
+# PRIVACY NOTICE — REVIEW BEFORE SHARING.
+# The bundle includes node metadata, pod logs, full kernel journal, and
+# systemd unit output. These may contain credentials (HF auth headers in
+# vLLM logs, bearer tokens in API errors, Environment= secrets in unit
+# files, cloud-provider IDs / account names in node annotations). Operators
+# should grep the bundle for sensitive substrings before attaching to
+# external bug reports.
 
 set -euo pipefail
 
@@ -19,8 +27,10 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 ts=$(date -u +%Y%m%dT%H%M%SZ)
+kver=$(uname -r)
 workdir="/tmp/nvidia-injector-must-gather-${ts}"
 mkdir -p "$workdir"
+trap 'rm -rf "$workdir"' EXIT
 
 log() { echo "[must-gather] $*"; }
 
@@ -28,7 +38,7 @@ log "collecting to $workdir"
 
 # Host state
 log "host kernel + cmdline"
-uname -r > "$workdir/uname-r.txt"
+echo "$kver" > "$workdir/uname-r.txt"
 cat /proc/cmdline > "$workdir/cmdline.txt"
 
 log "dmesg (full + filtered)"
@@ -62,7 +72,7 @@ done
 log "nvidia module + devices"
 cat /sys/module/nvidia/version > "$workdir/nvidia-version.txt" 2>&1 || echo "(driver not loaded)" > "$workdir/nvidia-version.txt"
 ls -la /dev/nvidia* > "$workdir/dev-nvidia.txt" 2>&1 || echo "(no /dev/nvidia*)" > "$workdir/dev-nvidia.txt"
-ls -la /lib/modules/$(uname -r)/extra/nvidia* > "$workdir/modules-extra.txt" 2>&1 || true
+ls -la "/lib/modules/${kver}/extra/nvidia"* > "$workdir/modules-extra.txt" 2>&1 || true
 
 log "nvidia-smi if available"
 nvidia-smi -q > "$workdir/nvidia-smi-q.txt" 2>&1 || echo "(nvidia-smi failed)" > "$workdir/nvidia-smi-q.txt"
@@ -74,7 +84,8 @@ cat /run/nvidia/injector/state > "$workdir/pc3-state.json" 2>&1 || echo "(file a
 log "kubernetes state"
 if command -v kubectl >/dev/null 2>&1; then
     kubectl get pods -A -o wide > "$workdir/k8s-pods-all.txt" 2>&1 || true
-    kubectl get nodes -o yaml > "$workdir/k8s-nodes.yaml" 2>&1 || true
+    kubectl get nodes -o wide > "$workdir/k8s-nodes-wide.txt" 2>&1 || true
+    kubectl describe nodes > "$workdir/k8s-nodes-describe.txt" 2>&1 || true
     kubectl get events -A --sort-by=.lastTimestamp > "$workdir/k8s-events.txt" 2>&1 || true
     kubectl logs -n kube-system -l app=nvidia-driver-injector --tail=200 > "$workdir/k8s-injector-logs.txt" 2>&1 || true
     kubectl logs -n kube-system -l name=nvidia-device-plugin-ds --tail=200 > "$workdir/k8s-device-plugin-logs.txt" 2>&1 || true
@@ -86,12 +97,13 @@ fi
 log "soak observability snapshot"
 ls -la /var/log/vllm-soak/ > "$workdir/soak-dir-listing.txt" 2>&1 || true
 cp /var/log/vllm-soak/metrics.csv "$workdir/soak-metrics.csv" 2>/dev/null || true
+# shellcheck disable=SC2012  # ls -t for mtime sort; find -printf | sort is uglier and the dir is operator-owned
 ls -t /var/log/vllm-soak/pods-*.txt 2>/dev/null | head -3 | xargs -I{} cp {} "$workdir/" 2>/dev/null || true
 
 log "tar"
 out="/tmp/nvidia-injector-must-gather-${ts}.tar.gz"
 tar -czf "$out" -C /tmp "$(basename "$workdir")"
-rm -rf "$workdir"
+# workdir cleanup handled by EXIT trap
 
 log "done: $out ($(stat -c %s "$out") bytes)"
 log "attach this file to issues; share via: cp $out <destination>"
