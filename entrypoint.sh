@@ -75,7 +75,69 @@ fail() {
     # /dev/kmsg is rate-limited; <3> is KERN_ERR priority.
     printf '<3>nvidia-driver-injector FAIL code=%s: %s\n' "$code" "$msg" \
         > /dev/kmsg 2>/dev/null || true
+    # PC-3: record the failure in the readiness file so must-gather.sh
+    # and external observers see *why* the container exited. Best-effort:
+    # never let a state-file failure mask the real exit code.
+    write_state "failed" "$code" "$msg" || true
     exit "$code"
+}
+
+# --- PC-3: readiness file as state machine ---
+# Mirrors NVIDIA's /run/nvidia/validations/.driver-ctr-ready pattern
+# (G1 audit). Consumed by the device plugin's initContainer for
+# startup ordering AND by must-gather.sh for diagnostic data.
+#
+# Written atomically via tmp+mv. Removed in cmd_uninstall and via
+# preStop hook.
+readonly STATE_DIR=/run/nvidia/injector
+readonly STATE_FILE="${STATE_DIR}/state"
+
+# write_state <phase> [last_error_code] [last_error_msg]
+# Phase enum: starting, scrubbing_dkms, kernel_build, modprobe,
+#             materializing_devs, engaging_persistence, ready,
+#             degraded, failed
+write_state() {
+    local phase="$1"
+    local err_code="${2:-0}"
+    local err_msg="${3:-}"
+    local now
+    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    mkdir -p "$STATE_DIR"
+    local tmp="${STATE_FILE}.tmp.$$"
+    # Driver version + PCI + BAR1 best-effort; OK to be empty in early phases.
+    local driver_ver bar1_gib gpu_pci
+    driver_ver=$(cat /sys/module/nvidia/version 2>/dev/null || echo "")
+    gpu_pci=$(lspci -d 10de: 2>/dev/null | awk '{print $1; exit}')
+    if [ -n "$gpu_pci" ]; then
+        local bar1_bytes
+        bar1_bytes=$(awk 'NR==2 {print strtonum("0x" $2) - strtonum("0x" $1) + 1}' \
+            "/sys/bus/pci/devices/0000:${gpu_pci}/resource" 2>/dev/null || echo 0)
+        bar1_gib=$((bar1_bytes / 1024 / 1024 / 1024))
+    else
+        bar1_gib=0
+    fi
+    # Build JSON with jq if available, fallback to printf.
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg phase "$phase" \
+            --arg ts "$now" \
+            --arg ver "$driver_ver" \
+            --arg pci "$gpu_pci" \
+            --argjson bar1 "$bar1_gib" \
+            --argjson code "$err_code" \
+            --arg msg "$err_msg" \
+            '{phase:$phase, last_checked:$ts, driver_version:$ver,
+              gpu_pci:$pci, bar1_size_gib:$bar1,
+              last_error_code:$code, last_error:$msg}' > "$tmp"
+    else
+        printf '{"phase":"%s","last_checked":"%s","driver_version":"%s","gpu_pci":"%s","bar1_size_gib":%d,"last_error_code":%d,"last_error":"%s"}\n' \
+            "$phase" "$now" "$driver_ver" "$gpu_pci" "$bar1_gib" "$err_code" "$err_msg" > "$tmp"
+    fi
+    mv -f "$tmp" "$STATE_FILE"
+}
+
+remove_state() {
+    rm -f "$STATE_FILE"
 }
 
 # ============================================================================
@@ -221,6 +283,10 @@ cmd_uninstall() {
 
     log "uninstall ✓ — all nvidia* modules unloaded from host kernel"
     log "host state restored to pre-injector baseline"
+    # PC-3: remove the readiness file — consumers (device plugin
+    # initContainer, must-gather.sh, the startupProbe) treat absence
+    # as "not ready" and will block / report accordingly.
+    remove_state
     # KUBERNETES_SERVICE_HOST is set when running inside a k8s pod
     # (Path B); absent means we're on docker compose (Path A).
     if [[ -n "${KUBERNETES_SERVICE_HOST:-}" ]]; then
@@ -328,6 +394,10 @@ KSRC="/lib/modules/${KVER}/build"
 log "host kernel: ${KVER}"
 log "kernel build dir (bind-mounted from host): ${KSRC}"
 
+# PC-3: announce we've begun the load sequence. From here on, the
+# readiness file is the canonical signal of where we are.
+write_state "starting"
+
 # ============================================================================
 # Step 1: PCI gate
 # ============================================================================
@@ -360,6 +430,7 @@ log "PCI gate ✓ — GPU at ${EGPU_BDF}"
 # would shadow our patched build and modprobe would silently load vanilla.
 # Remove before our build/load sequence.
 # See feedback_dkms_vanilla_vs_patched_module_collision (project memory).
+write_state "scrubbing_dkms"
 log "PC-7: scanning for DKMS-built vanilla nvidia artifacts"
 KMOD_DIR="/lib/modules/$(uname -r)/extra"
 DKMS_ARTIFACTS="$(find "$KMOD_DIR" -maxdepth 1 -name 'nvidia*.ko.xz' 2>/dev/null || true)"
@@ -438,6 +509,7 @@ if [[ ! -d "$KSRC" ]]; then
        docker run ... -v /lib/modules:/lib/modules:ro ..."
 fi
 
+write_state "kernel_build"
 log "building modules against ${KSRC} ..."
 cd /src/nvidia-open-gpu-kernel-modules
 # IGNORE_CC_MISMATCH: kernel may have been built with a slightly different gcc
@@ -597,6 +669,7 @@ load_module() {
     insmod "$ko_path" || fail "$EXIT_MODPROBE_FAILED" "insmod ${ko_path} failed"
 }
 
+write_state "modprobe"
 load_module "nvidia"     "$KO_NVIDIA"
 load_module "nvidia_uvm" "$KO_UVM"
 
@@ -640,6 +713,7 @@ fi
 # Materialises /dev/nvidia-uvm and /dev/nvidia-uvm-tools. Avoids first-cuInit
 # trying to invoke nvidia-modprobe and racing.
 
+write_state "materializing_devs"
 if command -v nvidia-modprobe >/dev/null 2>&1; then
     log "nvidia-modprobe -u -c 0 ..."
     nvidia-modprobe -u -c 0 || warn "nvidia-modprobe -u -c 0 failed (non-fatal)"
@@ -701,6 +775,7 @@ ls -la /dev/nvidia* 2>/dev/null | sed 's/^/  /' || true
 #
 # Tolerate failure: lazy state is functional, just thermally suboptimal.
 
+write_state "engaging_persistence"
 if command -v nvidia-smi >/dev/null 2>&1; then
     log "engaging GPU (nvidia-smi -pm 1) ..."
     pre=$(nvidia-smi --query-gpu=persistence_mode,power.draw --format=csv,noheader 2>/dev/null || echo "unknown")
@@ -726,13 +801,34 @@ fi
 cmd_label_node "${loaded_version:-unknown}"
 
 # ============================================================================
-# Done — sleep as container of intent
+# Done — write ready state + enter active heartbeat
 # ============================================================================
 log "=========================================="
 log "  nvidia driver loaded successfully"
 log "  patches applied: $(/src/tools/compose-patchset.sh --patches-dir /src/patches 2>/dev/null | wc -l)"
 log "  upstream tag:    ${NVIDIA_OPEN_TAG:-(image build-time pinned)}"
 log "=========================================="
-log "sleeping as container of intent — exit triggers restart policy"
 
-exec sleep infinity
+write_state "ready"
+log "PC-3: state=ready written to $STATE_FILE"
+
+# --- PC-3 active heartbeat (composite design) ---
+# Re-verify driver state every HEARTBEAT_INTERVAL seconds. Update file
+# timestamp + write phase=degraded if anything's wrong. This is more
+# active than NVIDIA's "sleep infinity" pattern — appropriate for our
+# eGPU/TB reality where GPUs can disappear at runtime.
+readonly HEARTBEAT_INTERVAL=30
+log "PC-3: entering active heartbeat loop (interval=${HEARTBEAT_INTERVAL}s)"
+while :; do
+    sleep "$HEARTBEAT_INTERVAL"
+    if [ ! -f /sys/module/nvidia/version ]; then
+        write_state "degraded" 30 "nvidia module unloaded mid-run"
+        continue
+    fi
+    if [ ! -e /dev/nvidia0 ]; then
+        write_state "degraded" 50 "/dev/nvidia0 disappeared"
+        continue
+    fi
+    # All checks pass; refresh ready state (updates last_checked timestamp)
+    write_state "ready"
+done

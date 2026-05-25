@@ -146,6 +146,21 @@ spec:
             - { name: etc-modprobe,  mountPath: /etc/modprobe.d,  readOnly: true }
             - { name: etc-group,     mountPath: /etc/group,       readOnly: true }
             - { name: lib-firmware,  mountPath: /lib/firmware }
+            # PC-3: readiness state file on host tmpfs. Visible to other
+            # pods (device plugin initContainer reads it for startup
+            # ordering) and to must-gather.sh on the host.
+            - { name: pc3-state,     mountPath: /run/nvidia/injector }
+          # PC-3: clean up the readiness file on intentional pod shutdown
+          # so the absence signals "not ready" to consumers. Host reboot
+          # also clears it via tmpfs semantics; preStop covers the
+          # `kubectl delete pod` case.
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - 'rm -f /run/nvidia/injector/state'
           # PC-1: startupProbe ONLY (no livenessProbe).
           # NVIDIA gpu-operator PR #1317 explicitly retired lsmod-based
           # livenessProbes because they cause undesirable container restarts
@@ -192,6 +207,15 @@ spec:
         - { name: etc-modprobe, hostPath: { path: /etc/modprobe.d } }
         - { name: etc-group,    hostPath: { path: /etc/group, type: File } }
         - { name: lib-firmware, hostPath: { path: /lib/firmware } }
+        # PC-3: hostPath so the readiness file is visible to other pods
+        # on the same node (e.g. the device plugin's initContainer) and
+        # to host-side must-gather.sh. DirectoryOrCreate so kubelet
+        # mints the dir on first pod schedule; lives on /run (tmpfs)
+        # so it's cleared by host reboot — correct semantics.
+        - name: pc3-state
+          hostPath:
+            path: /run/nvidia/injector
+            type: DirectoryOrCreate
   # PC-10: OnDelete prevents auto-replace of injector pods on DS manifest
   # changes. Driver reloads must be deliberate (admin runs kubectl delete
   # pod), not a side effect of editing an env var. NVIDIA gpu-operator
