@@ -319,6 +319,27 @@ fi
 log "PCI gate ✓ — GPU at ${EGPU_BDF}"
 
 # ============================================================================
+# Step 1.25: PC-7 — DKMS pre-flight scrub
+# ============================================================================
+# Fedora's kernel-core update auto-builds vanilla nvidia*.ko.xz via DKMS.
+# depmod prefers compressed over uncompressed, so a stale DKMS artifact
+# would shadow our patched build and modprobe would silently load vanilla.
+# Remove before our build/load sequence.
+# See feedback_dkms_vanilla_vs_patched_module_collision (project memory).
+log "PC-7: scanning for DKMS-built vanilla nvidia artifacts"
+KMOD_DIR="/lib/modules/$(uname -r)/extra"
+DKMS_ARTIFACTS="$(find "$KMOD_DIR" -maxdepth 1 -name 'nvidia*.ko.xz' 2>/dev/null || true)"
+if [[ -n "$DKMS_ARTIFACTS" ]]; then
+    log "PC-7: scrubbing DKMS artifacts to prevent vanilla shadowing:"
+    printf '%s\n' "$DKMS_ARTIFACTS" | sed 's/^/  /'
+    printf '%s\n' "$DKMS_ARTIFACTS" | xargs rm -f
+    depmod -a "$(uname -r)"
+    log "PC-7: scrub complete"
+else
+    log "PC-7: no DKMS artifacts found (clean)"
+fi
+
+# ============================================================================
 # Step 1.5: Clear driver_override if blocking nvidia bind
 # ============================================================================
 # The companion repo's remove.sh sets driver_override to a sentinel
