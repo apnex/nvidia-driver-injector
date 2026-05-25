@@ -418,6 +418,7 @@ fi
 if [[ -z "$EGPU_BDF" || ! -e "/sys/bus/pci/devices/${EGPU_BDF}" ]]; then
     log "no GPU matching ${EGPU_VENDOR_ID}:${EGPU_DEVICE_ID} found on PCI"
     log "exiting cleanly — pod will restart per restart policy or scheduler"
+    write_state "degraded" "$EXIT_NO_GPU" "no GPU enumerated; entrypoint waiting for hot-plug"
     exec sleep infinity
 fi
 log "PCI gate ✓ — GPU at ${EGPU_BDF}"
@@ -817,7 +818,7 @@ log "PC-3: state=ready written to $STATE_FILE"
 # timestamp + write phase=degraded if anything's wrong. This is more
 # active than NVIDIA's "sleep infinity" pattern — appropriate for our
 # eGPU/TB reality where GPUs can disappear at runtime.
-readonly HEARTBEAT_INTERVAL=30
+readonly HEARTBEAT_INTERVAL="${HEARTBEAT_INTERVAL:-30}"
 log "PC-3: entering active heartbeat loop (interval=${HEARTBEAT_INTERVAL}s)"
 while :; do
     sleep "$HEARTBEAT_INTERVAL"

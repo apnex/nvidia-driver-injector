@@ -41,6 +41,7 @@ RUN apt-get update && \
         curl \
         xz-utils \
         pciutils \
+        jq \
         m4 \
         libelf1t64 \
         libssl3t64 \
