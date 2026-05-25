@@ -99,10 +99,15 @@ spec:
       # at the PCI gate when no matching GPU is found, so a stray pod on a
       # GPU-less node is harmless (it sleeps + restarts; never labels).
       nodeSelector: {}
-      # Match any node taints — on a single-node k3s the control-plane carries
-      # the standard taints and we still need to run there.
+      # PC-6a: NVIDIA-canonical toleration. Every NVIDIA operand pod in
+      # gpu-operator uses exactly this toleration (G2 audit). Tighter
+      # than 'operator: Exists' (which tolerates ALL taints) — accepts
+      # only the canonical nvidia.com/gpu:NoSchedule taint admins use
+      # to fence GPU nodes.
       tolerations:
-        - operator: Exists
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
       # hostPID so modprobe / depmod / udevadm see the host's process + module
       # namespace; without it `grep ^nvidia /proc/modules` reads the
       # container's PID-1 view and reports nothing.
