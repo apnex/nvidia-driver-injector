@@ -4,7 +4,7 @@ layer: base
 source-branch: c5-crash-safety
 upstream-candidacy: high
 telemetry-tier: nominal
-status: amended-v3-draft
+status: partial-v3-needs-v4-architectural
 related-patches: [C2-aer-internal-unmask, C3-gpu-lost-retry, C4-err-handlers-scaffold]
 ---
 

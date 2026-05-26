@@ -100,6 +100,99 @@ Forensic timeline (verbatim from journalctl):
 
 **Critical observation:** There is **no kernel panic, no soft-lockup detection, no hung_task warning, no AER cascade** in the journal. The kernel simply stopped logging. This is the "silent wedge" failure mode characteristic of GPU-state deadlock in driver code paths.
 
+## Run 3 — 2026-05-26 22:33 UTC — REWEDGE under aorus.16 with C5 v3 partial coverage
+
+**Purpose:** validate that C5 v3 (the 8 site conversions + 2 new macros + osinit.c P-DISC-1 line) prevents the wedge cascade.
+
+**Conditions:**
+- Driver version: 595.71.05-aorus.16 (C5 v3 patches LOADED — confirmed `/sys/module/nvidia/version` reports .16)
+- C5 v3 macros: `NV_ASSERT_OR_GPU_LOST_OR_RETURN` + `NV_ASSERT_OR_GPU_LOST_OR_RETURN_VOID` present in nv-gpu-lost.h
+- 8 sites converted: kernel_graphics.c:2608, fecs_event_list.c:1623/1639, kernel_falcon_tu102.c:187, kernel_gsp_tu102.c:636, vaspace_api.c:573, mem.c:178, rs_server.c:1388
+- P-DISC-1 line in osHandleGpuLost lost-state branch: present
+- nvidia-device-plugin: running (sub-cycle 5 NVML probe loop active)
+- Persistence mode: engaged
+- Workload: drained (no vLLM)
+- Pre-test BAR1: 32 GiB
+- Pre-test nvbandwidth: 2.83/3.29/2.71 GB/s (parity confirmed)
+- TB tunnel: authorized (auto-authorized by boltd at cold-boot 22:26:06 UTC — NO manual boltctl authorize ever ran in this boot per sudo audit log)
+
+**Protocol:** identical to Run 2. Cable yank at NUC side, 5s wait, replug. No boltctl authorize step (boltd should auto-handle).
+
+**Result: REWEDGE — same silent-wedge outcome as Run 2, despite v3 coverage of 2 documented sites**
+
+| What v3 patches DID prevent | What v3 patches did NOT prevent |
+|---|---|
+| ✓ `kgraphicsFreeContextBuffers: cache evict returned NV_ERR_GPU_IS_LOST, continuing teardown` — v3 macro fired correctly | ✗ `nvAssertFailedNoLog: Assertion failed: rmStatus == NV_OK @ osinit.c:2462` — NEW site, missed by v3 sweep regex |
+| ✓ `fecsBufferDisableHw: GET_FECS_TRACE_HW_ENABLE returned NV_ERR_GPU_IS_LOST, returning early` — v3 macro fired correctly | ✗ `nvAssertFailedNoLog: Assertion failed: (ememOffsetEnd - ememOffsetStart) == wordsWritten @ kern_fsp_gh100.c:649` — DIFFERENT failure CLASS (arithmetic invariant on dead-bus reads, not a status comparison) |
+| | ✗ `nvCheckOkFailedNoLog: ... @ gpu_user_shared_data.c:248` — NV_CHECK_OK family (different macro; logs not crashes; observed in Run 2 too, intentionally left alone) |
+
+**Forensic timeline (Run 3, all times UTC):**
+
+```
+22:26:00  Boot starts (cold), kernel PCI enum, BAR1=32GiB cold-plug allocation
+22:26:06  boltd auto-authorizes TB tunnel (standard cold-boot behavior; no operator action)
+22:27:07  nvidia.ko (.16) loads via injector pod entrypoint
+22:27:14  external GPU detected, persistence engaged
+22:30-22:32  pre-test forensic captures (get-pci-stats, must-gather)
+22:33:19  ⚠️ CABLE YANK fires
+          ├─ thunderbolt: bandwidth consumption changed
+          ├─ NVRM: Xid (PCI:0000:04:00): 79, GPU has fallen off the bus.
+          ├─ NVRM: Xid (PCI:0000:04:00): 154, GPU recovery action changed (Reset Required)
+          ├─ NVRM: kgraphicsFreeContextBuffers: ... NV_ERR_GPU_IS_LOST, continuing teardown  ← v3 ✓
+          ├─ NVRM: fecsBufferDisableHw: ... NV_ERR_GPU_IS_LOST, returning early             ← v3 ✓
+          ├─ NVRM: nvAssertFailedNoLog: ... @ osinit.c:2462                                  ← UNCOVERED
+          ├─ NVRM: nvAssertFailedNoLog: ... @ kern_fsp_gh100.c:649                          ← UNCOVERED
+          └─ NVRM: nvCheckOkFailedNoLog: ... @ gpu_user_shared_data.c:248
+22:33:32  cable replugged, TB layer re-enumerates USB hub (boltd doesn't re-auth TB tunnel yet)
+22:33:48  vllm-soak-metrics.service oneshot fires (30s timer) — no-op HTTP scrape (no vLLM running)
+22:34:19  vllm-soak-metrics.service oneshot fires again (next 30s)
+22:34:22  ⛔ LAST journal entry. Silent wedge endpoint.
+~22:36    User forced power-cycle reboot.
+```
+
+The wedge mechanism is unchanged from Run 2: the uncovered assertions leave kernel state in inconsistent partial-cleanup, journald or some upstream dependency blocks, host goes silent.
+
+**Three new uncovered sites characterized:**
+
+### (1) `osinit.c:2462` — narrow `NV_ASSERT(status == NV_OK)` missed by sweep regex
+
+```c
+rmStatus = gpuStateUnload(pGpu, GPU_STATE_DEFAULT);
+NV_ASSERT(rmStatus == NV_OK);
+```
+
+The sweep regex `NV_ASSERT.*== NV_OK.*NV_ERR_GPU_IN_FULLCHIP_RESET` required BOTH literals; this pattern has only `NV_OK`. Sweep was too narrow. **Likely many more sites with this single-status pattern across the source tree.**
+
+### (2) `kern_fsp_gh100.c:649` — arithmetic invariant on dead-bus reads (different failure class)
+
+```c
+reg32 = GPU_REG_RD32(pGpu, NV_PFSP_EMEMC(FSP_EMEM_CHANNEL_RM));
+ememOffsetEnd = DRF_VAL(_PFSP, _EMEMC, _OFFS, reg32);
+ememOffsetEnd += DRF_VAL(_PFSP, _EMEMC, _BLK, reg32) * DWORDS_PER_EMEM_BLOCK;
+NV_ASSERT_OR_RETURN((ememOffsetEnd - ememOffsetStart) == wordsWritten, NV_ERR_INVALID_STATE);
+```
+
+When MMIO returns dead-bus value `0xFFFFFFFF`, the `DRF_VAL` extractions produce nonsense values, the arithmetic invariant breaks, assertion fires. **Different failure class entirely** — not a status comparison, but a hardware-state invariant. C5 v3 macros are structurally inapplicable (no `status` to tolerate). Needs entry-point dead-bus guards.
+
+### (3) `gpu_user_shared_data.c:248` — `NV_CHECK_OK` (different macro family)
+
+Doesn't crash (logs only). Not the wedge cause but indicator of cleanup-path failures continuing. Observed in Run 2 also; intentionally left out of v3 scope.
+
+**Attribution clarification (boltctl):** Run 3's wedge is the result of the cable yank ALONE. No `boltctl authorize` was run by me or any operator in boot -1 (verified via sudo audit log). Earlier session-thread perception that "boltctl authorize triggered the wedge" was incorrect; boltd autopilot at cold boot 22:26:06 is the only authorize event, well before the yank.
+
+**Bundle:** `/var/log/mission-1-archaeology/E07-Run3-aorus16/post-wedge.tar.gz` (must-gather post-recovery, includes `-b -1` journal capturing the entire wedge sequence per the must-gather.sh enhancement we landed earlier today).
+
+**Conclusion (Run 3):**
+
+C5 v3 is **incomplete**. The 8-site coverage we identified via sweep regex was the right INSTANCE-LEVEL fix for those 8 sites, but the failure-mode SURFACE is broader than the regex captured. The pattern is:
+
+- v1 → caught the 2 sites we observed firing in dev testing
+- v3 → expanded to 8 sites via grep sweep using a narrow regex
+- Run 3 → found 3 MORE sites the regex missed, plus a different failure class entirely
+- Implication: a v4 site-sweep would find more (broader regex covering single-status patterns), but the architectural insight is more important — **continue patching N sites is the wrong fix shape.**
+
+See `architectural-funnel-redirection-design.md` for the proposed v4 redirect: catch at detection layer earlier + single sink-state marker + small set of funnel points + zero per-site assertion patching needed.
+
 ## Patch coverage analysis
 
 | Existing patch | Should have helped? | What actually happened |

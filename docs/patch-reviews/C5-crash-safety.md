@@ -517,16 +517,35 @@ The v3 amendments to the intent (now applied) close both gaps and introduce the 
 
 ## v3 done gate
 
-- [ ] `docs/patch-intents/C5-crash-safety.md` v3 amendments applied — **DONE this commit**
-- [ ] v3 deltas section appended to `docs/patch-reviews/C5-crash-safety.md` — **DONE this commit**
-- [ ] `docs/patch-improvements/C5-crash-safety.md` lineage row added — separate commit
-- [ ] Fork-branch source changes (2 new macros + 8 conversions + 1 osinit.c line) — separate session
-- [ ] `patches/base/C5-crash-safety.patch` regenerated via `tools/regen-base-patches.sh` — separate session
-- [ ] `tools/validate-patchset.sh` passes — separate session
-- [ ] Container rebuilt as aorus.16 — separate session
-- [ ] Aorus.16 deployed + verified wedge-free under cable-yank test — separate session
+- [x] `docs/patch-intents/C5-crash-safety.md` v3 amendments applied
+- [x] v3 deltas section appended to `docs/patch-reviews/C5-crash-safety.md`
+- [x] `docs/patch-improvements/C5-crash-safety.md` lineage row added
+- [x] Fork-branch source changes (2 new macros + 8 conversions + 1 osinit.c line) — landed in c5-crash-safety tip 1a7f39ab
+- [x] `patches/base/C5-crash-safety.patch` regenerated via `tools/regen-base-patches.sh` — commit 48223c7
+- [x] `tools/validate-patchset.sh` passes — compile gate green against kernel 7.0.9
+- [x] Container rebuilt as aorus.16 — sha256 9fa35a20
+- [ ] ⛔ **aorus.16 deployed + verified wedge-free under cable-yank test** — **REWEDGED 2026-05-26 22:33 UTC; see E07 Run 3 forensic record. v3 is PARTIAL, not complete.**
 
-When all gates pass, frontmatter `status: amended-v3-draft → reviewed`.
+**Frontmatter transitioned to `status: partial-v3-needs-v4-architectural` 2026-05-26.**
+
+## v3 → v4 retraction (2026-05-26 22:34)
+
+C5 v3 is provably incomplete based on empirical Run 3 evidence:
+
+- v3 macros DID fire for the 2 patched sites we observed (kgraphicsFreeContextBuffers + fecsBufferDisableHw both logged the expected log-once messages with `NV_ERR_GPU_IS_LOST` tolerated)
+- v3 did NOT prevent the wedge — 3 OTHER sites fired uncovered, leading to the same silent-wedge outcome as Run 2
+
+Three new failure sites characterized (see E07 Run 3 record for full forensic):
+
+1. **`osinit.c:2462`** — `NV_ASSERT(rmStatus == NV_OK)` — narrow single-status assertion. v3 sweep regex required BOTH `NV_OK` and `NV_ERR_GPU_IN_FULLCHIP_RESET` literals; this pattern has only `NV_OK`. **Sweep was too narrow.** Likely many more sites with this pattern.
+2. **`kern_fsp_gh100.c:649`** — `NV_ASSERT_OR_RETURN((ememOffsetEnd - ememOffsetStart) == wordsWritten, ...)` — arithmetic invariant on dead-bus reads. **Different failure class** — not a status check. C5 macros are structurally inapplicable.
+3. **`gpu_user_shared_data.c:248`** — `NV_CHECK_OK` family — logs but doesn't crash. Not the wedge cause; observed in Run 2 also.
+
+**v4 direction:** the per-site patching approach scales linearly with failure-mode discovery and re-runs the sweep-and-test cycle each iteration. The architectural alternative (catch at detection layer + single sink-state marker + small set of funnel points) shrinks patch surface from ~50 sites to ~10. v4 work pivots to architectural refactor.
+
+See `docs/missions/mission-1-egpu-hot-plug-hot-power/architectural-funnel-redirection-design.md` for the v4 design.
+
+## v3 cross-references
 
 ## v3 cross-references
 
