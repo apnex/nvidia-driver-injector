@@ -1,8 +1,9 @@
 # E19 — `pci=realloc=on,hpmmioprefsize=32G`
 
-**Status:** PENDING
+**Status:** Run 1 DONE 2026-05-26 — Phase A NO-OP (no observable cold-plug effect), Phase B BLOCKED. Net impact: = NEUTRAL on operational state, + POSITIVE on patch scope narrowing (rules out "missing size hint" as cause of runtime hotplug fallback)
+**Sub-mission:** n/a (Phase 2.3 archaeology)
 **Phase:** 2.3
-**Risk:** LOW
+**Risk:** LOW (confirmed — no boot regression, no perf change)
 **Cost:** ~3 min editing + 1 reboot + post-test
 **Reversibility:** revert grub + reboot
 **Last updated:** 2026-05-26
@@ -85,29 +86,96 @@ Phase B: BAR1=256M (cmdline didn't reach hotplug allocation path)
 
 ## Per-run records
 
-> One subsection per execution. Body-of-evidence builds across runs.
+### Run 1 — 2026-05-26 — Phase A = NO-OP, Phase B BLOCKED
 
-### Run 1 — pending
+**Conditions:**
+- Driver version: 595.71.05-aorus.15
+- nvidia-device-plugin + injector: both 1/1 throughout, no restarts during experiment
+- Persistence mode: engaged
+- PC-3 heartbeat: active
+- Workload: drained
+- Pre-reboot cmdline: `pci=realloc=on,resource_alignment=35@0000:03:00.0`
+- Post-reboot cmdline: `pci=realloc=on,hpmmioprefsize=32G,resource_alignment=35@0000:03:00.0`
 
-(Filled in when run. Conditions / Protocol deviations / Result / Diff highlights / Forensic bundle / Anomalies / Conclusion.)
+**Protocol followed:** As documented in Method. Edit GRUB → grub2-mkconfig → reboot → verify cmdline → capture state.
+
+**Result — Phase A (cold-plug control):** = **NO-OP**
+
+The parameter is silently accepted by the kernel (visible in `/proc/cmdline`, no errors in dmesg) but produces **no observable change** in bridge window allocation at cold-plug compared to the E18 baseline (which had only `pci=realloc=on`):
+
+| State | E18 baseline (before this experiment) | E19 post-reboot |
+|---|---|---|
+| BAR1 | 32 GiB | 32 GiB (unchanged) |
+| Bridge 03:00.0 prefetchable | 33089M | 33089M (unchanged) |
+| Bridge 02:00.0 prefetchable | 65856M | 65856M (unchanged) |
+| Root port 00:07.0 prefetchable | 65856M | 65856M (unchanged) |
+| Sub-bridges 03:01/02/03 prefetchable | 10922M each | 10922M each (unchanged) |
+| nvbandwidth H2D / D2H / H2D-bidir | 2.84 / 3.29 / 2.71 GB/s | 2.84 / 3.29 / 2.71 GB/s (bit-identical) |
+
+**Result — Phase B (runtime cable cycle test):** ⏸ BLOCKED (same reason as E18 — cannot safely produce broken-BAR1)
+
+**Diff highlights** (from `get-pci-stats.sh --diff E19-Run1`):
+
+```
+cmdline:  + hpmmioprefsize=32G,
+boltctl authorized timestamp:  updated (just shows reboot happened)
+/dev/nvidia* mtimes:           updated (driver re-loaded post-reboot)
+nvidia-driver-injector restart count: 2→3 (this reboot)
+nvidia-device-plugin restart count:  3→4 (this reboot)
+Bridge windows section:        UNCHANGED
+PCI tree structure:            UNCHANGED
+AER counters:                  UNCHANGED (no new errors)
+```
+
+**Anomalies / unexpected observations:**
+
+1. **The "most-likely-PASS in Section 3" prediction was wrong on this hardware.** Per E19's own predicted-PASS-signature section (citing LF forum analysis), the expected outcome was bridge windows expanding to 32G+. They did NOT. This isn't a hardware fault — it's that the kernel's existing boot-time allocator ALREADY produces the maximum bridge windows possible given the host's PCI address space (33089M on 03:00.0, 65856M upstream). The `hpmmioprefsize` parameter would only matter if the kernel was choosing to allocate LESS than 32G at boot for some policy reason — it isn't.
+
+2. **Sub-bridge prefetchable allocations were already 10922M in E18 baseline** (not zero as I misremembered intra-conversation). The E11 Run 1 dmesg messages about sub-bridge windows "failed to assign" were specifically about I/O windows, not prefetchable memory. So the visible cmdline effects from E18 were entirely on the I/O resource type.
+
+3. **Perf parity confirmed** — nvbandwidth bit-identical to all prior runs (E11, E18, cold-plug aorus.14 baseline). Strong evidence the parameter doesn't affect anything tunnel-bandwidth-relevant.
+
+**Conclusion — net impact: = NEUTRAL on operational state, + POSITIVE on patch scope:**
+
+E19 Run 1 produces a SUBSTANTIVE patch-design insight despite the operational state being unchanged:
+
+The kernel's boot-time allocator ALREADY allocates ≥ 32G prefetchable windows when the BAR1=32G device is present at cold-plug. Adding `hpmmioprefsize=32G` doesn't change this because there's nothing to fix at cold-plug — the kernel achieves what we want without the parameter. **The runtime hot-plug fallback to 288M is therefore NOT a "kernel doesn't know how big to make the window" problem. It's a "kernel chooses NOT to attempt a fresh large allocation at hot-plug time" problem.**
+
+This narrows E27's design space significantly: the corrective patch needs to trigger the boot-time-style allocation logic at hot-plug events, NOT just provide better size hints. Hints don't help — the allocator already knows what's possible.
 
 ## Patch coverage analysis
 
-(Filled in if a run surfaces driver-level behavior.)
+Not stress-tested in Run 1 (no failure mode exercised). The cmdline parameter is upstream Linux PCI code, not our driver patches.
 
 ## Patch design implications
 
-(Filled in once body-of-evidence supports a design decision.)
+**Negative result with positive patch-scope value.** Captured in `E27-pci-core-patch.md` → Patch design implications. Key conclusion:
+
+- Boot-time allocation works correctly (33089M on 03:00.0 = 32G + overhead, the kernel achieves this without any hpmmioprefsize hint)
+- Runtime hot-plug allocation falls back to 288M
+- Therefore: the bug is **not "missing size hint"** but **"missing re-attempt at the right size"**
+- Eliminates the "userspace cmdline mitigation" lane for this specific failure mode (you can't tune your way out of this with kernel parameters)
+- Strengthens the case for **the in-kernel patch approach** (E27 territory)
+
+The two patch shapes outlined in E27 (parallel parameter `pci=realloc-pref=on` OR extend `__assign_resources_sorted`) BOTH still apply — but with the refined understanding that what they need to do is **trigger the existing allocator logic at hot-plug events**, not provide new size hints.
+
+Memory: [[feedback_io_vs_prefetchable_realloc_asymmetry_2026_05_26]] now strengthened by this finding.
 
 ## Open follow-ups
 
-- [ ] (Populated based on run results.)
+- [ ] **E20 (`+hpmmiosize=256M`)** — adds non-prefetchable hint. Likely also no-op for the same reason E19 was, but worth confirming pattern.
+- [ ] **E22 (`+pcie_aspm=off`)** — different parameter type; might affect runtime allocation behavior via link-state. Worth running.
+- [ ] **E24 (resource_alignment size variants)** — could probe whether the existing param's alignment value affects re-allocation behavior.
+- [ ] **Phase B test once broken-BAR1 producer exists** — currently blocked.
+- [ ] **Consider skipping E20-E21** — given hpmmioprefsize is a no-op, the analogous hpmmiosize and hpmemsize parameters are also likely no-ops. Could drop those experiments from the plan to save reboots, OR could run them to confirm the pattern.
 
 ## Forensic bundles
 
-| Run | Bundle path | Size | Notes |
+| Run | Bundle | Size | Notes |
 |---|---|---|---|
-|     |             |      |       |
+| Run 1 pre | `/var/log/mission-1-archaeology/E19-Run1/pre.tar.gz` | ~310 KB | E18-state captured before GRUB edit + reboot |
+| Run 1 post | `/var/log/mission-1-archaeology/E19-Run1/post.tar.gz` | ~310 KB | Post-reboot ready state |
+| Run 1 nvbandwidth | `/var/log/mission-1-archaeology/E19-Run1/nvbandwidth-postboot.txt` | 4 KB | Confirms bit-identical perf parity |
 
 ## Cross-references
 

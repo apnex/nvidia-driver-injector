@@ -56,7 +56,7 @@ Each file is a self-contained scientific-method record: **hypothesis, method, pr
 | ID | File | Status |
 |---|---|---|
 | E18 | [`pci=realloc=on` alone](E18-cmdline-realloc-on.md) | Run 1 DONE 2026-05-26 — Phase A PASS (safe); Phase B BLOCKED; I/O window expansion confirmed, prefetchable unchanged |
-| E19 | [`+hpmmioprefsize=32G`](E19-cmdline-hpmmioprefsize.md) | PENDING |
+| E19 | [`+hpmmioprefsize=32G`](E19-cmdline-hpmmioprefsize.md) | Run 1 DONE 2026-05-26 — NO-OP (no cold-plug effect); + patch-scope narrowing (rules out "missing size hint" hypothesis) |
 | E20 | [`+hpmmiosize=256M`](E20-cmdline-hpmmiosize.md) | PENDING |
 | E21 | [`hpmemsize=33G`](E21-cmdline-hpmemsize.md) | PENDING |
 | E22 | [`+pcie_aspm=off`](E22-cmdline-aspm-off.md) | PENDING |

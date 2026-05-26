@@ -209,6 +209,42 @@ See `E07-cable-replug-drain-first.md` Patch design implications section. The TB-
 - TB-unplug-aware teardown → produces broken-BAR1 state safely (instead of wedging)
 - E27 corrective patch → recovers from broken-BAR1 state automatically (or via explicit trigger)
 
+### The bug is not "missing size hint" — it's "missing re-attempt" (from E19 Run 1, 2026-05-26)
+
+**The observation.** E19 Run 1 added `pci=hpmmioprefsize=32G` (kernel hint: "size hotplug-capable bridges' prefetchable windows ≥ 32G at boot"). Result: **no observable change** to any bridge window vs the E18 baseline (which had `pci=realloc=on` only):
+
+| State | E18 baseline | E19 (with hpmmioprefsize=32G) |
+|---|---|---|
+| Bridge 03:00.0 prefetchable | 33089M | 33089M (unchanged) |
+| Bridge 02:00.0 prefetchable | 65856M | 65856M (unchanged) |
+| Sub-bridges 03:01/02/03 | 10922M each | 10922M each (unchanged) |
+| nvbandwidth | 2.84 / 3.29 / 2.71 GB/s | bit-identical |
+
+**Why the hint had no effect.** The kernel's existing boot-time allocator already produces ≥ 32G prefetchable windows when the BAR1=32G device is present at cold-plug — 33089M (32G + overhead) on the immediate parent bridge, 65856M (room for two 32G devices) upstream. There is no cold-plug case where the kernel allocates LESS than what's achievable — so a "32G minimum" hint can't push higher than what's already happening.
+
+**What this tells us about the runtime hot-plug failure mode.** Combined with the cable-replug observation (288M bridge window after a cable cycle when the device returns), the diagnosis is:
+
+- ✓ Boot-time allocator: succeeds at 33089M without any hint
+- ✗ Runtime hot-plug allocator: falls back to 288M
+- = The size hint can't help, because the kernel already knows 33089M is achievable
+- ⇒ **The bug is not "missing size information." It's "the runtime hot-plug allocator does not attempt the boot-time-style allocation."**
+
+**Implications for the patch shape.** The two patch options outlined above (parallel parameter / extend existing walker) both still apply, but the refined understanding sharpens what the patch needs to DO at the chosen entry point:
+
+- ❌ NOT: provide a size hint (kernel already has the size; hints are no-ops on this hardware)
+- ❌ NOT: pre-budget more space at boot (already maxed out)
+- ✓ YES: at hot-plug time, trigger the same allocation pass that boot uses. Probably means calling `pci_assign_unassigned_root_bus_resources()` or its inner helpers on the relevant bus, with the same flags the boot-time pass uses.
+
+This eliminates the "userspace cmdline mitigation" lane for this failure mode — you can't tune your way out via kernel parameters. The fix MUST live inside the PCI core's allocation logic (or be triggered from outside it). Strengthens the case for the in-kernel patch over a userspace mitigation.
+
+**Body-of-evidence sufficiency update.** Combined with E18's I/O-vs-prefetchable observation, the design directive is now:
+
+- Boot-time path is the reference implementation (achieves 33089M)
+- The corrective patch needs to invoke that path at hot-plug events
+- For an existing-bridge-already-assigned scenario, the patch may need an explicit "release + re-assign" sequence
+
+Still need (before final design): an actual broken-BAR1 reproduction with `__assign_resources_sorted` instrumented (bpftrace or strategic printk) to see exactly which fallback branch is taken at runtime hot-plug vs which branch boot takes.
+
 ## Open follow-ups
 
 - [ ] (Populated based on run results.)
@@ -225,6 +261,7 @@ See `E07-cable-replug-drain-first.md` Patch design implications section. The TB-
 - Linux source: `drivers/pci/setup-bus.c::__pci_setup_bridge_mmio_pref`
 - Linux source: `drivers/pci/pci.c::pci_realloc_enable` (the global flag set by `pci=realloc=on`)
 - E18 Run 1 — the I/O-vs-prefetchable asymmetry observation that informs E27's design
+- E19 Run 1 — the "bug is not missing size hint" finding that narrows E27's design space (the patch must trigger re-allocation, not provide hints)
 - E07 Run 2 — surprise-removal teardown patch (parallel patch effort; together with E27 forms a coherent runtime-hot-plug-hardening pair)
 - E25 (Miroshnichenko v9 — same problem class, different patch approach)
 - E26 (out-of-tree module — narrower-scope alternative)
