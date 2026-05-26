@@ -1,6 +1,6 @@
 # E19 — `pci=realloc=on,hpmmioprefsize=32G`
 
-**Status:** Run 1 DONE 2026-05-26 — Phase A NO-OP (no observable cold-plug effect), Phase B BLOCKED. Net impact: = NEUTRAL on operational state, + POSITIVE on patch scope narrowing (rules out "missing size hint" as cause of runtime hotplug fallback)
+**Status:** Run 1 DONE 2026-05-26 — Phase A NO-OP (no observable cold-plug effect), Phase B BLOCKED. Net impact: = NEUTRAL on operational state, +narrow on patch scope (only proves THIS parameter is redundant at cold-plug; does NOT prove other cmdline knobs are useless — see Patch design implications correction)
 **Sub-mission:** n/a (Phase 2.3 archaeology)
 **Phase:** 2.3
 **Risk:** LOW (confirmed — no boot regression, no perf change)
@@ -135,13 +135,13 @@ AER counters:                  UNCHANGED (no new errors)
 
 3. **Perf parity confirmed** — nvbandwidth bit-identical to all prior runs (E11, E18, cold-plug aorus.14 baseline). Strong evidence the parameter doesn't affect anything tunnel-bandwidth-relevant.
 
-**Conclusion — net impact: = NEUTRAL on operational state, + POSITIVE on patch scope:**
+**Conclusion — net impact: = NEUTRAL on operational state, +narrow on patch scope:**
 
-E19 Run 1 produces a SUBSTANTIVE patch-design insight despite the operational state being unchanged:
+E19 Run 1 produces a narrow patch-design observation. The kernel's boot-time allocator achieves 33089M on bridge 03:00.0 without any hint, and adding `hpmmioprefsize=32G` doesn't change this. So at minimum: the future corrective patch's runtime allocation logic does not require a size hint to produce the right window size; the boot-time path already proves the allocator has access to the necessary information.
 
-The kernel's boot-time allocator ALREADY allocates ≥ 32G prefetchable windows when the BAR1=32G device is present at cold-plug. Adding `hpmmioprefsize=32G` doesn't change this because there's nothing to fix at cold-plug — the kernel achieves what we want without the parameter. **The runtime hot-plug fallback to 288M is therefore NOT a "kernel doesn't know how big to make the window" problem. It's a "kernel chooses NOT to attempt a fresh large allocation at hot-plug time" problem.**
+**A broader claim than that requires more work.** Specifically: whether the runtime hot-plug fallback (288M) is reachable via cmdline tuning — and therefore whether the userspace mitigation lane should be considered closed — is NOT answered by E19 alone. That conclusion requires either a code-level audit of the runtime hot-plug allocation path's cmdline-controllable knobs, OR exhaustive testing of remaining Section 3 parameters (E20, E21, E22, E24).
 
-This narrows E27's design space significantly: the corrective patch needs to trigger the boot-time-style allocation logic at hot-plug events, NOT just provide better size hints. Hints don't help — the allocator already knows what's possible.
+Correction logged 2026-05-26 after review identified the previous "eliminates the cmdline mitigation lane" framing as an unsupported inferential leap from a single negative datapoint. See `../pci-cmdline-audit.md` (pending) for the audit that will properly bound this claim.
 
 ## Patch coverage analysis
 
@@ -149,17 +149,28 @@ Not stress-tested in Run 1 (no failure mode exercised). The cmdline parameter is
 
 ## Patch design implications
 
-**Negative result with positive patch-scope value.** Captured in `E27-pci-core-patch.md` → Patch design implications. Key conclusion:
+**Operational result with narrow patch-scope value.** Captured in `E27-pci-core-patch.md` → Patch design implications.
 
-- Boot-time allocation works correctly (33089M on 03:00.0 = 32G + overhead, the kernel achieves this without any hpmmioprefsize hint)
-- Runtime hot-plug allocation falls back to 288M
-- Therefore: the bug is **not "missing size hint"** but **"missing re-attempt at the right size"**
-- Eliminates the "userspace cmdline mitigation" lane for this specific failure mode (you can't tune your way out of this with kernel parameters)
-- Strengthens the case for **the in-kernel patch approach** (E27 territory)
+**What this run actually supports:**
 
-The two patch shapes outlined in E27 (parallel parameter `pci=realloc-pref=on` OR extend `__assign_resources_sorted`) BOTH still apply — but with the refined understanding that what they need to do is **trigger the existing allocator logic at hot-plug events**, not provide new size hints.
+- ✓ `pci=hpmmioprefsize=32G` specifically is a no-op at cold-plug on this hardware (n=1)
+- ✓ The kernel's existing boot-time allocator achieves 33089M on bridge 03:00.0 without any hint
+- ✓ This single parameter does not change cold-plug allocation behavior
 
-Memory: [[feedback_io_vs_prefetchable_realloc_asymmetry_2026_05_26]] now strengthened by this finding.
+**What it does NOT support (correction 2026-05-26 after review):**
+
+- ✗ ~~"No cmdline parameter can fix runtime hot-plug fallback"~~ — This sweeping claim was an inferential overreach from a single negative datapoint. The previous commit asserted this elimination of the entire userspace mitigation lane; that's not what the data shows.
+- A proper "no cmdline helps" claim requires either: (a) code-level audit of `drivers/pci/setup-bus.c::__assign_resources_sorted` + hot-plug allocation callers, enumerating every cmdline-controllable knob affecting the runtime hot-plug path; OR (b) exhaustive testing of remaining cmdline variants (E20 `hpmmiosize`, E21 `hpmemsize` — structurally different syntax, E22 `pcie_aspm=off` — different mechanism, E24 `resource_alignment` variants). E19 tested ONE parameter.
+
+**What the run DOES contribute (narrow positive):**
+
+- The kernel's boot-time allocator clearly can produce ≥ 32G windows when the device is present at cold-plug, WITHOUT any size hint. Whatever mechanism the boot-time allocator uses, it does not require external sizing direction from cmdline parameters.
+- Therefore: a future patch that triggers boot-time-style allocation logic at hot-plug events should likewise not need a hint to produce the right size. This is one design-direction insight (the patch invokes existing capability rather than introducing new sizing).
+- Does NOT eliminate the possibility that some OTHER cmdline parameter helps the existing hot-plug allocation path. That remains an open question gated on the audit / further experiments.
+
+Memory: [[feedback_io_vs_prefetchable_realloc_asymmetry_2026_05_26]] (E18 finding) and [[feedback_single_datapoint_inferential_overreach_2026_05_26]] (today's correction) bear on this.
+
+See `../pci-cmdline-audit.md` (pending) for the code-level enumeration that would convert today's narrow result into a stronger scope-narrowing claim.
 
 ## Open follow-ups
 

@@ -209,7 +209,9 @@ See `E07-cable-replug-drain-first.md` Patch design implications section. The TB-
 - TB-unplug-aware teardown → produces broken-BAR1 state safely (instead of wedging)
 - E27 corrective patch → recovers from broken-BAR1 state automatically (or via explicit trigger)
 
-### The bug is not "missing size hint" — it's "missing re-attempt" (from E19 Run 1, 2026-05-26)
+### Boot-time allocator achieves target size without a hint (from E19 Run 1, 2026-05-26)
+
+> ⚠️ **CORRECTION 2026-05-26:** the original framing of this section claimed E19's no-op result "eliminates the cmdline mitigation lane" and asserted the bug class as definitively "missing re-attempt, not missing hint." That was an inferential overreach from a single negative datapoint. The corrected version below preserves the narrow finding actually supported by the data. The broader scope-narrowing claim is deferred until the code audit (`../pci-cmdline-audit.md`, pending) and/or remaining Section 3 experiments produce supporting evidence.
 
 **The observation.** E19 Run 1 added `pci=hpmmioprefsize=32G` (kernel hint: "size hotplug-capable bridges' prefetchable windows ≥ 32G at boot"). Result: **no observable change** to any bridge window vs the E18 baseline (which had `pci=realloc=on` only):
 
@@ -220,30 +222,28 @@ See `E07-cable-replug-drain-first.md` Patch design implications section. The TB-
 | Sub-bridges 03:01/02/03 | 10922M each | 10922M each (unchanged) |
 | nvbandwidth | 2.84 / 3.29 / 2.71 GB/s | bit-identical |
 
-**Why the hint had no effect.** The kernel's existing boot-time allocator already produces ≥ 32G prefetchable windows when the BAR1=32G device is present at cold-plug — 33089M (32G + overhead) on the immediate parent bridge, 65856M (room for two 32G devices) upstream. There is no cold-plug case where the kernel allocates LESS than what's achievable — so a "32G minimum" hint can't push higher than what's already happening.
+**What this narrowly establishes:**
 
-**What this tells us about the runtime hot-plug failure mode.** Combined with the cable-replug observation (288M bridge window after a cable cycle when the device returns), the diagnosis is:
+- ✓ The kernel's existing boot-time allocator already produces ≥ 32G prefetchable windows when the BAR1=32G device is present at cold-plug (33089M = 32G + overhead on the immediate parent bridge)
+- ✓ This achievement does not require a `hpmmioprefsize` hint — the existing allocator has access to the necessary information by some other route (DEVICE_FLAG_HOTPLUG signal? PCI resource enumeration? — answered by the audit)
+- ✓ Therefore: a future corrective patch that invokes the boot-time allocator at hot-plug time would not need to feed it a size hint to produce the right size
 
-- ✓ Boot-time allocator: succeeds at 33089M without any hint
-- ✗ Runtime hot-plug allocator: falls back to 288M
-- = The size hint can't help, because the kernel already knows 33089M is achievable
-- ⇒ **The bug is not "missing size information." It's "the runtime hot-plug allocator does not attempt the boot-time-style allocation."**
+**What this does NOT establish (despite the previous version's overreach):**
 
-**Implications for the patch shape.** The two patch options outlined above (parallel parameter / extend existing walker) both still apply, but the refined understanding sharpens what the patch needs to DO at the chosen entry point:
+- ✗ ~~"The bug is not 'missing size hint' — it's 'missing re-attempt'"~~ — too strong from this data alone
+- ✗ ~~"Eliminates the userspace cmdline mitigation lane"~~ — only ONE cmdline parameter was tested; the parameter space is much larger
+- A code-level audit is required to enumerate which cmdline knobs affect the runtime hot-plug allocation path (separate from the boot-time path), and whether any of them could redirect the allocator away from the 288M fallback. Until that audit completes, the runtime hot-plug fallback's relationship to cmdline parameters is not characterized.
 
-- ❌ NOT: provide a size hint (kernel already has the size; hints are no-ops on this hardware)
-- ❌ NOT: pre-budget more space at boot (already maxed out)
-- ✓ YES: at hot-plug time, trigger the same allocation pass that boot uses. Probably means calling `pci_assign_unassigned_root_bus_resources()` or its inner helpers on the relevant bus, with the same flags the boot-time pass uses.
+**Refined patch design implications (the narrow version):**
 
-This eliminates the "userspace cmdline mitigation" lane for this failure mode — you can't tune your way out via kernel parameters. The fix MUST live inside the PCI core's allocation logic (or be triggered from outside it). Strengthens the case for the in-kernel patch over a userspace mitigation.
+- The boot-time allocation path **is** the reference implementation. Whatever code routes the kernel takes from `pci_assign_unassigned_root_bus_resources()` (or wherever boot-time enumeration kicks off) to the eventual 33089M assignment is the path the future patch should invoke at hot-plug events.
+- Whether the patch needs to provide hints OR can rely on the boot-time logic's existing self-sizing depends on the audit findings. Today's E19 data is consistent with EITHER interpretation; it doesn't disambiguate.
 
-**Body-of-evidence sufficiency update.** Combined with E18's I/O-vs-prefetchable observation, the design directive is now:
+**Still need (before final design):**
 
-- Boot-time path is the reference implementation (achieves 33089M)
-- The corrective patch needs to invoke that path at hot-plug events
-- For an existing-bridge-already-assigned scenario, the patch may need an explicit "release + re-assign" sequence
-
-Still need (before final design): an actual broken-BAR1 reproduction with `__assign_resources_sorted` instrumented (bpftrace or strategic printk) to see exactly which fallback branch is taken at runtime hot-plug vs which branch boot takes.
+- The code audit (`../pci-cmdline-audit.md`) to enumerate runtime hot-plug cmdline knobs and characterize their effect on `__assign_resources_sorted`'s decision branches
+- An actual broken-BAR1 reproduction with `__assign_resources_sorted` instrumented (bpftrace or strategic printk) to see exactly which fallback branch is taken at runtime hot-plug vs which branch boot takes
+- Remaining Section 3 experiments (E20, E21, E22, E24) for empirical coverage of other cmdline parameters in this category
 
 ## Open follow-ups
 
