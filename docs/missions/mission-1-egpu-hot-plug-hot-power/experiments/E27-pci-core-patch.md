@@ -158,7 +158,56 @@ Patch breaks other PCI devices (regression)
 
 ## Patch design implications
 
-(Filled in once body-of-evidence supports a design decision.)
+> Body-of-evidence accumulates here from related experiments. Each entry below cites the run that produced the insight.
+
+### Asymmetry: I/O space vs prefetchable memory under `pci=realloc=on` (from E18 Run 1, 2026-05-26)
+
+**The observation.** E18 Run 1 added `pci=realloc=on` to the GRUB cmdline and rebooted. Two measurable effects:
+
+1. ✓ Bridge I/O windows widened — root port 0000:00:07.0 went `4K → 16K`, cascade through TB hierarchy. The realloc walker found unallocated headroom in the host's 64KB I/O pool and expanded the bridge windows accordingly.
+2. ✗ Bridge prefetchable memory windows UNCHANGED — 03:00.0 stayed at 33089M, 02:00.0 at 65856M. Identical to the no-cmdline baseline.
+
+**What this tells us about `__assign_resources_sorted`.** The function differentiates between resource types. The I/O re-allocation path IS responsive to `realloc=on`; the prefetchable memory re-allocation path is not (or has a different trigger). This is the design-level asymmetry that E27's corrective patch needs to address.
+
+**Two patch shapes both follow from this observation:**
+
+- **Option A — parallel parameter / mechanism.** Introduce `pci=realloc-pref=on` (or equivalent flag) that explicitly opts into prefetchable re-allocation, modelled on the existing realloc-on code path. Smaller blast radius (opt-in), narrower review surface. Userspace-controllable.
+- **Option B — extend the existing walker.** Modify `__assign_resources_sorted` so the realloc-on flag triggers re-allocation for ALL resource types (I/O, non-prefetchable mem, prefetchable mem) uniformly. Larger blast radius (changes default behavior of an existing parameter), needs careful regression coverage on non-eGPU PCI devices. But: the upstream community might prefer this since it's the "fix the asymmetry" framing rather than the "add another flag" framing.
+
+**Common code structure for both options** (sketch — needs verification against actual 7.0.x source):
+
+```c
+/* In __assign_resources_sorted's fallback path (or a new wrapper) */
+struct list_head fail_head_pref;  /* prefetchable resources that failed assignment */
+list_for_each_entry_safe(fail_res, tmp, &fail_head_pref, list) {
+    /* If realloc enabled for prefetchable (Option A: a new flag;
+     * Option B: the existing pci_realloc_enable flag covers this too): */
+    if (prefetchable_realloc_enabled(...)) {
+        struct pci_bus *bus = fail_res->dev->bus;
+        if (try_expand_bridge_prefetchable_window(bus, fail_res->res, fail_res->size)) {
+            pr_info("pci: expanded prefetchable bridge window for %s BAR%d\n",
+                    pci_name(fail_res->dev), fail_res->resno);
+            continue;
+        }
+    }
+    drop_assignment(fail_res);
+}
+```
+
+**Why E18's data strengthens confidence in this design direction:**
+
+- The pattern of "realloc finds unallocated headroom → widens bridge window" IS proven to work (I/O case).
+- The bug is essentially "this pattern wasn't extended to prefetchable memory."
+- The fix is therefore additive (apply existing pattern to additional resource type), not architecturally novel.
+
+**Open dependency before this can ship:** still need an actual broken-BAR1 producer to validate that the patch ALSO fixes the runtime hot-plug case (not just cold-plug). Currently blocked on either the surprise-removal teardown patch (E1 extension / new A6) OR an alternative broken-BAR1 producer.
+
+### Surprise-removal teardown (from E07 Run 2, 2026-05-26)
+
+See `E07-cable-replug-drain-first.md` Patch design implications section. The TB-unplug-aware teardown patch is a separate, parallel patch effort to E27. Together they would form a coherent runtime-hot-plug-hardening pair:
+
+- TB-unplug-aware teardown → produces broken-BAR1 state safely (instead of wedging)
+- E27 corrective patch → recovers from broken-BAR1 state automatically (or via explicit trigger)
 
 ## Open follow-ups
 
@@ -174,6 +223,9 @@ Patch breaks other PCI devices (regression)
 
 - Linux source: `drivers/pci/setup-bus.c::__assign_resources_sorted`
 - Linux source: `drivers/pci/setup-bus.c::__pci_setup_bridge_mmio_pref`
+- Linux source: `drivers/pci/pci.c::pci_realloc_enable` (the global flag set by `pci=realloc=on`)
+- E18 Run 1 — the I/O-vs-prefetchable asymmetry observation that informs E27's design
+- E07 Run 2 — surprise-removal teardown patch (parallel patch effort; together with E27 forms a coherent runtime-hot-plug-hardening pair)
 - E25 (Miroshnichenko v9 — same problem class, different patch approach)
 - E26 (out-of-tree module — narrower-scope alternative)
 - `feedback_no_premature_upstream_filing` — patch must be tested before any upstream submission

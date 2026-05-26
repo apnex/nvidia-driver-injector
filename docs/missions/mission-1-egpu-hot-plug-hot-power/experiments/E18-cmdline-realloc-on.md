@@ -152,11 +152,12 @@ If a future runtime-hot-plug recovery path uses `pci=realloc=on` semantics inter
 ```
 drivers/pci/setup-bus.c::pci_assign_unassigned_resources    (the realloc-aware entry)
 drivers/pci/setup-bus.c::__assign_resources_sorted          (the fallback path inside)
+drivers/pci/pci.c::pci_realloc_enable                       (the global flag set by the cmdline)
 ```
 
-This is the same call site noted in E27 (PCI core patch experiment). Today's observation that realloc=on works for I/O space but not prefetchable space suggests `__assign_resources_sorted` differentiates between resource types — a corrective patch would need to make the prefetchable path equally responsive to realloc semantics.
+**Today's observation captured for patch design in `E27-pci-core-patch.md`** → "Patch design implications" → "Asymmetry: I/O space vs prefetchable memory under `pci=realloc=on`". Summary: the I/O bridge windows DID widen under `realloc=on`; the prefetchable bridge windows did NOT. This proves the realloc pattern works at the kernel level — the patch task is to extend it to the prefetchable resource type. Two patch shapes follow (parallel parameter `pci=realloc-pref=on`, OR extend `__assign_resources_sorted` to cover all resource types under the existing flag). See E27 for the design sketch.
 
-Not yet a design — just a note that the boundary between "what realloc=on touches" and "what it doesn't" maps to specific kernel code.
+Memory: [[feedback_io_vs_prefetchable_realloc_asymmetry_2026_05_26]] preserves this design pointer across sessions.
 
 ## Open follow-ups
 
