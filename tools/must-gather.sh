@@ -50,6 +50,15 @@ journalctl -k -b > "$workdir/journalctl-kernel.txt" 2>&1 || true
 journalctl -u nvidia-driver-injector-bridge-link-cap.service > "$workdir/journalctl-bridge-link-cap.txt" 2>&1 || true
 journalctl -u 'vllm-soak-*' > "$workdir/journalctl-vllm-soak.txt" 2>&1 || true
 
+# Previous boots — critical for wedge-class investigations where the failure
+# happened on a boot we recovered from via forced power-cycle (the failure
+# journal lives at -b -1, not -b 0). 2026-05-26 E07 Run 2 wedge surfaced this
+# gap: forced reboot dropped the only readable evidence into -b -1.
+log "journalctl prior boots (for wedge-class forensics)"
+journalctl -k -b -1 > "$workdir/journalctl-kernel-prev-boot.txt" 2>&1 || true
+journalctl -b -1 > "$workdir/journalctl-prev-boot-full.txt" 2>&1 || true
+journalctl -k -b -2 > "$workdir/journalctl-kernel-prev2-boot.txt" 2>&1 || true
+
 log "PCI topology"
 lspci -nn > "$workdir/lspci-all.txt" 2>&1 || true
 lspci -vvv > "$workdir/lspci-vvv.txt" 2>&1 || true
