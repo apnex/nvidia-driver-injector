@@ -604,3 +604,68 @@ modify the intent.)
   disconnect is declared); `docs/patch-improvements/C4-err-handlers-scaffold.md`
   (registers `pci_error_handlers` — C5 provides the de-branded
   primitives those handlers and the addon recovery stack consume).
+
+---
+
+# C5-crash-safety — v3 amendment lineage (2026-05-26)
+
+## Trigger
+
+MISSION-1 E07 Run 2 (2026-05-26 18:08:45) — TB cable yank during
+active driver session produced host wedge despite all v1/v2 C5
+guards firing correctly. Forensic record at
+`docs/missions/mission-1-egpu-hot-plug-hot-power/experiments/E07-cable-replug-drain-first.md`.
+
+## Triangulation sources
+
+- **Empirical evidence:** E07 Run 2 forensic record (Xid 79+154
+  cascade, kernel call sites firing assertions, host silent wedge
+  ~3 min post-yank).
+- **Driver-side root-cause audit:**
+  `docs/missions/mission-1-egpu-hot-plug-hot-power/nvidia-driver-surprise-removal-audit.md`
+  — identifies the wedge as a driver-side bug, NOT a Linux PCI core
+  issue. Linux delivered the surprise-removal signal correctly; the
+  driver's response cascaded.
+- **Userspace alternative survey:**
+  `docs/missions/mission-1-egpu-hot-plug-hot-power/userspace-reset-recover-survey.md`
+  — confirms no userspace primitive can substitute for the driver
+  fix (`nvidia-smi -r` refuses on healthy idle GPU due to client
+  locks; wedged state has clients connected, blocking all userspace
+  reset operations).
+- **Integration audit:**
+  `docs/missions/mission-1-egpu-hot-plug-hot-power/c3-c5-integration-audit.md`
+  — validates patch placement (the extensions fit C5, not C3) +
+  comprehensive 8-site sweep methodology.
+- **Amendments draft:**
+  `docs/missions/mission-1-egpu-hot-plug-hot-power/c5-intent-amendments-draft.md`
+  — the structural draft applied by this v3 cycle.
+
+## Two new requirement classes triangulated to v3
+
+| Class | Was covered by v1/v2? | v3 adds |
+|---|---|---|
+| Cross-layer disconnect propagation across all detection sites (not only `osDevReadReg032`'s post-read check) | Partially — only `osDevReadReg032` path | Propagation at `osHandleGpuLost`'s lost-state branch too |
+| Application of `NV_ASSERT_OR_GPU_LOST` family at all cleanup-path assertion sites that may receive `NV_ERR_GPU_IS_LOST` from C5-guarded RPC funnels | Partially — 2 sites (`rs_client.c:855`, `rs_server.c:272`) | All 8 swept sites + 2 new macro variants for `_OR_RETURN` / `_OR_RETURN_VOID` |
+
+## Site sweep methodology (v3)
+
+```bash
+grep -rn 'NV_ASSERT.*== NV_OK.*NV_ERR_GPU_IN_FULLCHIP_RESET' \
+  --include='*.c' --include='*.h'
+```
+
+Executed against fork branch `c5-crash-safety` tip 2026-05-26.
+8 sites identified across 7 files. 2 confirmed-fired in E07 Run 2,
+6 speculative-but-same-pattern. All 8 converted by v3 for completeness.
+
+## Status transition
+
+- v1: `status: reviewed`, accepted 2026-05-23
+- v2: `status: reviewed`, accepted 2026-05-23 (zero-delta confirmation)
+- **v3: `status: amended-v3-draft`, transitions to `reviewed` when fork-branch source changes land + container rebuilt as aorus.16 + soak verified**
+
+## Intent-updates frontmatter field
+
+`intent-updates: [v3-amendments-2026-05-26]` — captures the v3
+amendment cycle so the patch-intent's audit trail is queryable from
+the improvements doc.

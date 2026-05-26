@@ -469,3 +469,71 @@ have non-`applied` Resolutions.
   [[C4-err-handlers-scaffold]] (registers the
   `pci_error_handlers` table; C5 provides the de-branded
   primitives those handlers and the addon recovery stack consume).
+
+---
+
+# C5-crash-safety — v3 review (amended-v3-draft)
+
+## v2 → v3 deltas
+
+MISSION-1 E07 Run 2 (2026-05-26 18:08:45) produced a host wedge during a cable-yank-with-active-driver-session experiment. Despite C5 v2 firing correctly at the rcdbAddRmGpuDump / _issueRpcAndWait / rpcRmApiFree_GSP guards (all visible in journalctl log-once lines), an assertion cascade fired at sites that v2 did NOT cover — `kernel_graphics.c:2608`, `fecs_event_list.c:1623` — using plain `NV_ASSERT` patterns that rejected `NV_ERR_GPU_IS_LOST`. Subsequent integration audit (`docs/missions/mission-1-egpu-hot-plug-hot-power/c3-c5-integration-audit.md`) identified TWO gaps:
+
+1. Cross-layer propagation only fired from `osDevReadReg032`'s post-read check; once `PDB_PROP_GPU_IS_LOST` was set by ANY OTHER path (e.g., `osHandleGpuLost`), the short-circuit prevented the post-read check from ever running, so `os_pci_set_disconnected` was never called from non-osDevReadReg032 detection paths.
+2. The `NV_ASSERT_OR_GPU_LOST` macro existed and was applied at only 2 sites; a tree-wide grep found 8 total sites following the same `NV_ASSERT*((status == NV_OK) || (status == NV_ERR_GPU_IN_FULLCHIP_RESET))` pattern. Two were confirmed-fired during E07 Run 2. Six were speculative-but-same-pattern. The 2-site application was incomplete.
+
+The v3 amendments to the intent (now applied) close both gaps and introduce the missing macro variants. Three new must-fix deltas captured:
+
+### C5-crash-safety-D3 — Cross-layer propagation at osHandleGpuLost lost-state branch
+
+- **Location:** `src/nvidia/arch/nvalloc/unix/src/osinit.c::osHandleGpuLost` — the lost-state branch, immediately after `gpuSetDisconnectedProperties(pGpu);`
+- **Change:** add a single line: `os_pci_set_disconnected(nv->handle);` plus a brief rationale comment citing the propagation gap.
+- **Severity:** must-fix
+- **Evidence:** MISSION-1 E07 Run 2 (2026-05-26 18:08:45). After `osHandleGpuLost` declared the GPU lost, the Linux marker stayed unset for the entire wedge window. Documented in `docs/missions/mission-1-egpu-hot-plug-hot-power/experiments/E07-cable-replug-drain-first.md` Run 2 section.
+- **Boundary clarification:** C3 owns `osHandleGpuLost`'s preflight retry logic. C5 owns the cross-layer propagation in the lost-state branch. Both patches modify `osinit.c` but different hunks — clean and reviewable.
+- **Resolution:** applied via Amendment 3 to the v3 intent (this commit). Source change pending in a follow-up fork-branch commit (which will add the one line + comment to `osinit.c`).
+
+### C5-crash-safety-D4 — Macro family expansion + 8-site application
+
+- **Location:** `src/nvidia/inc/kernel/gpu/nv-gpu-lost.h` (new macros) + 7 source files (8 sites total).
+- **Change:**
+  - Add `NV_ASSERT_OR_GPU_LOST_OR_RETURN(status)` and `NV_ASSERT_OR_GPU_LOST_OR_RETURN_VOID(status)` to `nv-gpu-lost.h`. Both share the predicate body `NV_OK || NV_ERR_GPU_IN_FULLCHIP_RESET || NV_ERR_GPU_IS_LOST` with the existing `NV_ASSERT_OR_GPU_LOST(status)` macro. The new variants mirror `NV_ASSERT_OR_RETURN` and `NV_ASSERT_OR_RETURN_VOID` respectively.
+  - Convert 8 swept sites to the appropriate macro variant (see the intent's Requirement table for the precise mapping). Add a `NV_GPU_LOST_LOG_ONCE` line at each converted site, guarded by `if (status == NV_ERR_GPU_IS_LOST)`, matching the v1 pattern at `rs_client.c:855` and `rs_server.c:272`.
+  - Add `#include "gpu/nv-gpu-lost.h"` to 6 files that don't already have it (kernel_graphics.c, fecs_event_list.c, kernel_falcon_tu102.c, kernel_gsp_tu102.c, vaspace_api.c, mem.c).
+- **Severity:** must-fix
+- **Evidence:**
+  - 2 sites confirmed-fired in E07 Run 2 (kernel_graphics.c:2608, fecs_event_list.c:1623) — direct journalctl evidence
+  - 6 sites speculative-but-same-pattern; sweep methodology: `grep -rn 'NV_ASSERT.*== NV_OK.*NV_ERR_GPU_IN_FULLCHIP_RESET' --include='*.c' --include='*.h'` across the fork branch tip
+  - Treating only the 2 confirmed sites would leave 6 lurking assertion sites that fire under analogous conditions. Treating all 8 is the upstream-PR-friendly framing: "we fix the pattern, not just the observed instances."
+- **Macro-name justification:** the verbose names (`_OR_RETURN`, `_OR_RETURN_VOID`) mirror the existing kernel naming conventions (`NV_ASSERT_OR_RETURN`, `NV_ASSERT_OR_RETURN_VOID`). Consistency with the surrounding ecosystem outweighs brevity. The names are searchable and self-documenting.
+- **Resolution:** applied via Amendment 4 to the v3 intent. Source changes pending in follow-up fork-branch commits.
+
+### C5-crash-safety-D5 — Scope boundary clarification for C3/C5 split in osinit.c
+
+- **Location:** "Scope boundary" section of the patch-intent doc, the first bullet covering the C3/C5 boundary.
+- **Change:** replace the original "this patch does NOT cover the `osHandleGpuLost` preflight retry" bullet with an explicit version stating that C5 OWNS the single propagation line in `osHandleGpuLost`'s lost-state branch, even though C3 owns the surrounding preflight retry logic. Both patches modify `osinit.c` but different hunks — the boundary is clean and reviewable: C3 = retry logic, C5 = cross-layer propagation.
+- **Severity:** must-fix (documentation)
+- **Evidence:** without this clarification, the C3/C5 boundary in `osinit.c` would be ambiguous — a future maintainer reading the C3 intent's "does NOT alter the lost-state branch's behaviour" line would think the lost-state branch is C3's exclusive territory. The clarification preserves C3's narrow upstream-PR shape while explicitly allowing C5 to add its one-line propagation in the same file.
+- **Resolution:** applied via Amendment 5 to the v3 intent.
+
+## v3 done gate
+
+- [ ] `docs/patch-intents/C5-crash-safety.md` v3 amendments applied — **DONE this commit**
+- [ ] v3 deltas section appended to `docs/patch-reviews/C5-crash-safety.md` — **DONE this commit**
+- [ ] `docs/patch-improvements/C5-crash-safety.md` lineage row added — separate commit
+- [ ] Fork-branch source changes (2 new macros + 8 conversions + 1 osinit.c line) — separate session
+- [ ] `patches/base/C5-crash-safety.patch` regenerated via `tools/regen-base-patches.sh` — separate session
+- [ ] `tools/validate-patchset.sh` passes — separate session
+- [ ] Container rebuilt as aorus.16 — separate session
+- [ ] Aorus.16 deployed + verified wedge-free under cable-yank test — separate session
+
+When all gates pass, frontmatter `status: amended-v3-draft → reviewed`.
+
+## v3 cross-references
+
+- MISSION-1 forensic chain that surfaced v3:
+  - `docs/missions/mission-1-egpu-hot-plug-hot-power/experiments/E07-cable-replug-drain-first.md`
+  - `docs/missions/mission-1-egpu-hot-plug-hot-power/nvidia-driver-surprise-removal-audit.md`
+  - `docs/missions/mission-1-egpu-hot-plug-hot-power/userspace-reset-recover-survey.md`
+  - `docs/missions/mission-1-egpu-hot-plug-hot-power/c3-c5-integration-audit.md`
+  - `docs/missions/mission-1-egpu-hot-plug-hot-power/c5-intent-amendments-draft.md` (the draft applied by this v3 work)
+- Strategic forward implication: v3 source landing unblocks safe broken-BAR1 state production via cable yank, which unblocks ALL MISSION-1 Phase 2.1/2.2 experiments (E02/E10/E12/E13/E14/E04/E15/E03) AND the bpftrace instrumentation work for the BAR1 corrective patch (E27 territory).
