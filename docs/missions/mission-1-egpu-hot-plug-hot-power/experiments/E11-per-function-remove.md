@@ -190,7 +190,7 @@ E11 Run 1 confirms **two important things, partially answers a third, and surfac
 
 3. ⏸ **Original E11 hypothesis** (does function-level remove+rescan recover from broken-BAR1?) is now BLOCKED: we cannot safely produce the broken-BAR1 starting state on this hardware without the Sub-mission C wedge risk (see E07 Run 2). Phase 2.1 / 2.2 experiments depending on broken-BAR1 are similarly blocked.
 
-4. **NEW open question**: PCIe link bandwidth post-rescan reports degraded (2.5 GT/s × x4 ≈ 8 Gb/s vs cold-boot ~24 Gb/s on TB4). Worth measuring actual throughput via `nvbandwidth` (diag container) to determine if this is virtual-register noise (per `feedback_lspci_lnkcap_tb_virtual`) or a real degradation that would affect compute workloads. NOT a wedge issue, but a Phase 2.1 informant.
+4. ✓ **Closed (2026-05-26):** PCIe link bandwidth post-rescan reported "2.5 GT/s × x4" in dmesg, suggesting degradation. nvbandwidth measurement confirms NO actual degradation — H2D/D2H/H2D-bidir bit-identical to cold-plug aorus.14 baseline (2.84/3.29/2.71 vs 2.84/3.29/2.72 GB/s). The dmesg/lspci reading is virtualized (per `feedback_lspci_lnkcap_tb_virtual`). Real tunnel bandwidth is fully preserved through software remove+rescan.
 
 ## Patch coverage analysis
 
@@ -232,7 +232,7 @@ E11 Run 1 strengthens the patch design hypothesis from E07:
 ## Open follow-ups
 
 - [ ] **E11 Run 2 from BROKEN-BAR1 state** (the original E11 hypothesis) — BLOCKED on safely producing broken-BAR1, which depends on either: A6/E1-extension patch (so cable yank is safe), OR an alternative production mechanism not yet identified
-- [ ] **Re-link-speed investigation** — measure actual H2D/D2H bandwidth via `apnex/nvidia-driver-diag` container after E11-style remove+rescan, compare to cold-plug baseline. Determines if the dmesg "2.5 GT/s PCIe x4" is virtual-register-noise (per `feedback_lspci_lnkcap_tb_virtual`) or real degradation.
+- [x] **Re-link-speed investigation** — DONE 2026-05-26: nvbandwidth ran via `apnex/nvidia-driver-diag:1.0` (preserved at `/var/log/mission-1-archaeology/E11-Run1-software-remove/nvbandwidth-postrescan.txt`). Results: **H2D=2.84 GB/s, D2H=3.29 GB/s, H2D-bidir=2.71 GB/s** — bit-identical to cold-plug aorus.14 baseline (2.84 / 3.29 / 2.72 — last one within 0.01 noise). **No actual link degradation.** Confirms `feedback_lspci_lnkcap_tb_virtual`: dmesg / lspci link readings on TB-tunneled bridges are virtualized. (Also observed: under active workload `pcie.link.gen.current` now reports `3` not `1`, pstate `P0` not `P8` — the virtual register value depends on GPU activity level, not actual link state.)
 - [ ] **bpftrace-instrumented Run from healthy state** — kprobe on `nv_pci_remove`, `nv_pci_probe`, `pci_stop_and_remove_bus_device_locked` to capture exact code path that worked today (will be the reference for designing the surprise-removal recovery patch)
 - [ ] **n≥2 reproductions of Run 1** (per `feedback_reliability_methodology`) — confirm Run 1's safe-graceful outcome is deterministic and not coincidental
 - [ ] **Compare to Sub-mission B trigger** (chassis power-cycle while cable connected) — does that fire the wedge path or the graceful path?
@@ -243,6 +243,7 @@ E11 Run 1 strengthens the patch design hypothesis from E07:
 |---|---|---|---|
 | Run 1 pre | `/var/log/mission-1-archaeology/E11-Run1-software-remove/pre.tar.gz` | 309 KB | Full state immediately before remove+rescan |
 | Run 1 post | `/var/log/mission-1-archaeology/E11-Run1-software-remove/post.tar.gz` | 311 KB | Full state immediately after re-enumeration completed |
+| Run 1 nvbandwidth | `/var/log/mission-1-archaeology/E11-Run1-software-remove/nvbandwidth-postrescan.txt` | 4 KB | nvbandwidth suite output via `apnex/nvidia-driver-diag:1.0` — confirms no actual link degradation |
 
 The pre→post diff at bundle-level (extracting both and `diff -r`) will show every kernel/k8s/PCI state change in detail beyond what `get-pci-stats.sh --diff` summarizes.
 
