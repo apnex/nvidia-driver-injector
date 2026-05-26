@@ -119,19 +119,28 @@ Currently no guard at entry. The downstream `NV_ASSERT_OR_GPU_LOST*` relaxations
 
 ## Issue-tracker survey (Step 2)
 
-Survey of `github.com/NVIDIA/open-gpu-kernel-modules` issues for Xid 79 / Xid 154 / "fallen off the bus" on non-TB / non-eGPU systems:
+Survey of `github.com/NVIDIA/open-gpu-kernel-modules` issues for Xid 79 / Xid 154 / "fallen off the bus" — sorted by opened-date (most recent first). Metadata fetched via `gh issue view` 2026-05-26.
 
-| Issue | Hardware | Transport | Symptom | Driver |
-|---|---|---|---|---|
-| [#1134](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/1134) | RTX 3090 single-GPU desktop | **PCIe x16 (discrete, NOT TB)** | Xid 31 → Xid 154 "Node Reboot Required" under Chromium GPU workload | **nvidia-open 595.71.05** (same as our test rig) |
-| [#916](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/916) | Zotac RTX 4090 | PCIe x16 (discrete, NOT TB) | NV_ERR_GPU_IS_LOST + NV_ERR_GPU_IN_FULLCHIP_RESET during CUDA workload | open-driver |
-| [#1045](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/1045) | RTX 5080 | PCIe x16 (discrete, NOT TB) | Xid 62/45 → Xid 119 → Xid 154 desktop lockup | nvidia-open 590.48.01 |
-| [#888](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/888) | unspecified RTX | discrete | "GPU has fallen off the bus" | nvidia-open 570.1169 |
-| [#461](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/461) | ARM64 server | discrete | Xid 79 + system crash | open-driver |
-| [#776](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/776) | unspecified | desktop | Xid 79 during alt-tab game/KDE | open-driver |
-| [#900](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/900) | RTX 5090 | OCuLink (external PCIe, NOT Thunderbolt) | Xid 79 under load | nvidia-open |
-| [#974](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/974) | RTX 5060 Ti | Thunderbolt eGPU | Xid 79 init failure | nvidia-open |
-| [#979](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/979) | RTX 5090 (apnex) | Thunderbolt eGPU | Xid 79 + cascade — **our case** | 595.71.05 |
+| Issue | Opened | State | Hardware | Transport | Cascade | Driver |
+|---|---|---|---|---|---|---|
+| [#1134](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/1134) | 2026-05-07 | OPEN | RTX 3090 single-GPU desktop | **PCIe x16 (discrete, NOT TB)** | BAR1 sanity warn → Xid 31 → uvm fatal 0x60 → Xid 154 → Xid 175 → Xid 16; chip-reset itself wedges | **nvidia-open 595.71.05** (same as our test rig) |
+| [#1045](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/1045) | 2026-03-01 | OPEN | RTX 5080 desktop | PCIe x16 (discrete, NOT TB) | Xid 62 → Xid 45 (30s) → Xid 119 GSP timeout (45s) → Xid 154 | nvidia-open 590.48.01 |
+| [#979](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/979) | 2025-12-04 | OPEN | Multi-reporter: RTX 5080/5090/5060 Ti/PRO 6000 Blackwell + Windows | TB4/TB5/USB4 + Windows reproducer | Xid 79 → uvm 0x60 → Xid 154 (often per-GPU cross-contamination to internal dGPU); TOSUKUi reports `AER: device recovery failed` with no Xid | 590.44.01/590.48.01/595.58.03/595.71.05 + closed 580.142 + Windows 595.79 |
+| [#974](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/974) | 2025-11-25 | OPEN | RTX 5060 Ti TB4 enclosure | Thunderbolt eGPU | Bridge window can't assign (kernel PCI) → driver loads → Xid 79 → kgspBootstrap_GH100 fails → WPR2-stuck | nvidia-headless-580-open |
+| [#888](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/888) | 2025-11-25 | OPEN | RTX 5090 native PCIe | PCIe x16 (discrete, NOT TB) | Xid 79 from gpu_burn / sustained CUDA | nvidia-open 570.1169 |
+| [#916](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/916) | 2025-08-10 | OPEN | 2x RTX 4090 workstation | PCIe x16 (discrete, NOT TB) | NV_ERR_GPU_IS_LOST + IN_FULLCHIP_RESET; WARN at nv.c:5039 `nvidia_dev_put`; force-close storm | nvidia-open 575.64.03 |
+| [#900](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/900) | 2025-07-11 | CLOSED (OP swapped OCuLink dock, hw-workaround) | RTX 5090 | OCuLink (external PCIe, NOT Thunderbolt) | Xid 79 instantly under any sustained CUDA; nvidia-smi idle works | nvidia-open 575.64.03 |
+| [#776](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/776) | 2025-02-02 | OPEN | RTX A2000 Laptop + Intel iGPU (PRIME offload) | Internal MUX/PCIe | Xid 79 → API_GPU_ATTACHED_SANITY_CHECK x10 in 1s → Xid 154; reproduced via D3cold/BD_PROCHOT | nvidia-open 565.77 |
+| [#461](https://github.com/NVIDIA/open-gpu-kernel-modules/issues/461) | 2023-02-18 | CLOSED (maintainer routed to forums — NOT actually fixed; commenter pushed back same day) | RTX 3060 SolidRun HoneyComb | ARM64 PCIe Gen3 x8 | Xid 79 in `intrServiceStall_IMPL` → Xid 119 GSP timeout triggered by the crash-dump path's own RPC (fn 78 DUMP_PROTOBUF_COMPONENT) | nvidia-open 525.85.05 |
+
+**Empirical finding (corrected for accurate dates):** The same Xid 79 / Xid 154 cascade has been reproduced across 3 years (2023-02 → 2026-05), 5+ kernel versions, both open and closed drivers, both Linux and Windows, on:
+- **Discrete PCIe x16 cards:** RTX 3090 (#1134), 4090 (#916), 5080 (#1045), 5090 (#888) — no external transport at all
+- **OCuLink external PCIe:** RTX 5090 (#900) — non-TB external transport
+- **Thunderbolt/USB4 eGPU:** RTX 5060 Ti (#974), 5080/5090/PRO 6000 (#979) — our class
+- **PRIME laptop dGPU:** RTX A2000 (#776) — internal but D3cold-induced
+- **ARM64:** RTX 3060 (#461) — different ISA, same cascade
+
+Issue #1134 is particularly load-bearing evidence: same driver version (`595.71.05`), discrete RTX 3090 desktop card, exact same `Xid 154 / Node Reboot Required` marker that fires in our E07 Run 3 forensics, opened 2026-05-07 (3 weeks before the audit). The cascade is many-causes-one-effect — the failure class is **PCIe surprise removal / GPU-unrecoverable in general**, not "Thunderbolt cable yank" specifically.
 
 **Empirical finding:** The same Xid 79 / Xid 154 cascade fires on:
 - Discrete RTX 3090 / 4090 / 5080 single-GPU desktops (PCIe x16, no external transport at all)
