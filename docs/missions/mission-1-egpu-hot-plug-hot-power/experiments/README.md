@@ -35,7 +35,7 @@ Each file is a self-contained scientific-method record: **hypothesis, method, pr
 |---|---|---|
 | E02 | [pciehp slot power-cycle](E02-pciehp-slot-power-cycle.md) | PENDING |
 | E10 | [Remove root port + rescan from parent](E10-root-port-remove-rescan.md) | PENDING |
-| E11 | [Per-function remove (GPU + audio) + global rescan](E11-per-function-remove.md) | PENDING |
+| E11 | [Per-function remove (GPU + audio) + global rescan](E11-per-function-remove.md) | Run 1 DONE 2026-05-26 — Recipe B SAFE confirmed; doesn't produce broken-BAR1 from healthy state |
 | E12 | [FLR reset on GPU](E12-flr-reset.md) | PENDING |
 | E13 | [reset_method permutations](E13-reset-method-permutations.md) | PENDING |
 | E14 | [D3cold transitions](E14-d3cold-transitions.md) | PENDING |
