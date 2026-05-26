@@ -27,7 +27,7 @@
 # Verify:
 #   kubectl get nodes -L nvidia.driver/state,nvidia.driver/version
 #   # expect:  NAME   STATE  VERSION
-#   #          obpc   ready  595.71.05-aorus.15
+#   #          obpc   ready  595.71.05-aorus.16
 #
 # Image:
 #   apnex/nvidia-driver-injector:595.71.05-aorus.16 (built locally with
