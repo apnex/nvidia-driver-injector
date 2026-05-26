@@ -27,7 +27,8 @@
 #
 # Output
 # ------
-# /root/nvidia-driver-injector/archive/cap-retest-probes/<run-id>/
+# /var/log/nvidia-driver-injector-probes/<run-id>/   (default; override with
+#                                                    CAP_RETEST_PROBE_DIR env)
 #   00-config.txt            — what cap config we expected this run
 #   01-cap-state.txt         — bridge LnkCtl2/LnkSta + GPU LnkSta
 #   02-aer-baseline.txt      — AER counters before trigger
@@ -76,7 +77,7 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 RUN_ID="$(date -Iseconds | tr ':' '-')"
-RUN_DIR="$REPO_ROOT/archive/cap-retest-probes/$RUN_ID"
+RUN_DIR="${CAP_RETEST_PROBE_DIR:-/var/log/nvidia-driver-injector-probes}/$RUN_ID"
 mkdir -p "$RUN_DIR"
 LOG="$RUN_DIR/run.log"
 

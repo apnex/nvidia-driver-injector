@@ -331,7 +331,6 @@ right way to confirm before locking in a default.
 | LBMS interrupt handler that sets PCI_LINK_LBMS_SEEN | `drivers/pci/pcie/bwctrl.c:211` (`pcie_bwnotif_irq`) |
 | TB driver — does NOT touch LnkCtl2 (verified) | `drivers/thunderbolt/` (no PCI_EXP_LNKCTL2 references) |
 | Lever H17 catalog reference | `apnex/aorus-5090-egpu` `docs/lever-catalog.md` (referenced in service-retirement-roadmap; needs formal entry) |
-| Empirical retest dossier | `archive/cap-retest-probes/2026-05-10T13-11-35+10-00/` |
 | Project history of bit-5 / cap experiments | `apnex/aorus-5090-egpu` `docs/reliability-hypothesis-ledger.md` H17 entries |
 
 ## Open follow-ups
