@@ -543,7 +543,7 @@ Three new failure sites characterized (see E07 Run 3 record for full forensic):
 
 **v4 direction:** the per-site patching approach scales linearly with failure-mode discovery and re-runs the sweep-and-test cycle each iteration. The architectural alternative (catch at detection layer + single sink-state marker + small set of funnel points) shrinks patch surface from ~50 sites to ~10. v4 work pivots to architectural refactor.
 
-See `docs/missions/mission-1-egpu-hot-plug-hot-power/architectural-funnel-redirection-design.md` for the v4 design.
+See `docs/missions/mission-1-egpu-hot-plug-hot-power/decision-architecture-class-localization.md` for the v4 architectural decision record.
 
 ## v3 cross-references
 

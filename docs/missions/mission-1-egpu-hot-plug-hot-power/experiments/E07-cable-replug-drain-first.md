@@ -191,7 +191,7 @@ C5 v3 is **incomplete**. The 8-site coverage we identified via sweep regex was t
 - Run 3 → found 3 MORE sites the regex missed, plus a different failure class entirely
 - Implication: a v4 site-sweep would find more (broader regex covering single-status patterns), but the architectural insight is more important — **continue patching N sites is the wrong fix shape.**
 
-See `architectural-funnel-redirection-design.md` for the proposed v4 redirect: catch at detection layer earlier + single sink-state marker + small set of funnel points + zero per-site assertion patching needed.
+See `decision-architecture-class-localization.md` for the v4 architectural decision: Option 1 (Core / C-series, transport-agnostic) vs Option 2 (Addon / E+A-series, eGPU-localized). Audit gates the choice.
 
 ## Patch coverage analysis
 

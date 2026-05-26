@@ -100,8 +100,7 @@ docs/missions/mission-1-egpu-hot-plug-hot-power/
 ├── c3-c5-integration-audit.md                         NEW today
 ├── c5-intent-amendments-draft.md                      NEW today
 ├── consumer-holders-and-teardown-future-work.md       NEW today
-├── architectural-funnel-redirection-design.md         NEW today (now superseded by decision doc)
-├── decision-architecture-class-localization.md        NEW (this commit) — the canonical Option 1 vs 2 doc
+├── decision-architecture-class-localization.md        NEW — the canonical Option 1 vs 2 doc
 ├── session-handover-2026-05-26.md                     NEW (this commit) — this doc
 └── experiments/
     ├── E07-cable-replug-drain-first.md                +Run 3 section

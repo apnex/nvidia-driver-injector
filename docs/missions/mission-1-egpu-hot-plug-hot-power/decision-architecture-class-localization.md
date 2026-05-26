@@ -1,6 +1,6 @@
 # MISSION-1 v4 — Architecture decision record: Core-wide vs eGPU-localized
 
-**Status:** v1 2026-05-26 — written after E07 Run 3 rewedge confirmed C5 v3 incomplete; SUPERSEDES the muddled "hybrid" framing in `architectural-funnel-redirection-design.md`
+**Status:** v1 2026-05-26 — written after E07 Run 3 rewedge confirmed C5 v3 incomplete. (An earlier `architectural-funnel-redirection-design.md` draft existed briefly and was deleted as redundant once this canonical doc absorbed its useful content.)
 **Decision under consideration:** which architectural layer hosts the surprise-removal cascade prevention — Core (all GPUs) or Addon (TB eGPU only)
 **Owner:** apnex (user)
 **Status of decision:** PENDING — source audit + (optional) cross-hardware empirical test required before commitment
@@ -177,7 +177,6 @@ Audit + (optional) empirical test produce a clear recommendation. Then:
 
 ## Cross-references
 
-- `architectural-funnel-redirection-design.md` — SUPERSEDED by this doc for the Option 1 vs Option 2 framing. The funnel mechanics described there are still useful as Option 1 implementation reference.
 - `experiments/E07-cable-replug-drain-first.md` — Run 1/2/3 empirical record
 - `c3-c5-integration-audit.md` — patch placement audit (now applies only to Option 1 implementation)
 - `pci-cmdline-audit.md` — companion BAR1 work, separable but related
