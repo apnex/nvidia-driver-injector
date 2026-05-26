@@ -27,10 +27,10 @@
 # Verify:
 #   kubectl get nodes -L nvidia.driver/state,nvidia.driver/version
 #   # expect:  NAME   STATE  VERSION
-#   #          obpc   ready  595.71.05-aorus.14
+#   #          obpc   ready  595.71.05-aorus.15
 #
 # Image:
-#   apnex/nvidia-driver-injector:595.71.05-aorus.14 (built locally with
+#   apnex/nvidia-driver-injector:595.71.05-aorus.15 (built locally with
 #   `docker build`; on k3s, import to containerd with
 #   `docker save <image> | sudo k3s ctr images import -`).
 #   imagePullPolicy=IfNotPresent so a missing registry never blocks startup.
@@ -118,7 +118,7 @@ spec:
       # hostNetwork off to keep the pod's network namespace small.
       containers:
         - name: driver
-          image: apnex/nvidia-driver-injector:595.71.05-aorus.14
+          image: apnex/nvidia-driver-injector:595.71.05-aorus.15
           imagePullPolicy: IfNotPresent
           # Privileged + SYS_MODULE — load kernel modules + write PCI sysfs.
           # Same security posture as NVIDIA's own driver DaemonSet.
