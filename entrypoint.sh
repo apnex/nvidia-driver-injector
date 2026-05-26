@@ -109,9 +109,12 @@ write_state() {
     driver_ver=$(cat /sys/module/nvidia/version 2>/dev/null || echo "")
     gpu_pci=$(lspci -d 10de: 2>/dev/null | awk '{print $1; exit}')
     if [ -n "$gpu_pci" ]; then
-        local bar1_bytes
-        bar1_bytes=$(awk 'NR==2 {print strtonum("0x" $2) - strtonum("0x" $1) + 1}' \
-            "/sys/bus/pci/devices/0000:${gpu_pci}/resource" 2>/dev/null || echo 0)
+        local bar1_bytes=0 start end _
+        # bash arithmetic auto-parses 0x... hex; mawk in container lacks strtonum
+        if read -r start end _ < <(sed -n '2p' "/sys/bus/pci/devices/0000:${gpu_pci}/resource" 2>/dev/null) \
+           && [ -n "$start" ] && [ -n "$end" ]; then
+            bar1_bytes=$(( end - start + 1 ))
+        fi
         bar1_gib=$((bar1_bytes / 1024 / 1024 / 1024))
     else
         bar1_gib=0

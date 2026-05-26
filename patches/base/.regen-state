@@ -1,4 +1,4 @@
-# regen-base-patches.sh state -- generated 2026-05-24T00:38:45Z
+# regen-base-patches.sh state -- generated 2026-05-26T07:55:13Z
 # base tag: 595.71.05 (51edebee79919b54f498c19a0be31982cd97646e)
 C1-kbuild-version-mk  c1-kbuild-version-mk  51cfd01e9cfe62d3559fcd127a29e68d727803cb
 C2-aer-internal-unmask  c2-aer-internal-unmask  403d5daf8d80da79991534b3c9d2ef70ac91b63a
@@ -10,4 +10,4 @@ A1-pcie-primitives  a1-pcie-primitives  fe6ad92f6b770d5240db7783b40303278ac0d8ea
 A2-bus-loss-watchdog  a2-bus-loss-watchdog  353a859e5c5768b7ebc2d258596d2f3cb336e4a1
 A3-recovery  a3-recovery  60dfe4c7f2bcb4fdae4be1d4073f432ebfba4f40
 A4-close-path-telemetry  a4-close-path-telemetry  cddf8b9ad3cc999ae3ede135d46b0c7258985cdc
-A5-version-and-toggles  a5-version-and-toggles  5fab257398d8b11b2b129eac472d108964000a03
+A5-version-and-toggles  a5-version-and-toggles  2c134e532e0968ea74d249acf65176e212dcee1b
