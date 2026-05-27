@@ -154,7 +154,7 @@ The failure class is clearly **PCIe surprise removal in general**, not "Thunderb
 
 ### Option 1 — Core / C-series (RECOMMENDED)
 
-**The audit is clear: the failure class is transport-agnostic.** Every observed assertion site is reachable on a discrete RTX 5090 in a PCIe x16 slot experiencing AER fatal / hot-eject / signal-integrity link drop. Multiple independent issue reports confirm the cascade fires on non-TB discrete cards in the wild.
+**The audit is clear: the failure class is transport-agnostic for the dominant funnel paths.** Every observed assertion site is reachable on a discrete RTX 5090 in a PCIe x16 slot experiencing AER fatal / hot-eject / signal-integrity link drop. Multiple independent issue reports confirm the cascade fires on non-TB discrete cards in the wild. (Site discovery is still possible in driver-version updates; v4's response is "extend the funnel," not "extend the sweep" — see [[cascade-class-design-v4]].)
 
 Option 2 (eGPU-localized via `is_external_gpu` gates) would:
 - Leave discrete-GPU users (Issue #1134, #916, #1045, #888, #461, #776, #900) unfixed
@@ -187,7 +187,7 @@ Plus the existing detection layer (`os.c` post-read check setting both `PDB_PROP
 
 - **High confidence** on transport-agnostic classification for sites 1, 2, 3, 6, 7, 8, 9, 10, 11, 13 (10 sites). Each has clean caller-chain evidence; multiple sites have empirical issue-tracker corroboration.
 - **High confidence** on classification for sites 4, 12 (Blackwell-reachable via specific HAL dispatch verified).
-- **Medium confidence** on site 5 — transport-agnostic in the abstract, but not reachable on the 5090 in our test rig due to HAL dispatch. Listed as transport-agnostic because the same code path is fully reachable on discrete Turing/Ampere/Ada cards.
+- **Site 5 classification** — transport-agnostic AND not Blackwell-reachable (these are independent axes; the original "medium confidence transport-agnostic" wording conflated them). The TU102 HAL implementation is transport-agnostic for the architectures it serves (Turing/Ampere/Ada); the Blackwell HAL dispatch routes elsewhere (`kgspTeardown_GH100`). Same code path is fully reachable on discrete Turing/Ampere/Ada cards.
 - **Caveat on funnel completeness:** Sweep for arithmetic-invariant patterns has not been exhaustively run. Site #12 was discovered in E07 Run 3 forensics, not by source sweep. Implementation work should include a targeted regex pass for `NV_ASSERT.*GPU_REG_RD` and similar patterns to surface other instances of this class before declaring v4 complete.
 - **Caveat on issue tracker survey:** Survey was limited to top-of-search-results issues; deeper grep may surface more cases or counterexamples. None found suggest TB-specificity; all reinforce transport-agnostic class.
 
