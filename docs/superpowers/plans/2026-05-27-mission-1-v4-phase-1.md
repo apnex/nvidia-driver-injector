@@ -969,7 +969,15 @@ sudo reboot
 - `tools/must-gather.sh`, `tools/get-pci-stats.sh` — forensic capture
 - Memories: `project_addon_recarve_merged_2026_05_22`, `project_sub_cycle_4_paired_cascade_2026_05_24`, `feedback_force_push_fork_carve_out`, `feedback_propose_options_dont_ask_blind`
 
-## Phase 2 preview (separate plan)
+## Scope clarification — hot-unplug vs hot-replug vs application-transparent reattach
+
+Phase 1 explicitly addresses **hot-unplug survival**: when the GPU disappears (cable yank, power-off, sysfs unbind), the host stays alive, cleanup completes, no nvidia_drm hang, no 75s lock-hold cascade. This is what the validation gates (Task 4A E07 Run 4, Task 4B power-off wedge) test.
+
+Phase 1 also delivers basic **hot-replug enumeration**: when the GPU reappears, Linux PCI re-enumeration creates a fresh `OBJGPU` via standard `.probe`. The probe-time BAR-failure detector `[g]` rejects probe cleanly if BAR allocation didn't work.
+
+Phase 1 does NOT deliver **application-transparent reattach**: the original `pGpu` is lost with sink-set; the new probe creates a new GPU instance; applications holding device handles must release + reacquire. Acceptable workflow under v4: unplug → host stays healthy → replug → fresh OBJGPU via probe → workload pod restart (e.g., `kubectl rollout restart`) acquires the new GPU. Application-transparent reattach (sink-clear + in-place re-init + in-flight workload migration) is a LATER PHASE design problem, not in Phase 1 or Phase 2 scope.
+
+## Phase 2 preview (separate plan, to follow Phase 1)
 
 Phase 2 will cover:
 - C6 (F1) per `f1-uvm-fatal-error-gating-design.md` — `nvGpuOpsReportFatalError` per-GPU gating (+39 lines, ordered after Phase 1 confirmed stable)
@@ -978,3 +986,11 @@ Phase 2 will cover:
 - Upstream PR preparation for C1-C6 + E1 series
 
 Plan to be written after Phase 1 exit gate is met.
+
+## Phase 3+ preview (later phases; not yet planned)
+
+Phase 3 candidate scope (subject to user direction; no design yet):
+- **Application-transparent reattach.** Sink-clear path on confirmed device re-enumeration; in-place `OBJGPU` resurrection; workload migration semantics; UVM-side coordination for in-flight handles. Substantially larger design surface than Phase 1+2 — likely a multi-month design + implementation effort if pursued.
+- Open question: is this even tractable on TB without GPU UUID drift across replug? Some hardware/firmware may make in-place resurrection impossible by construction (the new device-instance has a new identity); in that case, the right design is a userspace coordinator (workload manager that orchestrates pod-restart on hot-replug) rather than a driver-internal resurrection path.
+
+Phase 3 design work begins (if at all) only after Phase 2 ships and is stable.
