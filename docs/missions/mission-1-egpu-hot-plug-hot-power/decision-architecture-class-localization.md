@@ -1,9 +1,17 @@
 # MISSION-1 v4 — Architecture decision record: Core-wide vs eGPU-localized
 
-**Status:** v1 2026-05-26 — written after E07 Run 3 rewedge confirmed C5 v3 incomplete. (An earlier `architectural-funnel-redirection-design.md` draft existed briefly and was deleted as redundant once this canonical doc absorbed its useful content.)
+**Status:** v1.1 2026-05-27 — written after E07 Run 3 rewedge confirmed C5 v3 incomplete; updated 2026-05-27 with formal Option 1 commitment.
 **Decision under consideration:** which architectural layer hosts the surprise-removal cascade prevention — Core (all GPUs) or Addon (TB eGPU only)
 **Owner:** apnex (user)
-**Status of decision:** PENDING — source audit + (optional) cross-hardware empirical test required before commitment
+**Status of decision:** ✅ **COMMITTED — Option 1 (Core / transport-agnostic) — 2026-05-27**
+
+**Commitment rationale:**
+- Source audit ([[cascade-scope-audit]] @ `f1eb290`): 13/13 observed assertion sites are transport-agnostic; no `is_external_gpu` gates on any caller chain.
+- Issue-tracker survey: same Xid 79 / Xid 154 cascade documented on discrete RTX 3090 (#1134, same 595.71.05 driver), RTX 4090 (#916), RTX 5080 (#1045), ARM64 (#461), OCuLink 5090 (#900) — none TB-attached.
+- Option 2 would leave these discrete-GPU users unfixed.
+- v4 architecture for Option 1 specified in [[cascade-class-design-v4]] @ `67d0ff5` (v1.1, post-adversarial-review).
+
+The implementation-level architecture supersedes the abbreviated "What the patches look like" sketch under Option 1 below; that sketch is kept as framing-level overview, with [[cascade-class-design-v4]] as the load-bearing design reference.
 
 ## Premise
 
