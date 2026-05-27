@@ -5,6 +5,23 @@
 **Predecessor:** v3 of C5 (per-site sweep + macro family) + scattered detection across C5/C3/A2/C4.
 **Goal:** Single coherent architecture for the surprise-removal cascade class that handles all 9 cited issues with bounded surface and provable completeness, while improving aggregate properties across the patch series.
 
+## Conventions / notation
+
+This doc uses several short-form labels. Defined here for quick reference:
+
+| Symbol | Meaning |
+|---|---|
+| **C1-C6** | Core / base-layer patches in the C/E/A geometry — upstream-bound. Each owns a discrete responsibility (C1 build, C2 AER unmask, C3 osHandleGpuLost retry, C4 pci_error_handlers scaffold, C5 crash-safety + sink primitive, C6 = new for v4, hosts F1). See `docs/upstream-plan.md` and memory `project_cea_patch_geometry_2026_05_22` for the canonical patch-geometry doc. |
+| **E1** | eGPU-detection patch (forces `is_external_gpu` flag set on TB/USB4 paths NVIDIA's TB3-bridge-list misses). Base-layer; upstream-bound. |
+| **A1-A5** | Addon-layer patches — project-specific, NOT upstream-bound (recovery actions, watchdogs, version metadata). Naming: A1 pcie-primitives, A2 bus-loss-watchdog, A3 recovery, A4 close-path telemetry, A5 version/toggles. |
+| **F1, F2, …** | Follow-up items — design-time placeholders for patches not yet assigned a stable C/E/A identifier. F1 was promoted to **patch C6** mid-design; future Fs may follow the same path or stay deferred. |
+| **G1-G10** | **Entry-point guards** in the v4 architecture. Each is a single checkpoint in driver code that consults the sink-state and short-circuits operations on a known-dead GPU. The set is bounded by design (10 guards in v4); see "Why each guard exists" table below. |
+| **`[a]`-`[g]`** | **Detection inputs** (6 classes) — places where the driver discovers a GPU has gone dead (MMIO post-read returns 0xFFFFFFFF, AER fatal, GSP heartbeat timeout, Q-watchdog DMA wedge, probe-time BAR failure, kernel-side sysfs disconnect). Each one calls the sink primitive. See architecture diagram. |
+| **Sink primitive** | `cleanupGpuLostStateAtomic(pGpu, detector_class)` — single, idempotent, per-GPU function that sets both markers (`PDB_PROP_GPU_IS_LOST` + `pci_dev_is_disconnected`) and emits one canonical log per detector class. Owned by C5 (base); called by detection inputs across C5/C4/A2. |
+| **`DETECTOR_*`** | Enum slots passed to `cleanupGpuLostStateAtomic` to identify which detection input fired (DETECTOR_MMIO_DEAD, DETECTOR_AER_FATAL, DETECTOR_GSP_HEARTBEAT_TIMEOUT, etc.). Used for telemetry and for canonical-log differentiation. |
+| **Sink-state** | The shared state set by the primitive and consulted by guards. Physically two markers (`PDB_PROP_GPU_IS_LOST` in RM, `pci_dev_is_disconnected` in Linux PCI core); semantically one bit per GPU: "this device is unrecoverable; cleanup may proceed via short-circuit; do not issue new operations." |
+| **v1 / v3 / v4 / v4.1 / v1.2** | Versions of the C5 patch family (or this design doc). v1 = original 2-site C5; v3 = 8-site sweep + macro family; v4 = this architecture; v1.2 = this doc's current revision. |
+
 ## Design goals (multi-dimensional improvement targets)
 
 The v4 redesign must improve on v2/v3 across **all** of:
