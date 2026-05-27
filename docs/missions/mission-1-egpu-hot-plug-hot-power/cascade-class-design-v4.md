@@ -1,7 +1,7 @@
 # Cascade-class design synthesis — v4 architecture
 
-**Status:** v1.1 2026-05-27 — design exercise informed by [[cascade-scope-audit]] + 9-issue tracker review.
-**Revision:** v1 (2026-05-26) → v1.1 after adversarial review pass identified 2 Critical + 9 Important findings; revisions integrated below. Original v1 framing of "+26 net lines" and "5 independent detectors" was source-checked and corrected.
+**Status:** v1.2 2026-05-27 — design exercise informed by [[cascade-scope-audit]] + 9-issue tracker review + adversarial review pass + F1/G8 follow-up investigations.
+**Revision:** v1 (2026-05-26) → v1.1 (adversarial review) → v1.2 (G8 site identified; F1 in scope as new patch C6 with full design at [[f1-uvm-fatal-error-gating-design]]).
 **Predecessor:** v3 of C5 (per-site sweep + macro family) + scattered detection across C5/C3/A2/C4.
 **Goal:** Single coherent architecture for the surprise-removal cascade class that handles all 9 cited issues with bounded surface and provable completeness, while improving aggregate properties across the patch series.
 
@@ -14,12 +14,12 @@ The v4 redesign must improve on v2/v3 across **all** of:
 | **Coverage** | 1 cascade entry class (MMIO 0xFFFFFFFF post-read) | 6 cascade entry classes (kernel PCI core async / AER fatal / MMIO 0xFFFFFFFF / GSP heartbeat timeout / Q-watchdog DMA / probe-time BAR-failure) |
 | **Completeness** | Per-site sweep — unbounded; never converges; new driver versions surface new sites | Entry-point guards — bounded by design; new sites covered by upstream funnel where the funnel intercepts (DRM-side and chip-reset preconditions need their own guards) |
 | **Convergence** | Scattered detection in C5 + C3 + A2 + C4; markers set inconsistently per detection path | Single sink-state primitive; all detection inputs route through it; markers always consistent |
-| **Robustness** | Chip-reset path can loop forever on `NV_ERR_RESET_REQUIRED` while sink-state already set (#1134) | Recovery primitives query sink-state FIRST; bounded retry already aborts on sink-set |
-| **Isolation (our driver's half)** | Our driver's detection is per-GPU but propagates via two scattered markers | Per-GPU sink-state with explicit per-GPU semantics in *our* code paths. **Caveat:** `nvGpuOpsReportFatalError` (`src/nvidia/src/kernel/rmapi/nv_gpu_ops.c:11678`) takes no `pGpu` and unconditionally calls `sysSetRecoveryRebootRequired(pSys, NV_TRUE)` — the #979 jciolek cross-contamination symptom requires a **separate follow-up patch** to that function's signature (out of scope for v4 base architecture; tracked as follow-up F1 below) |
+| **Robustness** | Chip-reset RPC path holds the GPU lock 75s per attempt while `bFatalError` is already known TRUE; userspace ioctl-storm wedges nvidia_drm teardown (#1134). NOT a true in-kernel retry loop — exhaustive grep confirms NV_ERR_RESET_REQUIRED has exactly ONE consumer (which bails). | `_kgspRpcRecvPoll` hoists existing `_kgspRpcSanityCheck` (or adds `osIsGpuBusDead`) to *before* the polling loop — fatal-error RPCs return in µs not 75s, eliminating the lock-hold-storm cascade |
+| **Isolation (per-GPU sink)** | Detection is per-GPU but propagates via two scattered markers (inconsistent across detection paths) | Per-GPU sink-state with explicit per-GPU semantics in our code paths. **#979 jciolek cross-contamination addressed by new patch C6** — see [[f1-uvm-fatal-error-gating-design]]: extends `nvUvmInterfaceReportFatalError` to take `const NvProcessorUuid *`, threads identity through 10 UVM call sites, gates `sysSetRecoveryRebootRequired` on gpumgr walk of remaining healthy GPUs. **In scope for v4** (ordered after C5 v4 base; +39 lines net) |
 | **Maintainability** | Site list grows linearly with driver-version changes; v3 sweep missed 3 sites; future sweeps will miss more | Funnel set is bounded by entry-point count, not by call-site count; survives driver-version churn for paths the funnels intercept |
 | **Upstream-PR fitness** | "Convert 8 asserts" reads as a sweep, not a fix | "Single sink-state primitive with 6 detection inputs and 10 guards" reads as a coherent design |
 | **Defense-in-depth (qualified)** | One detection input — if it fails, all downstream guards are silent | **2-3 independent upstream classes:** PCIe-completion-based (MMIO post-read, GSP heartbeat, osHandleGpuLost retry — all consume the same PCIe TLP-completion mechanism), PCIe-state-based (AER fatal callback signaled by root complex, kernel-side `pci_dev_is_disconnected`), and forward-progress-based (Q-watchdog DMA, probe-BAR). Failure of one *upstream class* is masked by the others; failure of one *detector* within a class may not be |
-| **Code surface** | C5 v1+v3 = ~230 lines added across multiple files | Net delta after revisions: ~+8 lines (see [aggregate code delta](#aggregate-code-delta) below); excludes follow-up F1 (~+10-15 if pursued) |
+| **Code surface** | C5 v1+v3 = ~230 lines added across multiple files (baseline; stays in tree under v4) | v4 ADDS on top: ~+23 to +26 lines for v4 base architecture (C5 +26-28 incl. G8; A2 +2; A3 +3; A4 -2 to -5; C4 +1; C3 0); plus new C6 (F1) at +39 net. **Total v4 addition: ~+62 to +68 lines on top of v1+v3.** Conditional Phase 2 revertability of v3 site conversions could net up to −80, yielding **~−12 to −18 net** in the best case. |
 
 The goal is **NOT** "fewer lines for the sake of fewer lines." It is "the smallest architectural surface that correctly handles the entire cited failure class with provable completeness."
 
@@ -117,11 +117,18 @@ ENTRY-POINT GUARDS (10 guards)
 │       nv.c:5445; guard tolerates IS_LOST instead of WARN_ON, addresses
 │       #916 WARN class). nvidia_close / nvidia_dev_put may need additional
 │       guard at file_operations.release path; verify against #1134 hang.
-├── [G8] Chip-reset consumer-retry           (NEW — LOCATION TBD; six producer
-│       sites of NV_ERR_RESET_REQUIRED in tree {heap.c:3960, kernel_gsp.c
-│       :302/488/1885, message_queue_cpu.c:384, alloc_free.c:822} but the
-│       #1134 consumer-retry loop site needs identification before this
-│       guard can be specified or sized)
+├── [G8] Chip-reset RPC lock-hold guard      (NEW — REFRAMED after investigation.
+│       There is NO internal RM consumer-retry loop on NV_ERR_RESET_REQUIRED
+│       (exhaustive grep: 1 consumer in tree, which bails). The #1134 cascade
+│       is per-call lock-hold time (75s per RPC) × userspace ioctl storm,
+│       NOT a loop iteration count.
+│       Placement A (recommended): hoist existing _kgspRpcSanityCheck (or
+│       add osIsGpuBusDead) to BEFORE the for(;;) loop in _kgspRpcRecvPoll
+│       (kernel_gsp.c:2787), so fatal-error RPCs return in µs not 75s.
+│       Placement B (defense-in-depth): kbifResetFromTimeoutFullChip_IMPL
+│       precondition (kernel_bif.c:2015) — currently unreferenced function
+│       but harmless to harden.
+│       Combined: ~+8 to +10 lines.)
 ├── [G9] kfsp arithmetic invariants         (NEW site-local — #12 from audit)
 └── [G10] DRM-side teardown                  (NEW — nv_drm_remove
         (nvidia-drm-drv.c:2187) and KMS resource-release-on-disconnected GPU.
@@ -151,15 +158,15 @@ Each entry-point guard is justified by either (a) a cited issue showing the path
 | G5 API_GPU_ATTACHED_SANITY_CHECK callers (rate-limit) | #776 (10× in 1s LEVEL_ERROR + re-loop) | Macro evaluates FALSE once sink is set (via PDB_PROP_GPU_IS_CONNECTED cleared by gpuSetDisconnectedProperties); the gap is rate-limiting at the 10 noisy call sites. NOT a "single central gate" change |
 | G6 RmLogGpuCrash | #461 (crash-dump RPC fn 78 DUMP_PROTOBUF_COMPONENT triggers Xid 119 cascade) | Crash-dump paths must check sink before issuing diagnostic RPCs |
 | G7 rm_set_external_kernel_client_count | #916 (WARN_ON at nv.c:5445), #1134 (close-path hang contribution) | Tolerate NV_ERR_GPU_IS_LOST instead of WARN_ON; document whether additional file_operations.release-path guard is needed |
-| G8 Chip-reset consumer-retry | #1134 (`NV_ERR_RESET_REQUIRED` precondition loop) | LOCATION TBD: six producer sites of RESET_REQUIRED exist; the actual #1134 consumer-retry loop site must be identified during implementation Phase 1 before this guard can be sized or coded |
+| G8 Chip-reset RPC lock-hold guard | #1134 (75s GPU-lock hold per RPC after `bFatalError=TRUE` → ioctl-storm wedges `nvidia_drm` teardown) | `_kgspRpcRecvPoll` (kernel_gsp.c:2787, pre-loop): hoist existing `_kgspRpcSanityCheck` OR add `osIsGpuBusDead` check before the `for(;;)` so fatal-error RPCs return in µs not 75s. Optional defense-in-depth at `kbifResetFromTimeoutFullChip_IMPL` (kernel_bif.c:2015). **REFRAMING:** there is no internal retry loop — the wedge is per-call lock-hold time × ioctl-storm. Confidence MEDIUM: dynamic confirmation via lock-hold instrumentation recommended in Phase 1. **+8 to +10 lines.** |
 | G9 kfsp arithmetic invariants | E07 Run 3 site #12 + audit (sentinel value can't satisfy `end - start == wordsWritten`) | Site-local early-return on dead-bus first-read; OR top-of-function osIsGpuBusDead check |
 | G10 DRM teardown | #1134 (`nvidia_drm` teardown hangs >5min); grep confirmed zero `GPU_IS_LOST` / `os_pci_is_disconnected` in `kernel-open/nvidia-drm/*.c` | `nv_drm_remove` (`nvidia-drm-drv.c:2187`) and KMS resource-release-on-disconnected-GPU need sink-checks to avoid hardware touches during teardown |
 
-### Why per-GPU not global — and what it does NOT fix
+### Per-GPU sink across the full chain (v4 base + C6)
 
-Per-GPU sink-state is the right design choice for OUR driver's state machines: detection in one OBJGPU should not cause cleanup or recovery in another. C5 v1's `osIsGpuBusDead(pGpu)` and `gpuSetDisconnectedProperties(pGpu)` are already per-GPU; the v4 sink primitive preserves that.
+Per-GPU sink-state is the right design choice for our driver's state machines: detection in one OBJGPU should not cause cleanup or recovery in another. C5 v1's `osIsGpuBusDead(pGpu)` and `gpuSetDisconnectedProperties(pGpu)` are already per-GPU; the v4 sink primitive preserves that.
 
-**Critical caveat surfaced by adversarial review:** issue #979 jciolek (external 5090 loss rebooted internal 3060) is NOT addressed by per-GPU sink alone. The escalation path is `nvGpuOpsReportFatalError` at `src/nvidia/src/kernel/rmapi/nv_gpu_ops.c:11678`:
+**The cross-contamination gap (and its fix in C6):** issue #979 jciolek (external 5090 loss rebooted internal 3060) flows through `nvGpuOpsReportFatalError` at `src/nvidia/src/kernel/rmapi/nv_gpu_ops.c:11678`:
 
 ```c
 void nvGpuOpsReportFatalError(NV_STATUS error)   /* no pGpu parameter */
@@ -170,14 +177,18 @@ void nvGpuOpsReportFatalError(NV_STATUS error)   /* no pGpu parameter */
 }
 ```
 
-This function is in OUR tree (open-source RM code, modifiable), takes no `pGpu`, and unconditionally sets a system-global reboot flag. A per-GPU sink in `cleanupGpuLostStateAtomic` cannot stop this escalation because the call site never reaches the sink primitive — the global flag fires regardless. **Tracked as follow-up F1; out of scope for v4 base architecture.** Pursuing F1 means:
+This function takes no `pGpu` and unconditionally sets a system-global reboot flag. A per-GPU sink in `cleanupGpuLostStateAtomic` cannot stop the escalation because the call site never reaches the sink primitive.
 
-- Extending `nvGpuOpsReportFatalError`'s signature to accept `OBJGPU *pGpu` (or `NvU32 gpuId`)
-- Updating callers (`rm-gpu-ops.c:918` + UVM ABI shim) to pass the originating GPU
-- Gating `sysSetRecoveryRebootRequired` on whether a non-lost GPU remains in the system (gpumgr enumeration)
-- Estimated +10-15 lines + API-shape consequences requiring UVM-side coordination
+**C6 (F1) closes this gap.** Full design at [[f1-uvm-fatal-error-gating-design]]. Summary:
 
-The v4 architecture does not block F1, but the #979 jciolek cross-contamination class remains an unaddressed failure mode until F1 lands.
+- Signature change: `nvGpuOpsReportFatalError(const NvProcessorUuid *uuid, NV_STATUS error)` — UUID is UVM's native identity unit, boundary-clean across `kernel-open` ↔ `src/nvidia`
+- Caller chain updated: 10 UVM call sites + `uvm_global` macro + 2 ABI shims + RM-side entrypoint
+- New body marks originating GPU lost via `cleanupGpuLostStateAtomic(pLostGpu, DETECTOR_UVM_FATAL)` AND gates `sysSetRecoveryRebootRequired` on a gpumgr walk that confirms no non-lost GPU remains
+- +39 net lines (revised from initial +10-15 estimate — the funnel view missed UVM-side identity-threading)
+- New base-layer patch C6, upstream-bound alongside C1-C5+E1
+- Ordering: C5 v4 base → C6 (degraded-mode fallback if C5 slips: C6 still suppresses cross-contamination via gpumgr walk, just without coherent per-GPU sink marking)
+
+With both C5 v4 and C6 landed, the #979 jciolek class is addressed end-to-end.
 
 ## Cross-patch impact analysis
 
@@ -239,40 +250,41 @@ C5 v1's primitives stay. C5 v3's 8 site conversions stay (cleanup paths still ne
 - G5 rate-limiting at hot API_GPU_ATTACHED_SANITY_CHECK callers (~5 lines — per-site rate-limit, NOT a single central route)
 - G6 RmLogGpuCrash sink-check (~5 lines extension to existing rcdbAddRmGpuDump)
 - G7 `rm_set_external_kernel_client_count` tolerates IS_LOST (~3 lines — single WARN_ON → tolerate path)
-- G8 chip-reset consumer-retry guard (~? lines — LOCATION TBD, see I8 finding; cannot size until #1134 consumer-retry site is identified in Phase 1)
+- G8 chip-reset RPC lock-hold guard at `_kgspRpcRecvPoll:2787` (~+8 to +10 lines — pre-loop sink check + optional `kbifResetFromTimeoutFullChip` precondition; no internal retry loop exists per investigation)
 - G9 kfsp arithmetic-invariant guard (~5 lines site-local)
 - G10 DRM teardown guard (~10 lines — `nv_drm_remove` + KMS resource-release-on-disconnected-GPU)
 - Consolidated per-site logging into per-detector logging — retire 8 per-site `NV_GPU_LOST_LOG_ONCE` latches (~40 lines deleted)
 
-C5 net (with G8 unknown deferred): **+58 lines added, -40 lines deleted = +18 lines** (excludes G8 which awaits Phase 1 site identification).
+C5 net (with G8 now sized): **+66 to +68 lines added, -40 lines deleted = +26 to +28 lines.**
 
 ## Aggregate code delta
 
 **Revised after review.** Original v1 estimate was +26 lines; many per-patch claims were misattributed or hid semantics changes. Source-checked revisions below:
 
-| Patch | Δ lines | Rationale (revised) |
+| Patch | Δ lines | Rationale (v1.2 revised) |
 |---|---|---|
 | C2 | 0 | Unchanged |
 | C3 | 0 | Two-line propagation was misattributed; lines live in C5, not C3 |
-| C4 | +1 | Single `cleanupGpuLostStateAtomic` call inserted into existing 60-line `nv_pci_error_detected` body (NOT "adding a body" — body exists) |
-| C5 | +18 | Sink primitive + 6 new guards + retired per-site logging; G8 (chip-reset) deferred for Phase 1 site identification |
+| C4 | +1 | Single `cleanupGpuLostStateAtomic` call inserted into existing 60-line `nv_pci_error_detected` body (body exists) |
+| C5 | +26 to +28 | Sink primitive + 6 new guards + G8 chip-reset lock-hold guard (+8-10) + retired per-site logging (-40) |
 | A1 | 0 | Unchanged |
 | A2 | +2 | Detector → sink primitive; **flagged as semantics change** (now sets RM marker too) |
-| A3 | +3 | Single sink-query in pre_schedule_gates (already bounded; reduced from original +10) |
-| A4 | ~-2 to -5 | Telemetry consolidation — depends on whether A4 currently has hooks to consume the canonical log; aspirational pending implementation verification |
-| **TOTAL** | **+15 to +18 lines** | **vs ~230 added by C5 v1+v3** (G8 not included; F1 follow-up not included) |
+| A3 | +3 | Single sink-query in pre_schedule_gates (already bounded) |
+| A4 | ~-2 to -5 | Telemetry consolidation — aspirational pending implementation verification |
+| **C6 (NEW — F1)** | **+39** | New base patch: per-GPU gating of `nvGpuOpsReportFatalError`. See [[f1-uvm-fatal-error-gating-design]]. Ordered after C5 v4 base. |
+| **TOTAL** | **+62 to +68 lines** | **on top of C5 v1+v3 (~230 lines existing baseline; stays in tree)** |
 
-**Out-of-scope:** follow-up F1 (`nvGpuOpsReportFatalError` signature change to address #979 jciolek cross-contamination) is +10-15 lines additional if pursued.
+**In scope for v4:** C6 (F1) is now in scope as a new base-layer patch ordered after C5 v4 base. See [[f1-uvm-fatal-error-gating-design]] for full design. +39 net lines.
 
-**Honest framing (revised):** v4 net delta is ~+15 to +18 lines for the base architecture. This is a modest add, well within budget for the architectural improvements gained. The "less code than v2/v3" target is achievable only if conditional Phase 2 revertability of v3 site conversions pans out (potentially −80 lines if all 8 revert; the revised intermediate honest answer is "perhaps −60 net" in that scenario; without revertability the answer is "+15 to +18, still strongly net-positive given the coverage/robustness gains").
+**Honest framing (v1.2):** v4 adds ~+62 to +68 lines on top of C5 v1+v3 (which stays in tree as baseline). This is larger than the v1.1 estimate (+15 to +18) due to: (a) G8 site identification produced a concrete +8-10 estimate (was deferred), and (b) F1 promoted from out-of-scope to in-scope as new patch C6 (+39, was excluded). The "less code than v2/v3" target is achievable only if conditional Phase 2 revertability of v3 site conversions pans out — potentially −80 lines if all 8 v3 sites revert, yielding **best-case net delta of −12 to −18 lines** vs v3 baseline. Without revertability, the answer is "+62 to +68, but buys 6× failure-class coverage, per-GPU isolation including #979 jciolek fix, and architectural completeness vs unbounded sweep."
 
 What v4 achieves instead — and what the user's "improvement on multiple dimensions" actually asks for:
 
 1. **6× coverage** (6 detection classes vs 1) — modest line count buys substantial failure-class coverage gain.
 2. **Bounded vs unbounded surface** — v4 guard count is 10, fixed by design (G1-G10); v3 site count grew from 2 → 10 in two iterations and would grow further. Future driver-version site discovery costs v3 hours per site; costs v4 zero ONLY for sites that the funnels intercept — DRM-side, chip-reset, and arithmetic-invariant classes need their own guards (G10/G8/G9), so the bounded set is "10 guards" not "1 funnel."
 3. **Single sink primitive** — replaces 4 scattered detection paths (C5 v1 post-read, C5 v3 osHandleGpuLost, A2 Q-watchdog, ad-hoc-via-AER-callback); marker-divergence bugs (the E07 Run 2 finding that motivated v3) become **structurally less likely** (not "impossible" — review pushback retained — but the single-primitive-with-test invariant is stronger than the v3 scattered-detection model).
-4. **Recovery-respects-sink** — addresses the #1134 wedge-on-recovery class **at the layers we control** (A3 sink-query, G8 chip-reset consumer if identified, G10 DRM teardown). Does NOT claim "eliminates" — the consumer-retry loop site is still TBD; A3 surrender is one mitigation but not the whole story.
-5. **Per-GPU isolation in our state machines** — preserves per-GPU semantics in `cleanupGpuLostStateAtomic` and all guards. Does NOT prevent `nvGpuOpsReportFatalError`'s system-global escalation (#979 jciolek class); that requires follow-up F1.
+4. **Recovery-respects-sink** — addresses the #1134 wedge class at the layers we control (A3 sink-query for fast-surrender on already-set sink, G8 pre-loop sanity check at `_kgspRpcRecvPoll` so fatal-error RPCs return in µs not 75s, G10 DRM teardown). Investigation confirmed there is no internal RM retry loop — the #1134 wedge is per-call lock-hold time × userspace ioctl storm, addressed by collapsing lock-hold via G8.
+5. **Per-GPU isolation across the full chain** — `cleanupGpuLostStateAtomic` and all guards preserve per-GPU semantics. **C6 (F1) closes the cross-contamination gap** by extending `nvUvmInterfaceReportFatalError` to take `const NvProcessorUuid *` and gating `sysSetRecoveryRebootRequired` on gpumgr enumeration of remaining healthy GPUs. The #979 jciolek class is addressed end-to-end in v4 once C5 v4 base + C6 land. See [[f1-uvm-fatal-error-gating-design]].
 6. **Cross-patch coherence** — C3 (no delta, retry only), C4 (insert sink-call into existing body), A2 (route detector through sink) all converge on a shared primitive owned by C5; reduces coordination cost when one patch is updated.
 7. **Upstream-PR fitness** — "one sink, six detectors, ten guards, with explicit base/addon ownership and identified follow-up F1" reads as a coherent design; reviewers can verify completeness from the architecture diagram, not from auditing a sweep regex.
 8. **Defense-in-depth via independent upstream classes** — three independent upstream classes (PCIe-completion, PCIe-state, forward-progress). Failure of one class is masked by the other two. Within a class, detectors share upstream — so failure of one *class* is not masked; failure of one *detector within a class* often is.
@@ -327,21 +339,11 @@ To keep scope bounded and avoid speculative complexity:
 3. **API_GPU_ATTACHED_SANITY_CHECK semantic shift.** ~~Today the check is timeout-based.~~ **Revised: macro is a predicate inlined at 20+ sites, not a central gate (per I2 finding).** Once sink is set, `gpuSetDisconnectedProperties` clears `PDB_PROP_GPU_IS_CONNECTED` and the macro evaluates FALSE everywhere. The actual #776 issue is 10 noisy call sites each LEVEL_ERROR + re-loop without rate-limiting; fix is per-site rate-limit at the loud callers (G5 as revised).
 4. **Recovery precondition + bounded retry interaction.** A3's bounded retry already exists. v4 adds one sink-query at top of `tb_egpu_recover_pre_schedule_gates` as fast-path early-surrender. Sink-set always wins. ~3 lines.
 5. **Revertability of v3 site conversions.** Assessment deferred to implementation Phase 2 (not Phase end as v1 said — promoted earlier per M3 recommendation). The +15 to +18 vs −60 swing decides whether v4 looks like an improvement to upstream reviewers, so the revertability question is on the critical path.
-6. **G8 chip-reset consumer-retry site identification.** Cannot size G8 until the actual #1134 consumer-retry loop is located. Six `NV_ERR_RESET_REQUIRED` producer sites exist in tree but the consumer-retry that triggers the loop is unidentified. Phase 1 must include this investigation.
+6. ✅ **G8 chip-reset consumer-retry site identification — RESOLVED.** Investigation (2026-05-27) found there is NO internal RM consumer-retry loop on NV_ERR_RESET_REQUIRED (exhaustive grep returned ONE site which bails). The #1134 wedge is per-call lock-hold time × userspace ioctl storm, not a loop. G8 placement is `_kgspRpcRecvPoll:2787` pre-loop sanity check (+8-10 lines). Phase 1 should dynamically confirm via lock-hold instrumentation before code lands.
 7. **C4 / sink-primitive base-vs-addon layering.** `cleanupGpuLostStateAtomic` owned by C5 (base) is recommended; C4 (base) calls it cleanly; A2 (addon) calls upward into base which is also clean per project geometry. Confirm during implementation that this layering holds (no addon-owned primitives called from base).
-8. **F1 (`nvGpuOpsReportFatalError` system-global escalation) scope decision.** Pursue as part of MISSION-1 v4 or defer to a follow-on patch series? F1 has API-shape consequences for UVM-side coordination; user direction needed.
-
-## Follow-up F1: `nvGpuOpsReportFatalError` signature change (out of scope for v4 base)
-
-**Why this is its own patch:** `nvGpuOpsReportFatalError` takes `NV_STATUS error` with no GPU identity, then calls `sysSetRecoveryRebootRequired(pSys, NV_TRUE)` — system-wide. The #979 jciolek cross-contamination (external 5090 loss → Xid 154 on internal 3060) happens through this function regardless of our sink-state design. Fixing it requires:
-
-- Signature: `nvGpuOpsReportFatalError(NV_STATUS error)` → `nvGpuOpsReportFatalError(OBJGPU *pGpu, NV_STATUS error)` (or NvU32 gpuId)
-- Caller update: `rm_gpu_ops_report_fatal_error` (`rm-gpu-ops.c:918`) must pass the originating GPU
-- UVM ABI shim: `nvGpuOpsReportFatalError` is called from UVM-side; the C-ABI between RM and UVM has to be updated in lockstep
-- Gating: `sysSetRecoveryRebootRequired` should only fire if no non-lost GPU remains; query gpumgr to enumerate
-- Scope: ~10-15 lines plus the ABI coordination
-
-**Decision needed:** include F1 in MISSION-1 v4 implementation, or defer to a follow-up patch series after v4 base lands? My recommendation: defer F1 — it's a meaningful piece of work with cross-component coordination that warrants its own design + review cycle, and v4 base is already substantial. F1 can stay tracked as an open mitigation for the #979 jciolek case.
+8. ✅ **F1 scope decision — RESOLVED (in scope).** F1 promoted from out-of-scope follow-up to in-scope as new patch C6 per user direction (2026-05-27). Full design at [[f1-uvm-fatal-error-gating-design]]. Ordered after C5 v4 base; +39 net lines; upstream-bound base patch.
+9. **G8 dynamic confirmation.** Investigation produced a strong CANDIDATE for the #1134 mechanism but is MEDIUM-confidence. Phase 1 must instrument lock-hold time at `_kgspRpcRecvPoll` entry vs `bFatalError` state on a synthetic reproduction; if observed lock-hold << 75s per call, the wedge mechanism is different and Placement A may need revision.
+10. **C6 softirq safety.** `gpumgrGetGpuFromUuid` allocates per-GPU; in true softirq context (non-replayable-fault ISR bottom-half is the only such site) the allocation may need a context guard. Implementation Phase 2 must verify and add `in_atomic()` guard if needed.
 
 ## Decision-doc impact
 
@@ -351,24 +353,27 @@ If v4 is the chosen Option 1 implementation strategy, this document supersedes t
 
 ✅ Per-issue design implications mapped (9 issues → design inputs)
 ✅ Architecture proposed (6 detection inputs, 1 sink primitive, 10 entry-point guards)
-✅ Cross-patch impact enumerated (C2/C3/C4/A1/A2/A3/A4/C5)
-✅ Aggregate code delta computed (revised: +15 to +18 lines for base architecture; F1 follow-up adds +10-15 if pursued; conditional -60 net possible if Phase 2 revertability assessment succeeds)
+✅ Cross-patch impact enumerated (C2/C3/C4/A1/A2/A3/A4/C5 + new C6)
+✅ Aggregate code delta computed (v1.2: +62 to +68 lines on top of C5 v1+v3 baseline; conditional -12 to -18 best-case if Phase 2 revertability succeeds)
 ✅ Robustness dimensions enumerated (with corrected independence claims per review)
 ✅ Adversarial review pass completed; v1 → v1.1 revisions integrated
-☐ User commitment to Option 1 + v4 architecture
-☐ Implementation plan (Phase 1: sink primitive + 6 detectors + G8 site identification; Phase 2: revertability assessment of v3 sites + DRM teardown G10; Phase 3: deploy + soak)
-☐ F1 (`nvGpuOpsReportFatalError` signature change) — decision needed: include in v4 or defer as follow-up patch series
+✅ Option 1 formally committed (`decision-architecture-class-localization` @ 599b679)
+✅ G8 chip-reset site identified (`_kgspRpcRecvPoll:2787` pre-loop sanity check); v4 design updated to v1.2
+✅ F1 scope decision: in scope as new patch C6 — full design at [[f1-uvm-fatal-error-gating-design]]
+☐ Implementation plan (Phase 1: sink primitive + 6 detectors + G8 dynamic confirmation; Phase 2: C6 (F1) implementation + revertability assessment of v3 sites + G10 DRM teardown; Phase 3: deploy + soak)
 ☐ Optional cross-hardware empirical test (per decision doc Step 3)
 
 ## Revision history
 
 - **v1** (2026-05-26): initial design synthesis. Claimed +26 lines, 5 detectors, 9 guards. Several source-level claims unverified.
-- **v1.1** (2026-05-27): post-adversarial-review revisions. Corrected: per-GPU sink does NOT block uvm-global escalation (F1 follow-up scoped separately); C4 has existing body (not scaffold); C3 −1 was misattributed (lives in C5); A2 +2 hides semantics change; "5 independent detectors" overclaimed (3 upstream classes); +26 line estimate revised to +15 to +18; G10 DRM teardown added (#1134 actual hang site); G8 chip-reset consumer-retry site flagged TBD; GSP and probe-BAR hook points refined per source verification; shutdown ordering subsection added.
+- **v1.1** (2026-05-27): post-adversarial-review revisions. Corrected: per-GPU sink does NOT block uvm-global escalation (F1 follow-up scoped separately at the time); C4 has existing body (not scaffold); C3 −1 was misattributed (lives in C5); A2 +2 hides semantics change; "5 independent detectors" overclaimed (3 upstream classes); +26 line estimate revised to +15 to +18; G10 DRM teardown added (#1134 actual hang site); G8 chip-reset consumer-retry site flagged TBD; GSP and probe-BAR hook points refined per source verification; shutdown ordering subsection added.
+- **v1.2** (2026-05-27): F1 follow-up investigation + G8 site investigation completed. G8: there is no internal RM consumer-retry loop on NV_ERR_RESET_REQUIRED (exhaustive grep found one consumer which bails); the #1134 wedge is per-call lock-hold time (75s) × userspace ioctl storm, addressed by hoisting existing `_kgspRpcSanityCheck` to before `_kgspRpcRecvPoll`'s polling loop (+8 to +10 lines). F1: promoted from "out of scope" to in scope as new patch C6, full design at [[f1-uvm-fatal-error-gating-design]] (+39 net lines, signature `const NvProcessorUuid *`, ordered after C5 v4 base, base-layer upstream-bound). Aggregate delta revised: +62 to +68 lines.
 
 ## Cross-references
 
 - [[cascade-scope-audit]] — site-level audit + issue-tracker survey (input to this doc)
-- [[decision-architecture-class-localization]] — Option 1 vs Option 2 decision record (this doc is Option 1's detailed design)
+- [[decision-architecture-class-localization]] — Option 1 vs Option 2 decision record (Option 1 committed @ 599b679)
+- [[f1-uvm-fatal-error-gating-design]] — full C6 (F1) design for `nvGpuOpsReportFatalError` per-GPU gating
 - `experiments/E07-cable-replug-drain-first.md` — empirical record of v3 incompleteness
 - `nvidia-driver-surprise-removal-audit.md` — earlier driver-side attribution
 - `c3-c5-integration-audit.md` — placement audit (C3 vs C5 boundary)
