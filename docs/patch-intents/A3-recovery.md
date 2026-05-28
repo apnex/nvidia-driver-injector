@@ -4,7 +4,7 @@ layer: addon
 source-branch: a3-recovery
 upstream-candidacy: n/a
 telemetry-tier: mandatory
-status: reviewed
+status: v4-target-ready
 related-patches: [A1-pcie-primitives, A2-bus-loss-watchdog]
 ---
 
@@ -276,6 +276,62 @@ reason suitable for the caller's log line.
 - **AND** `reason_out` (if non-NULL) MUST receive a short string
   citing the H1 exhaustion
 
+### Requirement: Driver SHALL query sink-state at `pre_schedule_gates` entry and surrender if sink is already set
+
+A3's `pre_schedule_gates` SHALL probe the [[C5-crash-safety]] sink
+primitive at the very top of the function — AFTER the
+`st == NULL || NVreg_TbEgpuRecoverEnable == 0` early-out, and BEFORE
+any retry-budget increment, H1 burst-boundary reset, or H2 rate-limit
+check — by calling `os_pci_is_disconnected(pdev)` on the supplied
+`pdev`. When the sink primitive has already declared the GPU lost
+(via any C5 detector class — `DETECTOR_MMIO_DEAD`,
+`DETECTOR_AER_FATAL`, `DETECTOR_GSP_HEARTBEAT_TIMEOUT`,
+`DETECTOR_QWATCHDOG_DMA_WEDGE`, or future-added detectors), the
+function SHALL surrender immediately: return
+`TB_EGPU_RECOVER_GATE_SURRENDER`, increment `surrender_count`, emit a
+`TB_EGPU_GPU_STATE=PERMANENT_FAIL` uevent against `pdev`, and write a
+short static reason string of `"sink-set: GPU already declared lost
+(C5 sink)"` to `*reason_out`. The retry budget (`attempt_count`)
+SHALL NOT be consumed by this fast-path — `atomic_inc_return` on
+`attempt_count` is sequenced AFTER the sink-query, so a sink-set
+short-circuit leaves the counter untouched. The query SHALL use
+`os_pci_is_disconnected` (the Linux-side
+`pci_channel_io_perm_failure` marker that the C5 sink primitive
+sets) and SHALL NOT probe the RM-side `PDB_PROP_GPU_IS_LOST` marker,
+to keep `pre_schedule_gates` lock-free at the AER `err_handler` /
+kthread entry contexts where the RM API lock is unsafe to acquire.
+
+#### Scenario: Sink already set short-circuits to surrender without retry-budget consumption
+- **GIVEN** the AER `error_detected` callback fires on the GPU pdev
+- **AND** an earlier detector class (e.g. A2's Q-watchdog firing
+  `DETECTOR_QWATCHDOG_DMA_WEDGE` against C5's sink) has already
+  driven `pci_channel_io_perm_failure` on `pdev`
+- **AND** `attempt_count == 1` (one earlier real attempt consumed)
+- **WHEN** `tb_egpu_recover_pre_schedule_gates(st, pdev, &reason)`
+  runs from `nv_pci_error_detected`
+- **THEN** `os_pci_is_disconnected(pdev)` MUST return `NV_TRUE`
+- **AND** the function MUST return `TB_EGPU_RECOVER_GATE_SURRENDER`
+  immediately
+- **AND** `attempt_count` MUST remain `1` (NOT incremented to `2`)
+- **AND** `surrender_count` MUST be incremented atomically
+- **AND** a `TB_EGPU_GPU_STATE=PERMANENT_FAIL` uevent MUST be emitted
+  against `pdev`
+- **AND** `reason_out` MUST receive
+  `"sink-set: GPU already declared lost (C5 sink)"`
+- **AND** A3's bus-reset MUST NOT be attempted by the caller (doomed
+  to fail — the GPU is unreachable)
+
+#### Scenario: Sink not set falls through to H1/H2 gates as normal
+- **GIVEN** AER `error_detected` fires on a healthy `pdev`
+- **AND** `os_pci_is_disconnected(pdev)` returns `NV_FALSE`
+- **WHEN** `pre_schedule_gates` runs
+- **THEN** the function MUST proceed past the sink-query
+- **AND** the existing H1 burst-boundary / H2 rate-limit / H1
+  MaxAttempts logic MUST run unchanged
+- **AND** the function MUST return whichever gate result those
+  downstream checks produce (`OK` / `RATE_LIMITED` / `SURRENDER` on
+  H1 exhaust)
+
 ### Requirement: Driver SHALL reset `attempt_count` ONLY on verified end-to-end recovery
 
 The driver SHALL call `tb_egpu_recover_record_post_rminit_ok(nvl)`
@@ -453,7 +509,10 @@ the handler normally does this itself), `kfree(st)`, and set
   [[C5-crash-safety]]'s API surface; [[A2-bus-loss-watchdog]] calls
   into it from the watchdog kthread. A3 emits uevents
   (`READY` / `RECOVERING` / `PERMANENT_FAIL`) for userspace
-  observability but does NOT touch C5's disconnect state directly.
+  observability and READS the C5 sink-state (via
+  `os_pci_is_disconnected` at `pre_schedule_gates` entry — the
+  lock-free Linux-side marker) to fast-path-surrender, but does NOT
+  WRITE / set C5's disconnect state directly.
 - This patch does NOT introduce a build-time `CONFIG_NV_TB_EGPU`
   gate on its source-list line. The master toggle is owned by
   `A5-version-and-toggles` and applies at the consumer-call-site
@@ -582,15 +641,18 @@ soak window blocks promotion.
   adds the `cor_error_detected` slot to the struct — C4's
   registration declared the struct's fields up to `.resume`; A3's
   hunk appends `.cor_error_detected = nv_pci_cor_error_detected`.
-- **C5 ABI consumed:** A3 does NOT directly call into [[C5-crash-safety]]'s
-  `os_pci_set_disconnected` API. The disconnect propagation on
-  dead-bus detection is owned by [[A2-bus-loss-watchdog]] (the
-  watchdog kthread calls C5's API on first detection). A3
-  observes disconnect state via the same `pci_get_drvdata` →
-  `nvl->recover` lookup but does NOT directly toggle the
-  disconnect flag. The PERMANENT_FAIL uevent is A3's userspace
-  surface; the kernel-side disconnect propagation runs in parallel
-  via A2 / C5.
+- **C5 ABI consumed:** A3 calls into [[C5-crash-safety]]'s
+  `os_pci_is_disconnected(pdev)` read-side API exactly once per
+  `pre_schedule_gates` invocation — the v4 sink-query early-surrender
+  fast-path. A3 does NOT directly call C5's write-side
+  `os_pci_set_disconnected` API; that propagation on dead-bus
+  detection is owned by [[A2-bus-loss-watchdog]]'s watchdog kthread
+  (and the AER `error_detected` default branch in `nv-pci.c`, both
+  via `rm_cleanup_gpu_lost_state` → `cleanupGpuLostStateAtomic`).
+  A3 reads the disconnect state to surrender doomed recovery
+  attempts, but does NOT toggle the disconnect flag itself. The
+  PERMANENT_FAIL uevent is A3's userspace surface; the kernel-side
+  disconnect propagation runs via A2 / C5.
 - **Module parameter surface:** six parameters, all `uint` /
   mode `0644`, all `module_param`-registered and
   `MODULE_PARM_DESC`-documented.

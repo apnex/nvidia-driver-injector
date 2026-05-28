@@ -4,7 +4,7 @@ layer: base
 source-branch: c5-crash-safety
 upstream-candidacy: high
 telemetry-tier: nominal
-status: partial-v3-v4-design-committed
+status: v4-target-ready
 related-patches: [C2-aer-internal-unmask, C3-gpu-lost-retry, C4-err-handlers-scaffold]
 ---
 
@@ -362,6 +362,372 @@ relaxation at every swept site, including 6 additional sites that
 would fire under analogous conditions. Two new macro variants
 (`_OR_RETURN`, `_OR_RETURN_VOID`) are needed to cover the three
 structural variants in use.
+
+### Requirement (v4): Driver SHALL expose a single sink primitive that consolidates dual-marker writes
+
+`src/nvidia/inc/kernel/gpu/nv-gpu-lost.h` SHALL declare a detector-class
+enum `nv_gpu_lost_detector_t` allocating one slot per upstream detection
+input (`DETECTOR_MMIO_DEAD`, `DETECTOR_OSHANDLEGPULOST_RETRY_EXHAUSTED`,
+`DETECTOR_GSP_HEARTBEAT_TIMEOUT`, `DETECTOR_AER_FATAL`,
+`DETECTOR_QWATCHDOG_DMA_WEDGE`, `DETECTOR_PROBE_BAR_FAILURE`,
+`DETECTOR_SYSFS_DISCONNECTED`, `DETECTOR_UVM_FATAL` reserved for Phase
+2 C6). The header SHALL declare
+`void cleanupGpuLostStateAtomic(struct OBJGPU *, nv_gpu_lost_detector_t)`.
+The implementation in `src/nvidia/arch/nvalloc/unix/src/os.c` SHALL be
+idempotent (early-return when `PDB_PROP_GPU_IS_LOST` is already set) and
+SHALL set both `PDB_PROP_GPU_IS_LOST` (via
+`gpuSetDisconnectedProperties`) AND `pci_dev_is_disconnected` (via
+`os_pci_set_disconnected(nv->handle)`) atomically.
+
+The primitive SHALL emit at most one `NV_PRINTF(LEVEL_ERROR, ...)` per
+**(GPU, detector class)** pair per kernel-module lifetime, naming the
+GPU instance and the detector class. The log-once latch is a bitmap
+field (`gpu_lost_detector_logged`) on `nv_state_t`, one bit per
+detector class — keying on the per-GPU state means a second GPU's loss
+is NOT silenced by the first GPU's log having already fired for the
+same detector class.
+
+The latch SHALL be exactly-once across concurrent detector fire on the
+same (GPU, class): the implementation uses `__atomic_fetch_or` with
+`__ATOMIC_RELAXED` and emits the `NV_PRINTF` only if the bit was clear
+in the returned prior value. The dual-marker writes
+(`gpuSetDisconnectedProperties` / `os_pci_set_disconnected`) are
+already idempotent under the `PDB_PROP_GPU_IS_LOST` gate; the atomic
+test-and-set on the log latch closes the only remaining
+load-store-gap class (the rare double-log under simultaneous fire from
+two detectors on the same GPU).
+
+#### Scenario: Sink primitive sets both markers on first call
+- **GIVEN** an OBJGPU whose `PDB_PROP_GPU_IS_LOST` is `NV_FALSE`
+- **AND** `pci_dev_is_disconnected(nv->handle)` returns false
+- **WHEN** `cleanupGpuLostStateAtomic(pGpu, DETECTOR_*)` is called
+- **THEN** `PDB_PROP_GPU_IS_LOST` MUST be `NV_TRUE` after the call
+- **AND** `pci_dev_is_disconnected(nv->handle)` MUST return true
+- **AND** the primitive MUST emit exactly one log line naming the
+  detector class
+
+#### Scenario: Sink primitive is idempotent on re-entry
+- **GIVEN** the primitive has already set both markers from a prior
+  detector input (e.g. `DETECTOR_MMIO_DEAD` on GPU 0)
+- **WHEN** the primitive is re-entered on the same GPU from the same
+  detector class (e.g. another `DETECTOR_MMIO_DEAD` fire on GPU 0)
+- **THEN** the primitive MUST return without re-issuing
+  `gpuSetDisconnectedProperties` or `os_pci_set_disconnected`
+- **AND** no additional dual-marker writes MUST be performed
+- **AND** the log latch MUST suppress re-emission only when the same
+  (gpu, detector class) pair has already fired; a different class on
+  the same GPU (e.g. a subsequent `DETECTOR_AER_FATAL` after the
+  initial `DETECTOR_MMIO_DEAD`) WILL emit its own canonical log line
+  (see the per-(GPU, detector class) scenario below)
+
+#### Scenario: Sink primitive accepts pGpu == NULL safely
+- **GIVEN** a caller dispatches with `pGpu == NULL` (defensive path)
+- **WHEN** the primitive is entered
+- **THEN** the primitive MUST return immediately without dereferencing
+
+#### Scenario: Log-once latch is per-(GPU, detector class)
+- **GIVEN** two physical GPUs (GPU 0 and GPU 1)
+- **AND** GPU 0 has already fired `DETECTOR_AER_FATAL` and the
+  canonical "GPU 0 lost via detector_class=3" log has emitted
+- **WHEN** GPU 1 subsequently fires `DETECTOR_AER_FATAL`
+- **THEN** the primitive MUST emit a "GPU 1 lost via detector_class=3"
+  log line for GPU 1 (the latch is keyed on the per-GPU
+  `nv_state_t::gpu_lost_detector_logged` bitmap, not a module-global
+  per-class array)
+
+#### Scenario: Log-once latch is exactly-once under concurrent fire
+- **GIVEN** two detectors fire on the same (GPU, detector class) pair
+  simultaneously (e.g. AER callback + osHandleGpuLost on the same CPU
+  cycle)
+- **WHEN** both invocations reach the log latch concurrently
+- **THEN** the `__atomic_fetch_or` operation MUST guarantee exactly
+  one of the invocations sees `(prior & mask) == 0` and emits the
+  NV_PRINTF
+- **AND** the other invocation MUST observe `(prior & mask) != 0` and
+  skip the log
+
+### Requirement (v4): Driver SHALL route the MMIO post-read detector and the osHandleGpuLost retry-exhausted detector through the sink primitive
+
+The two detection sites that pre-date v4 (`osDevReadReg032` post-read
+verification in `os.c`, and `osHandleGpuLost` retry-exhausted branch in
+`osinit.c`) SHALL be refactored to invoke `cleanupGpuLostStateAtomic`
+with the appropriate `DETECTOR_*` tag (`DETECTOR_MMIO_DEAD` and
+`DETECTOR_OSHANDLEGPULOST_RETRY_EXHAUSTED` respectively) rather than
+calling `gpuSetDisconnectedProperties` + `os_pci_set_disconnected`
+directly. This ensures every dual-marker transition lands through the
+canonical idempotent path.
+
+#### Scenario: MMIO post-read detector routes through primitive
+- **GIVEN** the GPU is not yet marked lost
+- **WHEN** `osDevReadReg032` returns `NV_GPU_BUS_DEAD_VALUE_U32`
+- **AND** the NV_PMC_BOOT_0 verification read confirms the dead-bus
+  sentinel
+- **THEN** `cleanupGpuLostStateAtomic(pGpu, DETECTOR_MMIO_DEAD)` MUST
+  be invoked
+- **AND** both dual markers MUST be set after the call
+- **AND** no direct invocation of `gpuSetDisconnectedProperties` /
+  `os_pci_set_disconnected` MUST appear in the v4 post-read code path
+
+#### Scenario: osHandleGpuLost detector routes through primitive
+- **GIVEN** the C3 retry loop in `osHandleGpuLost` has exhausted its
+  retry budget and confirmed the GPU is genuinely off the bus
+- **WHEN** the lost-state branch executes
+- **THEN** `cleanupGpuLostStateAtomic(pGpu,
+  DETECTOR_OSHANDLEGPULOST_RETRY_EXHAUSTED)` MUST be invoked
+- **AND** both dual markers MUST be coherent for any subsequent
+  query through either `osIsGpuBusDead` or `pci_dev_is_disconnected`
+
+### Requirement (v4): Driver SHALL wire GSP heartbeat timeout as detector [c]
+
+In `_kgspRpcRecvPoll` (`src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c`),
+the branch that classifies a fatal GSP timeout (when
+`bIsFatalTimeout == NV_TRUE`) SHALL call
+`cleanupGpuLostStateAtomic(pGpu, DETECTOR_GSP_HEARTBEAT_TIMEOUT)`
+immediately after the existing handle-fatal-timeout path so the sink-
+state is set with the canonical detector class. The hook keys on the
+existing `_kgspIsTimeoutFatal` classifier so no new exposed entry
+point is introduced.
+
+#### Scenario: GSP fatal timeout fires the sink primitive
+- **GIVEN** `_kgspRpcRecvPoll` is polling and the GPU timeout fires
+- **AND** `_kgspIsTimeoutFatal` returns `NV_TRUE`
+- **WHEN** the fatal-timeout branch executes
+- **THEN** `cleanupGpuLostStateAtomic(pGpu,
+  DETECTOR_GSP_HEARTBEAT_TIMEOUT)` MUST be invoked before the function
+  returns
+- **AND** subsequent `osDevReadReg032` calls on the same GPU MUST
+  observe the dead-bus short-circuit through `osIsGpuBusDead`
+
+### Requirement (v4): Driver SHALL wire AER `error_detected` DISCONNECT as detector [d]
+
+In `nv_pci_error_detected` (`kernel-open/nvidia/nv-pci.c`), the
+`default:` branch returning `PCI_ERS_RESULT_DISCONNECT` SHALL dispatch
+through the new exported RM-side entry point `rm_cleanup_gpu_lost_state`
+to set the RM marker. The kernel's PCI core sets the Linux marker
+unconditionally on the DISCONNECT return path, so the RM-side dispatch
+is the missing half of the dual-marker write. The dispatch uses
+`pci_get_drvdata`/`NV_STATE_PTR`/`nv_kmem_cache_alloc_stack` per the
+existing kernel-open patterns; the cross-module boundary is necessary
+because OBJGPU is not addressable from `kernel-open/nvidia` directly.
+
+`rm_cleanup_gpu_lost_state` SHALL acquire the API lock best-effort and
+skip the RM-marker set if contention prevents acquisition; the Linux
+marker (set by the kernel's AER state machine) plus the next MMIO read
+funnel (which fires `DETECTOR_MMIO_DEAD`) close the coverage gap in
+that case.
+
+#### Scenario: AER fatal callback routes through sink primitive
+- **GIVEN** the kernel's PCIe AER state machine has classified a fatal
+  error on the device
+- **WHEN** `nv_pci_error_detected` is invoked with a non-normal
+  `pci_channel_state_t`
+- **THEN** the callback MUST dispatch
+  `rm_cleanup_gpu_lost_state(sp, NV_STATE_PTR(nvl), DETECTOR_AER_FATAL)`
+- **AND** the callback MUST return `PCI_ERS_RESULT_DISCONNECT`
+- **AND** the RM-side `PDB_PROP_GPU_IS_LOST` marker MUST be set if the
+  API lock was acquired successfully; otherwise the next MMIO read
+  funnel MUST converge on the same state via `DETECTOR_MMIO_DEAD`
+
+### Requirement (v4): Driver SHALL detect probe-time BAR-allocation failure as detector [g]
+
+In `nv_pci_probe` (`kernel-open/nvidia/nv-pci.c`), immediately after
+`nv_pci_validate_bars(pci_dev, /* only_bar0 = */ NV_TRUE)` returns
+TRUE, the driver SHALL iterate `pci_resource_flags(pci_dev, i)` for
+`i ∈ [0, NV_GPU_NUM_BARS)` and SHALL refuse to continue probing (goto
+the existing probe-failure path) if any BAR has `IORESOURCE_UNSET`.
+OBJGPU is not constructed at this point in probe, so no sink-primitive
+call is applicable here; the -ENODEV return is the actionable
+behaviour. The log line SHALL name `detector_class=5
+DETECTOR_PROBE_BAR_FAILURE` so the failure is greppable alongside the
+sink-side detector logs.
+
+#### Scenario: Probe with unassigned BAR refuses to continue
+- **GIVEN** the Linux PCI core could not assign a memory window for
+  one of the GPU's BARs (`pci_resource_flags(pci_dev, N) &
+  IORESOURCE_UNSET`)
+- **WHEN** `nv_pci_probe` reaches the BAR-validation block
+- **THEN** the probe MUST log a NVRM error naming the failing BAR
+  index and the detector class
+- **AND** the probe MUST take the `goto failed` path (return -ENODEV)
+- **AND** the driver MUST NOT proceed into `rm_init_adapter` /
+  GSP-FMC bootstrap which can only fail in obscure ways
+
+### Requirement (v4): Driver SHALL add seven new entry-point guards
+
+G3, G5, G6, G7, G8, G9, G10 each SHALL short-circuit a specific class
+of operations against a known-dead GPU. Each guard's site, condition,
+and action are enumerated in the cascade-class-design-v4 architecture
+diagram.
+
+| Guard | Site | Condition | Action |
+|---|---|---|---|
+| G3 | `_issueRpcLarge` (rpc.c) | `PDB_PROP_GPU_IS_LOST` set | return `NV_ERR_GPU_IS_LOST` (mirror G2) |
+| G5 | `_threadNodeCheckTimeout` (thread_state.c) | `API_GPU_ATTACHED_SANITY_CHECK` failed | `NV_GPU_LOST_LOG_ONCE` + return `NV_ERR_TIMEOUT` |
+| G6 | `RmLogGpuCrash` (osapi.c) | `os_pci_is_disconnected` AND `PDB_PROP_GPU_IS_LOST` | `NV_GPU_LOST_LOG_ONCE` + return without crash-dump RPC |
+| G7 | `rm_set_external_kernel_client_count` callers (nv.c) | return == `NV_ERR_GPU_IS_LOST` | suppress `WARN_ON` (silent tolerate) |
+| G8 | `_kgspRpcRecvPoll` pre-loop (kernel_gsp.c) | `pKernelGsp->bFatalError` OR `PDB_PROP_GPU_IS_LOST` | return `NV_ERR_RESET_REQUIRED` (skip 75s lock-hold) |
+| G9 | `_kfspWriteToEmem_GH100` post-first-read (kern_fsp_gh100.c) | first EMEMC read == 0xFFFFFFFF AND `PDB_PROP_GPU_IS_LOST` | `NV_GPU_LOST_LOG_ONCE` + return `NV_ERR_GPU_IS_LOST` |
+| G10 | `nv_drm_remove` (nvidia-drm-drv.c) | `nvKms->isGpuLost(nv_dev->pDevice) == NV_TRUE` | skip `nv_drm_dev_destroy` hardware-touching teardown; route to `nv_drm_dev_destroy_lost` (cancel work, drop refcount, free wrapper -- no MMIO / RPC) |
+
+#### Scenario: G3 short-circuits multi-chunk RPC on lost GPU
+- **GIVEN** `PDB_PROP_GPU_IS_LOST` is set
+- **WHEN** `_issueRpcLarge` is called
+- **THEN** the function MUST return `NV_ERR_GPU_IS_LOST` before any
+  send/poll cycle
+
+#### Scenario: G5 rate-limits noisy sanity-check log
+- **GIVEN** the GPU has gone off the bus
+- **AND** `_threadNodeCheckTimeout` is being called repeatedly under
+  timeout-storm conditions (e.g. issue #776 reproduction)
+- **WHEN** `API_GPU_ATTACHED_SANITY_CHECK(pGpu)` returns false
+- **THEN** the `NV_PRINTF(LEVEL_ERROR, ...)` log line MUST fire AT
+  MOST ONCE per kernel-module lifetime per call site
+- **AND** the function MUST still return `NV_ERR_TIMEOUT` so the
+  caller's error-handling proceeds
+
+#### Scenario: G6 skips diagnostic RPCs on confirmed-lost GPU
+- **GIVEN** both `os_pci_is_disconnected(nv->handle)` returns true
+  AND `PDB_PROP_GPU_IS_LOST` is set
+- **WHEN** `RmLogGpuCrash(pGpu)` is entered
+- **THEN** the function MUST log once and return early
+- **AND** the function MUST NOT issue the
+  `DUMP_PROTOBUF_COMPONENT`-class RPCs that would otherwise trigger
+  the issue #461 cascade
+
+#### Scenario: G7 suppresses WARN_ON on IS_LOST close-path
+- **GIVEN** the close-path refcount drop encounters
+  `rm_set_external_kernel_client_count` returning `NV_ERR_GPU_IS_LOST`
+- **WHEN** the close-path code observes the return status
+- **THEN** `WARN_ON` MUST NOT fire (no stack-trace flood)
+- **AND** non-`NV_ERR_GPU_IS_LOST` non-`NV_OK` returns MUST retain
+  the original `WARN_ON(1)` behaviour
+
+#### Scenario: G8 pre-loop short-circuit avoids 75s lock-hold storm
+- **GIVEN** `pKernelGsp->bFatalError` is already `NV_TRUE` (or
+  `PDB_PROP_GPU_IS_LOST` is set) when `_kgspRpcRecvPoll` is entered
+- **WHEN** the function executes the pre-loop check
+- **THEN** the function MUST clear `pKernelGsp->bPollingForRpcResponse`
+  and return `NV_ERR_RESET_REQUIRED` without entering the `for(;;)`
+  loop
+- **AND** the GPU lock MUST NOT be held for the timeout window
+  (lock-hold time SHOULD be ≤ 1ms per call)
+
+#### Scenario: G9 bypasses arithmetic invariant under dead-bus read
+- **GIVEN** the FSP EMEMC register read returns `0xFFFFFFFF` AND
+  `PDB_PROP_GPU_IS_LOST` is set
+- **WHEN** `_kfspWriteToEmem_GH100` reaches the post-first-read check
+- **THEN** the function MUST log once and return `NV_ERR_GPU_IS_LOST`
+- **AND** the function MUST NOT enter the write loop and subsequent
+  `NV_ASSERT_OR_RETURN((ememOffsetEnd - ememOffsetStart) ==
+  wordsWritten)` invariant check
+
+#### Scenario: G10 short-circuits hardware-touching teardown when sink is set
+- **GIVEN** the C5 v4 sink primitive has set the dead-bus marker on the
+  affected GPU (either Linux `pci_dev_is_disconnected` via the AER
+  DISCONNECT callback / `os_pci_set_disconnected`, or the RM marker
+  `PDB_PROP_GPU_IS_LOST` via `cleanupGpuLostStateAtomic`)
+- **WHEN** `nv_drm_remove(gpuId)` is invoked (normal unload OR
+  hot-eject) and a matching `nv_drm_device` is found
+- **THEN** `nv_drm_remove` MUST query the cross-module
+  `nvKms->isGpuLost(nv_dev->pDevice)` predicate exposed through the
+  `NvKmsKapiFunctionsTable` extension (provider: nvidia-modeset.ko's
+  `IsGpuLost` -> `nvkms_is_gpu_lost` -> `__rm_ops.is_gpu_lost`
+  jump-table entry -> nvidia.ko's `nvidia_dev_is_gpu_lost` ->
+  `os_pci_is_disconnected`)
+- **AND** the query MUST return `NV_TRUE`
+- **AND** the teardown MUST route to `nv_drm_dev_destroy_lost` which
+  cancels in-flight workers, drops the DRM refcount via `drm_dev_put`,
+  and frees the `nv_drm_device` wrapper via `nv_drm_free`
+- **AND** the teardown MUST NOT call `nv_drm_dev_unload` (i.e. MUST
+  NOT invoke `drm_atomic_helper_shutdown`, `nvKms->releaseOwnership`,
+  `drm_kms_helper_poll_fini`, `drm_mode_config_cleanup`,
+  `nvKms->declareEventInterest`, or `nvKms->freeDevice` -- each of
+  which issues NVKMS RPC that would timeout against the dead bus and
+  reproduce the >5min teardown hang documented in GitHub #1134)
+- **AND** `drm_dev_unplug(nv_dev->dev)` MUST still be called
+  unconditionally BEFORE the destroyer (DRM-core requirement; releases
+  userspace file-op waiters and tears down dma-buf bindings)
+- **AND** an `NV_DRM_DEV_LOG_INFO` line MUST fire reporting the
+  `gpuLost=true` branch
+- **AND** (trade-off acknowledged) this path leaks
+  (1) DRM-core internal state — connector / encoder / crtc objects,
+      mode config — reclaimed by `drm_dev_put` refcount drop only if
+      `drm_mode_config_cleanup` runs (which is skipped here); and
+  (2) the underlying `NvKmsKapiDevice` struct (kmalloc-backed via
+      `nvkms_alloc` → `kmalloc(GFP_KERNEL)`) including the RM client
+      handle and the per-device semaphore — normally freed by
+      `nvKms->freeDevice`, skipped here to avoid the RPC → MMIO chain
+      against a dead bus.
+- **AND** the `NvKmsKapiDevice` leak is bounded but real:
+  `nvKmsModuleUnload` does not walk a master list to free outstanding
+  per-GPU devices (none exists — they are owned by external callers
+  like nvidia-drm), so the leak persists across rmmod/insmod of
+  `nvidia-modeset`, freed only at host reboot. Per-event cost is
+  O(1KB) and the event is once per lost-GPU teardown (typically 0–1
+  over a host lifetime), so the steady-state footprint is bounded.
+  A forced-cleanup path that calls `freeDevice` through the C5 G2/G3
+  funnels (which short-circuit on `PDB_PROP_GPU_IS_LOST`) is feasible
+  follow-on work; deferred from this commit pending a dedicated
+  review of the `freeDevice` teardown chain.
+- **AND** the bounded leak remains strictly preferable to the
+  multi-minute teardown hang documented in #1134.
+
+#### Scenario: Stale-read race on `isGpuLost` query in `nv_drm_remove` is benign
+- **GIVEN** `nv_drm_remove` has read the `isGpuLost` predicate as
+  `NV_FALSE` and is about to dispatch the normal `nv_drm_dev_destroy`
+  path
+- **WHEN** an AER fatal callback fires on the same GPU AFTER the
+  `isGpuLost` read but BEFORE the normal-path destroyer begins
+  issuing NVKMS RPCs (i.e. the query is a stale-read)
+- **THEN** the C5 G2/G3 funnels in `nvidia.ko`'s `_issueRpcAndWait`
+  and `_issueRpcAndWaitLarge` MUST short-circuit any RPCs the
+  destroyer subsequently issues (the sink has been set by the AER
+  path before any RPC reaches the funnel)
+- **AND** the hang class documented in #1134 MUST NOT be
+  reintroduced; the worst-case outcome is a heavier teardown path
+  with extra G2/G3 short-circuit log lines
+- **AND** therefore no re-query of `isGpuLost` inside the destroyer
+  is required (defense-in-depth is provided by the downstream
+  funnels, not by re-querying at every dispatch site)
+
+#### Scenario: G10 falls through to normal teardown when GPU is alive
+- **GIVEN** the sink primitive has NOT marked the GPU lost
+- **WHEN** `nv_drm_remove(gpuId)` is invoked (e.g. clean module
+  unload, suspend-driven device removal)
+- **THEN** `nvKms->isGpuLost(nv_dev->pDevice)` MUST return `NV_FALSE`
+- **AND** the teardown MUST route to the original `nv_drm_dev_destroy`
+  full-unload path (i.e. `nv_drm_dev_unload` MUST run normally, doing
+  the hardware-touching NVKMS teardown that the alive GPU can service)
+- **AND** an `NV_DRM_DEV_LOG_INFO` line MUST fire reporting the
+  `gpuLost=false` branch (useful for triage to confirm the sink-aware
+  path is reachable but not gating the normal teardown)
+
+### Requirement (v4): Telemetry consolidation — per-site logs retire in favor of canonical sink log
+
+The per-site `NV_GPU_LOST_LOG_ONCE` latches added by C5 v1 and v3 at
+the 8 cleanup-path conversion sites (`nv_debug_dump.c`,
+`kernel_graphics.c`, `fecs_event_list.c` ×2,
+`kernel_falcon_tu102.c`, `kernel_gsp_tu102.c`, `vaspace_api.c`,
+`mem.c`, `rs_server.c:1389`) SHALL be removed in v4. The canonical
+per-detector-class log line emitted by `cleanupGpuLostStateAtomic`
+replaces them. At most two canonical site-level logs SHALL be retained
+as defense-in-depth (one in `rs_client.c`, one in `rs_server.c:268`).
+The three NEW guard-specific logs (G5 thread_state, G6 RmLogGpuCrash,
+G9 kfsp) are not retirements — they're new guard entry-point logs
+covering surfaces where the canonical sink log alone is insufficient
+for triage (high call frequency, distinct diagnostic context).
+
+#### Scenario: Cleanup-path site receives IS_LOST without flooding the kernel log
+- **GIVEN** a cleanup cascade traverses the 8 converted sites under
+  a lost-GPU teardown
+- **WHEN** each site evaluates its `NV_ASSERT_OR_GPU_LOST*` macro
+- **THEN** no additional log line MUST fire from the per-site code
+  path (the canonical sink-side log fired once at detection)
+- **AND** the assertion MUST still accept `NV_ERR_GPU_IS_LOST`
+  without firing (covered by the v3 macro family)
+- **AND** the 2 retained resserv canonical logs MUST still fire
+  (defense-in-depth: if the sink primitive was somehow bypassed,
+  these logs are the last-resort record)
 
 ## Scope boundary
 

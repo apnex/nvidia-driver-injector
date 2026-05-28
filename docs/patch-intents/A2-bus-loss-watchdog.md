@@ -4,8 +4,8 @@ layer: addon
 source-branch: a2-bus-loss-watchdog
 upstream-candidacy: n/a
 telemetry-tier: mandatory
-status: reviewed
-related-patches: [A1-pcie-primitives, A3-recovery]
+status: v4-target-ready
+related-patches: [A1-pcie-primitives, A3-recovery, C5-crash-safety]
 ---
 
 # A2-bus-loss-watchdog — Per-Device Heartbeat Watchdog for Silent Bus-Loss Detection
@@ -16,23 +16,65 @@ The driver SHALL run a per-device kthread heartbeat that periodically
 reads `NV_PMC_BOOT_0` via direct volatile BAR0 MMIO, recognises the
 all-ones return as the dead-bus signature that PCIe completes after the
 hardware completion timeout on a fallen-off-the-bus device, and on
-detection latches the GPU into the kernel-side disconnected state via
-[[C5-crash-safety]]'s `os_pci_set_disconnected` so every subsequent
-RM-side MMIO read short-circuits via `os_pci_is_disconnected`. The
-watchdog closes the DMA-path Mode B detection gap that Q-active alone
-cannot cover — Mode B wedges in the DMA-upload path where no MMIO reads
-fire from userspace context, so the Q-active wrapper at the ioctl path
-stays silent. Q-watchdog provides an active heartbeat that fires
-regardless of which subsystem stalled, latches the first detection of
-each episode into per-device state (jiffies, raw PMC_BOOT_0 value, AER
-snapshot embedded from [[A1-pcie-primitives]]), publishes the state as
-five `tb_egpu_qwd_*` sysfs attributes for cross-boot post-mortems, and
-honours a runtime kill switch (`NVreg_TbEgpuQwdEnable`) so the
-heartbeat itself can be A/B-toggled to characterise whether the active
-probe perturbs the observability-sensitive failure mode. The
-[[A3-recovery]] state machine reads the latched AER snapshot when
-deciding whether to escalate to `pci_reset_bus`; A2 is the detection
-half, A3 is the recovery half.
+detection dispatches into [[C5-crash-safety]]'s
+`cleanupGpuLostStateAtomic` sink primitive (via the kernel-open wrapper
+`rm_cleanup_gpu_lost_state`) with detector class
+`NV_GPU_LOST_DETECTOR_QWATCHDOG_DMA_WEDGE` so that BOTH the RM-side
+`PDB_PROP_GPU_IS_LOST` marker AND the Linux-side
+`pci_channel_io_perm_failure` marker are set atomically and one
+canonical telemetry log line is emitted. Every subsequent RM-side MMIO
+read then short-circuits via `os_pci_is_disconnected` and every RM
+state machine that keys on `PDB_PROP_GPU_IS_LOST` observes the
+disconnect as well. The watchdog closes the DMA-path Mode B detection
+gap that Q-active alone cannot cover — Mode B wedges in the DMA-upload
+path where no MMIO reads fire from userspace context, so the Q-active
+wrapper at the ioctl path stays silent. Q-watchdog provides an active
+heartbeat that fires regardless of which subsystem stalled, latches the
+first detection of each episode into per-device state (jiffies, raw
+PMC_BOOT_0 value, AER snapshot embedded from [[A1-pcie-primitives]]),
+publishes the state as five `tb_egpu_qwd_*` sysfs attributes for
+cross-boot post-mortems, and honours a runtime kill switch
+(`NVreg_TbEgpuQwdEnable`) so the heartbeat itself can be A/B-toggled
+to characterise whether the active probe perturbs the
+observability-sensitive failure mode. The [[A3-recovery]] state
+machine reads the latched AER snapshot when deciding whether to
+escalate to `pci_reset_bus`; A2 is the detection half, A3 is the
+recovery half.
+
+## v4 SEMANTICS CHANGE
+
+**Pre-v4 behaviour:** the Q-watchdog detection latch called
+`os_pci_set_disconnected(nv->handle)` directly. This set ONLY the
+Linux-side `pci_channel_io_perm_failure` marker. The RM-side
+`PDB_PROP_GPU_IS_LOST` was left unset by the Q-watchdog path;
+downstream RM consumers that keyed on the RM marker (UVM,
+GSP-heartbeat watchdogs, persistence state machines) observed the
+disconnect only indirectly via the Linux marker propagated through
+Q-passive on the next MMIO read attempt.
+
+**v4 behaviour:** the Q-watchdog detection latch dispatches into the
+C5 sink primitive `cleanupGpuLostStateAtomic` (kernel-open wrapper
+`rm_cleanup_gpu_lost_state`) with detector class
+`DETECTOR_QWATCHDOG_DMA_WEDGE` (numeric 4, mirrored from
+`nv_gpu_lost_detector_t` in `src/nvidia/inc/kernel/gpu/nv-gpu-lost.h`
+into the `NV_GPU_LOST_DETECTOR_*` macro family in
+`kernel-open/common/inc/nv.h`). The primitive sets BOTH markers
+atomically via `gpuSetDisconnectedProperties` + the wrapper's
+`os_pci_set_disconnected` call and emits one canonical telemetry log
+line keyed by detector class.
+
+**Risk surface:** downstream UVM consumers and other RM state
+machines that previously observed only the Linux marker now observe
+the RM marker as well. UVM in particular may take different teardown
+paths when `PDB_PROP_GPU_IS_LOST` is set, including faster
+fault-channel quiesce and skipping certain MMIO-bound cleanup steps.
+This is the desired behaviour (the architectural goal of the v4 sink
+funnel is exactly that BOTH markers are set on every detector path)
+but it does change observable runtime semantics for downstream
+consumers. The change is validated through Phase 4 E07 Run 4
+(end-to-end Mode B detection → sink → recovery) plus a ≥7-day
+production soak before the `status:` frontmatter is promoted from
+`v4-target-ready` to `reviewed`.
 
 ## Requirements
 
@@ -129,28 +171,65 @@ once-per-episode log latch so a future episode logs again.
 - **AND** the kthread MUST continue sleeping at the configured
   interval so the kill switch is reversible without a module reload
 
-### Requirement: On dead-bus detection the kthread SHALL latch episode state, emit one mandatory log line, and propagate the disconnect
+### Requirement: On dead-bus detection the kthread SHALL latch episode state, emit one mandatory log line, and dispatch into the C5 sink primitive
 
 When the heartbeat read returns `0xFFFFFFFFu` the kthread SHALL
 atomically increment the per-device detection counter and, if the
 once-per-episode log latch has not yet fired in the current episode,
 SHALL emit exactly one log line at the `NV_DBG_ERRORS` level (the
 mandatory telemetry tier — silent bus-loss is untraceable) naming the
-`PMC_BOOT_0` value, the cycle count at detection, and the
-`os_pci_set_disconnected` action being taken. The kthread SHALL latch
-`jiffies` into `qwd->last_detection_jiffies`, the raw
-`PMC_BOOT_0` value into `qwd->last_pmc_boot_0`, and SHALL leave the
-`qwd->last_aer` snapshot for [[A3-recovery]] to populate via
-[[A1-pcie-primitives]]'s `tb_egpu_dump_aer_trigger_event(pdev,
-"watchdog", &qwd->last_aer)` call (A3 owns the call site because A3
-is the recovery state machine that consumes the snapshot; A2 only
-provides the persistent storage). The kthread SHALL call
-`os_pci_set_disconnected(nv->handle)` on every detection cycle (not
-just the latched first detection) so the disconnect propagation is
-re-asserted in case it was cleared by another path. The kthread MUST
-continue looping after detection — the cycle counter continues
-ticking, and if the disconnect ever clears the kthread MUST be ready
-to re-fire and re-log.
+`PMC_BOOT_0` value, the cycle count at detection, and the sink
+dispatch action being taken. The kthread SHALL latch `jiffies` into
+`qwd->last_detection_jiffies`, the raw `PMC_BOOT_0` value into
+`qwd->last_pmc_boot_0`, and SHALL populate the `qwd->last_aer`
+snapshot via [[A1-pcie-primitives]]'s
+`tb_egpu_dump_aer_trigger_event(pdev, "qwd-detect", &qwd->last_aer)`
+call from inside the A2 detection latch (the call site lives in A2's
+own translation unit per the A3-D3 hoist; A2 owns both the storage
+and the trigger; A3 consumes the populated snapshot via sysfs at the
+recovery dispatch site).
+
+The kthread SHALL dispatch into [[C5-crash-safety]]'s
+`cleanupGpuLostStateAtomic` sink primitive by calling
+`rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_QWATCHDOG_DMA_WEDGE)`
+where `sp` is a fresh stack allocated via `nv_kmem_cache_alloc_stack`
+and freed immediately after the call returns. The primitive sets
+BOTH `PDB_PROP_GPU_IS_LOST` (RM-side) AND
+`pci_channel_io_perm_failure` (Linux-side) atomically and emits one
+canonical telemetry log line keyed by detector class. The kthread
+MUST tolerate `nv_kmem_cache_alloc_stack` failure (return non-zero)
+by emitting one error log line and deferring the sink dispatch to
+the next probe cycle — the dead-bus signature will still be present
+on the next iteration and the dispatch will retry.
+
+#### Scenario: Sink dispatch sets both markers atomically
+- **GIVEN** a kthread that has just observed `PMC_BOOT_0 == 0xFFFFFFFFu`
+- **AND** stack-alloc succeeds
+- **WHEN** `rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_QWATCHDOG_DMA_WEDGE)` returns
+- **THEN** the RM-side `PDB_PROP_GPU_IS_LOST` MUST be set
+- **AND** the Linux-side `pci_channel_io_perm_failure` MUST be set
+  (verifiable via `pci_dev_is_disconnected(nvl->pci_dev) == true`)
+- **AND** the C5 canonical telemetry log line MUST have been emitted
+  exactly once (keyed by detector class `QWATCHDOG_DMA_WEDGE`)
+
+#### Scenario: Stack-alloc failure defers dispatch without losing the detection
+- **GIVEN** a kthread that has just observed `PMC_BOOT_0 == 0xFFFFFFFFu`
+- **AND** `nv_kmem_cache_alloc_stack` returns non-zero
+- **WHEN** the latch block runs
+- **THEN** an error log line MUST be emitted citing the stack-alloc
+  failure and the deferred dispatch
+- **AND** the once-per-episode log latch MUST NOT be set (so the
+  next probe cycle re-attempts both the log and the dispatch)
+- **AND** the kthread MUST continue looping (stack-alloc failure
+  is not fatal to A2 — the dispatch retries on the next cycle while
+  the dead-bus signature persists)
+
+The C5 sink primitive is idempotent under the both-markers-set
+guard; subsequent cycles within the same episode that re-enter the
+latch (e.g. after a hypothetical latch reset) will dispatch a
+no-op. The kthread MUST continue looping after detection — the
+cycle counter continues ticking, and if the disconnect ever clears
+the kthread MUST be ready to re-fire and re-log.
 
 #### Scenario: First dead-bus read in an episode emits the mandatory log and latches state
 - **GIVEN** a kthread reading a live BAR0 mapping
@@ -165,11 +244,13 @@ to re-fire and re-log.
 - **AND** `qwd->last_detection_jiffies` MUST be set to the current
   `jiffies` value
 - **AND** `qwd->last_pmc_boot_0` MUST be set to `0xFFFFFFFFu`
-- **AND** `os_pci_set_disconnected(nv->handle)` MUST be called
+- **AND** `rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_QWATCHDOG_DMA_WEDGE)`
+  MUST be called with a freshly-allocated stack (`sp`), and the
+  stack MUST be freed immediately after
 - **AND** the once-per-episode log latch MUST be set so subsequent
   detections within the same episode do not re-log
 
-#### Scenario: Subsequent dead-bus reads in the same episode are silent but still propagate
+#### Scenario: Subsequent dead-bus reads in the same episode are silent and skip the sink dispatch
 - **GIVEN** a kthread that has already logged once for the current
   episode (the latch is set)
 - **WHEN** the kthread reads `PMC_BOOT_0` and gets `0xFFFFFFFFu`
@@ -177,8 +258,10 @@ to re-fire and re-log.
 - **THEN** the detection counter MUST be incremented atomically
 - **AND** no additional log line MUST be emitted (latch suppresses
   per-cycle logging)
-- **AND** `os_pci_set_disconnected(nv->handle)` MAY still be called
-  to re-assert propagation
+- **AND** the sink primitive MUST NOT be re-dispatched (the latch
+  also guards the sink dispatch; the primitive is idempotent under
+  the both-markers-set guard so this is defence-in-depth, not a
+  correctness requirement)
 - **AND** the latched state (`jiffies`, `pmc_boot_0`) MUST NOT be
   overwritten — only the first detection of an episode latches state
 
@@ -333,7 +416,9 @@ immediately after sleep returns.
 | Kthread allocation failure (`kzalloc`) | `NV_DBG_ERRORS` (err) | `"tb_egpu: qwd kzalloc failed; continuing without watchdog\n"` |
 | Kthread allocation failure (`kthread_run`) | `NV_DBG_ERRORS` (err) | `"tb_egpu: qwd kthread_run failed: %d; continuing without watchdog\n"` |
 | Sysfs group create failure | `NV_DBG_INFO` (info) | `"tb_egpu: qwd sysfs_create_group failed: %d\n"` |
-| **Dead-bus detected (first detection per episode — mandatory tier)** | **`NV_DBG_ERRORS` (err)** | `"tb_egpu: qwd DETECTED dead bus (PMC_BOOT_0=0x%08x after %d cycles).\n  action: os_pci_set_disconnected called; subsequent ioctl-path MMIO reads will short-circuit via Q-passive.\n"` |
+| **Dead-bus detected (first detection per episode — mandatory tier)** | **`NV_DBG_ERRORS` (err)** | `"tb_egpu: qwd DETECTED dead bus (PMC_BOOT_0=0x%08x after %d cycles).\n  action: dispatching into C5 sink primitive (detector=QWATCHDOG_DMA_WEDGE); BOTH the RM-side PDB_PROP_GPU_IS_LOST marker and the Linux-side pci_channel_io_perm_failure marker will be set atomically; subsequent ioctl-path MMIO reads will short-circuit via Q-passive.\n"` |
+| Stack-alloc failure (sink dispatch deferred) | `NV_DBG_ERRORS` (err) | `"tb_egpu: qwd stack-alloc failed; sink dispatch deferred to next probe cycle\n"` |
+| C5 sink canonical telemetry (emitted by `cleanupGpuLostStateAtomic`) | per C5 spec | one canonical line keyed by `detector_class=QWATCHDOG_DMA_WEDGE` (format owned by [[C5-crash-safety]]) |
 | Kthread stopped | `NV_DBG_INFO` (info) | `"tb_egpu: qwd kthread stopped (cycles=%d detections=%d)\n"` |
 
 The mandatory-tier log line is the detection event itself —
@@ -405,11 +490,35 @@ state.
   - Does NOT consume `TB_EGPU_PCIE_WPR2_REG_OFFSET` or
     `TB_EGPU_PCIE_WPR2_VAL_MASK` because A2 does not poll WPR2.
 - **C5 ABI consumed:** A2 calls
-  [[C5-crash-safety]]'s `os_pci_is_disconnected(nv->handle)` (skip
-  read if already disconnected) and `os_pci_set_disconnected(nv->handle)`
-  (propagate the disconnect on detection). These calls are reached
-  through the de-branded `nv-gpu-lost.h` API surface; A2 does NOT
-  touch C5's internal state directly.
+  [[C5-crash-safety]]'s `os_pci_is_disconnected(nv->handle)` to
+  skip the MMIO read when the GPU is already declared disconnected
+  (avoid spamming detections within the same episode), and dispatches
+  into the C5 sink primitive `cleanupGpuLostStateAtomic` via the
+  kernel-open wrapper
+  `rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_QWATCHDOG_DMA_WEDGE)`
+  on the first detection of each episode. The wrapper accepts a
+  `nvidia_stack_t *` (allocated by A2 via `nv_kmem_cache_alloc_stack`,
+  freed immediately after the call returns) plus the `nv_state_t *`
+  and the detector class macro. The detector class macro
+  `NV_GPU_LOST_DETECTOR_QWATCHDOG_DMA_WEDGE` (numeric value 4) is
+  defined in `kernel-open/common/inc/nv.h` and mirrors
+  `nv_gpu_lost_detector_t::DETECTOR_QWATCHDOG_DMA_WEDGE` from
+  `src/nvidia/inc/kernel/gpu/nv-gpu-lost.h`. A2 does NOT call
+  `os_pci_set_disconnected` directly — that lower-level primitive is
+  invoked inside `cleanupGpuLostStateAtomic` as part of the atomic
+  both-markers-set step. A2 does NOT touch C5's internal state
+  directly; all coupling is through the wrapper API.
+
+  **v4 SEMANTICS CHANGE provenance:** in v3 and earlier, this
+  intent doc Required A2 to call `os_pci_set_disconnected(nv->handle)`
+  directly on every detection cycle. The v4 promotion to
+  `rm_cleanup_gpu_lost_state` is captured in the Purpose section's
+  `## v4 SEMANTICS CHANGE` callout and traces back to MISSION-1 v4
+  Phase 1 plan task 1C (per
+  `docs/superpowers/plans/2026-05-27-mission-1-v4-phase-1.md`) and
+  the cascade-class architecture in
+  `docs/missions/mission-1-egpu-hot-plug-hot-power/cascade-class-design-v4.md`
+  (Q-watchdog is detector input [f] in the six-input sink funnel).
 - **Module parameter surface:** `NVreg_TbEgpuQwdEnable` (uint,
   default 1, mode 0644) and `NVreg_TbEgpuQwdIntervalMs` (uint,
   default 200, clamped to `[10, 60000]`, mode 0644). Both are

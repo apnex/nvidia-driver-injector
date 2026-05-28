@@ -1,13 +1,13 @@
-# regen-base-patches.sh state -- generated 2026-05-26T12:02:31Z
+# regen-base-patches.sh state -- generated 2026-05-28T08:27:35Z
 # base tag: 595.71.05 (51edebee79919b54f498c19a0be31982cd97646e)
 C1-kbuild-version-mk  c1-kbuild-version-mk  51cfd01e9cfe62d3559fcd127a29e68d727803cb
 C2-aer-internal-unmask  c2-aer-internal-unmask  403d5daf8d80da79991534b3c9d2ef70ac91b63a
 C3-gpu-lost-retry  c3-gpu-lost-retry  c589673a33729e24c5179f92c5c98dbac4886d6b
 C4-err-handlers-scaffold  c4-err-handlers-scaffold  75e823eff5b18f08be8d56924d8099fce9829e58
 E1-egpu-detection  e1-egpu-detection  000ea7a51db8b78225950a753a390a82f3aa1d81
-C5-crash-safety  c5-crash-safety  1a7f39ab8f325c944887ddfd8c515be6367bf7e8
-A1-pcie-primitives  a1-pcie-primitives  4f5e39e62a0b93c48b2de1d103517ce249e225fb
-A2-bus-loss-watchdog  a2-bus-loss-watchdog  38f54569c80f0613991ea57949ec50127c088419
-A3-recovery  a3-recovery  e396e0c818a4380527ffb412316cc8caf38f77b8
-A4-close-path-telemetry  a4-close-path-telemetry  4e4befeaa61b30dd8fac95031f867bafd1e40cd5
-A5-version-and-toggles  a5-version-and-toggles  39169b01cf7d93aedfe79ebbb1ba1ae47b303b47
+C5-crash-safety  c5-crash-safety  9f4a4dd2ed9139c6d6706d5d66d1eb552671be2b
+A1-pcie-primitives  a1-pcie-primitives  26431cbd65d447ac9d5b9b96c7ece933ae42f960
+A2-bus-loss-watchdog  a2-bus-loss-watchdog  1e1fc329dae24680bb5a2b9e4ffd7776c159280d
+A3-recovery  a3-recovery  8530669cbfe612171984604f213f4cd60eae8217
+A4-close-path-telemetry  a4-close-path-telemetry  125072b08c95c8d0bc94a8bc35a2f93f86f6bd5c
+A5-version-and-toggles  a5-version-and-toggles  018d406da8b161a69c8f0f656c861ecae57ec0bb

@@ -4,8 +4,8 @@ layer: addon
 source-branch: a4-close-path-telemetry
 upstream-candidacy: n/a
 telemetry-tier: mandatory
-status: reviewed
-related-patches: [A1-pcie-primitives, A3-recovery]
+status: v4-target-ready
+related-patches: [A1-pcie-primitives, A3-recovery, C5-cascade-class-sink]
 ---
 
 # A4-close-path-telemetry — Event-Triggered Nominal Telemetry on the RM / UVM Close Path
@@ -288,6 +288,47 @@ and supersede the legacy hardcoded `pci_get_domain_bus_and_slot(0,
 - **THEN** the function MUST return `NULL`
 - **AND** the function MUST NOT panic or `BUG_ON`
 - **AND** no refcount MUST have been taken
+
+### Requirement: Driver SHALL consume the C5 canonical sink-side log rather than duplicate it
+
+A4 SHALL consume the [[C5-cascade-class-sink]] canonical sink-side log
+(`"GPU %u lost via detector_class=%u"` emitted exactly once per
+`(gpu, detector_class)` per kernel-module lifetime by
+`cleanupGpuLostStateAtomic`) rather than duplicating it. A4's own
+observation hooks SHALL add ONLY unique state-delta payload —
+close-path-specific data such as `site=`, `usage_count`, `fd_count`,
+PMC_BOOT_0, WPR2, and the `wpr2_up:` verdict — and SHALL NOT re-emit
+the basic "GPU lost" marker. The canonical log is the single source
+of truth for "GPU N was just classified lost via detector class X";
+A4's lines are the orthogonal close-path nominal observability that
+answers "did the close path execute, and what was the hardware state
+at last-close?".
+
+This Requirement is satisfied by construction in v1: none of A4's
+log lines emit "GPU lost" wording. The Requirement is documented
+here to make the architectural relationship explicit for future
+maintainers, so that any future addition to A4's telemetry surface
+preserves the non-duplication invariant.
+
+#### Scenario: Sink fires for DETECTOR_*; A4 hook adds only its state-delta
+- **GIVEN** C5's `cleanupGpuLostStateAtomic` has just emitted the
+  canonical `"GPU N lost via detector_class=X"` line for some
+  detector class
+- **AND** an A4 observation point (RM `close-entry` / `pre-stop` /
+  `post-shutdown` / `close-exit`, or any UVM lifecycle site)
+  triggers in the same teardown window
+- **WHEN** A4's hook executes
+- **THEN** A4 MUST add only its unique state-delta payload (the
+  `site=` marker line, and on last-close the PMC_BOOT_0 + WPR2 +
+  `wpr2_up:` snapshot line)
+- **AND** A4 MUST NOT re-emit the basic "GPU lost" message — that
+  is C5's responsibility and the canonical line already exists
+  in dmesg
+- **AND** the two log surfaces MUST remain unambiguously
+  distinguishable by their format strings and prefix tokens
+  (C5: `"GPU %u lost via detector_class=%u"`;
+  A4 RM: `"tb_egpu [CLOSE]: site=..."`;
+  A4 UVM: `"tb_egpu UVM [CLOSE]: site=..."`)
 
 ## Scope boundary
 
