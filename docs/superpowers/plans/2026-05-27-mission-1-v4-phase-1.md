@@ -440,7 +440,17 @@ Related: GitHub issues #461, #776, #888, #900, #916, #974, #979,
 #1045, #1134."
 ```
 
-### Task 1B: C4 v4 — sink-call insertion in existing callback body
+### Task 1B: C4 v4 — sink-call insertion ABSORBED INTO C5
+
+**EXECUTION DEVIATION 2026-05-27:** The original plan put the +1 line into a separate `c4-err-handlers-scaffold` commit. This is a **branch-ordering violation**: C4 is upstream of C5 in the stack, so a call from C4 to a function defined in C5 leaves C4-tip alone broken (call without definition) — breaks bisection + upstream-PR piecewise acceptance. **Fix:** absorb the +1 line into C5's diff to `nv-pci.c`. C4 stays unchanged; the AER callback gains its sink-call via a C5 hunk on top of C4's existing scaffold body. Layering preserved.
+
+Task 1B (as a separate task) is therefore SKIPPED — see Task 1A's expanded scope which now includes the AER body edit.
+
+**Aggregate delta correction:** C4 = 0 lines (was +1); C5 absorbs the +1 line into its existing +26-28 range. No net change to aggregate.
+
+---
+
+### Task 1B (ORIGINAL — kept for reference; absorbed into 1A above)
 
 **Branch:** `c4-err-handlers-scaffold`
 **Outcome:** existing `nv_pci_error_detected` callback gains one `cleanupGpuLostStateAtomic` call on the DISCONNECT branch.
