@@ -6,7 +6,7 @@
 
 **Architecture:** Per [[../missions/mission-1-egpu-hot-plug-hot-power/cascade-class-design-v4]] v1.2. Each fork branch (`c5-crash-safety`, `c4-err-handlers-scaffold`, `a2-bus-loss-watchdog`, `a3-recovery`, `a4-close-path-telemetry`) is amended to its v4 target state, then cascade-rebased and regenerated as a complete `.patch` set. One container build, one cutover. G8 lands with the rest (medium confidence accepted; validation gate is E07 Run 4 + power-off wedge regression tests). C6 (F1) is deferred to Phase 2 (separate plan) due to scope + cross-component coordination + multi-GPU validation gap.
 
-**Tech Stack:** Linux kernel 7.0.x, NVIDIA open-gpu-kernel-modules 595.71.05 (fork at `/root/open-gpu-kernel-modules`), stacked git branches (c1→c2→c3→c4→c5→e1→a1→a2→a3→a4→a5), `tools/regen-base-patches.sh` for .patch regeneration, OCI container build via `Dockerfile`, k3s deployment via `apnex/k8s-vllm` repo. Test rig: AORUS RTX 5090 AI BOX over TB4 → NUC 15 Pro+ (Arrow Lake). Verification is build + smoke + soak + must-gather forensic capture; no automated unit tests.
+**Tech Stack:** Linux kernel 7.0.x, NVIDIA open-gpu-kernel-modules 595.71.05 (fork at `/root/open-gpu-kernel-modules`), stacked git branches (c1→c2→c3→c4→e1→c5→a1→a2→a3→a4→a5), `tools/regen-base-patches.sh` for .patch regeneration, OCI container build via `Dockerfile`, k3s deployment via `apnex/k8s-vllm` repo. Test rig: AORUS RTX 5090 AI BOX over TB4 → NUC 15 Pro+ (Arrow Lake). Verification is build + smoke + soak + must-gather forensic capture; no automated unit tests.
 
 ---
 
@@ -605,7 +605,7 @@ Wherever A4 emits a "GPU lost via XXX" diagnostic, route through the sink-side l
 
 ### Task 2A: Cascade-rebase the stacked branches
 
-**Pattern:** branch stack is c1→c2→c3→c4→c5→e1→a1→a2→a3→a4→a5. Phase 1 modified c4, c5, a2, a3, a4. Each modified branch needs its downstream branches rebased onto its new tip.
+**Pattern:** branch stack is c1→c2→c3→c4→e1→c5→a1→a2→a3→a4→a5. Phase 1 modified c4, c5, a2, a3, a4. Each modified branch needs its downstream branches rebased onto its new tip.
 
 - [ ] **Step 1: Rebase e1 atop new c5 tip**
 
