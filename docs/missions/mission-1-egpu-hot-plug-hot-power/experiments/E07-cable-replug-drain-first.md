@@ -288,3 +288,84 @@ TB status:                      authorized → connected → (manually re-author
 The cable replug protocol DOES reach the FAIL state (broken-BAR1) the mission targeted — confirming H1's Linux PCIe hotplug fallback allocation hypothesis is reachable. HOWEVER, in our current post-sub-cycle-5 environment the path to that state is unsafe: surprise-removal during active NVML probing fires Xid 79+154 cascade that the existing patch series detects (visibility ✓) but does not recover (no hook for Xid-154-mid-session). Recovery requires forced power-cycle.
 
 This is exactly the kind of data the mission's testing matrix is supposed to surface — an unmapped failure class with concrete kernel-site evidence pointing at where a corrective patch needs to live (likely an E1 extension covering pci_remove + RPC-path short-circuiting, scope TBD with more data points).
+
+## Run 4 — 2026-05-28 08:46–08:49 UTC — **PASS under aorus.17 with v4 base architecture**
+
+**Status:** PASS — host survived cable yank; clean PCIe teardown in ~6ms; no wedge.
+
+**Date:** 2026-05-28 08:47:31 UTC (cable yank during active device-plugin + persistence-engaged state).
+
+**Driver:** `595.71.05-aorus.17` (v4 base architecture). Patches loaded: 11 (C2, C3, C4, C5 v4, E1, A1, A2 v4, A3 v4, A4 v4, A5 v4).
+
+**Setup:**
+- Cold-boot to aorus.17 ~7 min before yank
+- vLLM not running (vllm namespace empty at yank time)
+- Active consumers: nvidia-device-plugin DaemonSet (NVML probes ~30s) + injector with persistence-mode engaged (P8 @ 21W)
+- BAR1 = 32GiB; bridge 03:00.0 prefetch = 33089M; TB authorized
+- Pre-yank forensic capture: `/var/log/mission-1-archaeology/E07-Run4.baseline.txt`, `/var/log/mission-1-archaeology/E07-Run4-aorus17/pre-yank.tar.gz`
+
+**Trigger:** physical TB cable yank from AORUS AI BOX, host running.
+
+**dmesg cascade (post-yank, ~6ms total):**
+
+```
+[  391.922274] NVRM: cleanupGpuLostStateAtomic: GPU 0 lost via detector_class=1   ← ONE canonical sink fire (DETECTOR_OSHANDLEGPULOST_RETRY_EXHAUSTED)
+[  391.922276] NVRM: krcRcAndNotifyAllChannels_IMPL: RC all channels for critical error 79.
+[  391.922282] NVRM: _threadNodeCheckTimeout: API_GPU_ATTACHED_SANITY_CHECK failed   ← G5 rate-limit: ONE line (not 10+)
+[  391.922303] NVRM: RmLogGpuCrash: GPU lost, skipping crash log to avoid diagnostic-RPC cascade   ← G6 fired
+[  391.922335] NVRM: Xid (PCI:0000:04:00): 154, GPU recovery action changed from 0x0 (None) to 0x1 (GPU Reset Required)
+[  391.924692] NVRM: GPU0 _kccuUnmapAndFreeMemory: CCU memdesc unmap request failed with status: 0xf   ← cleanup-path graceful IS_LOST
+[  391.924996] NVRM: _kfspWriteToEmem_GH100: dead-bus read on EMEMC; aborting EMEM write   ← G9 fired
+[  391.925000] NVRM: kfspWaitForResponse: FSP command timed out
+[  391.925001] NVRM: kfspCleanupBootState_IMPL: Clock boost disablement via FSP failed with error 0x65
+[  391.925191] NVRM: nvCheckOkFailedNoLog: ... NV_ERR_GPU_IS_LOST returned from pRmApi->Control(...) @ gpu_user_shared_data.c:248   ← C5 v4 absorbed via NV_CHECK_OK graceful return
+[  391.925234] NVRM: nvAssertFailedNoLog: Assertion failed: rmStatus == NV_OK @ osinit.c:2464   ← ⚠️ unconverted v4 site — non-fatal
+[  391.927563] pci_bus 0000:04: busn_res: [bus 04] is released
+[  391.927804] pci_bus 0000:05: busn_res: [bus 05-11] is released
+[  391.927856] pci_bus 0000:12: busn_res: [bus 12-1e] is released
+[  391.927884] pci_bus 0000:1f: busn_res: [bus 1f-2b] is released
+[  391.927912] pci_bus 0000:03: busn_res: [bus 03-2b] is released
+```
+
+**v4 architecture design promises — verified:**
+
+| Promise | Result |
+|---|---|
+| ONE canonical detector log per (gpu, class) | ✅ Single line `detector_class=1` (OSHANDLEGPULOST_RETRY_EXHAUSTED) — C3 retry-exhausted path fired first |
+| Cleanup completes within seconds (not minutes) | ✅ ~6ms total (sink at 391.922274 → final bus release 391.927912) |
+| `nvidia_drm` teardown does NOT hang (G10 KAPI) | ✅ No nvidia_drm hang logs; PCIe bus release sequence clean |
+| Host SSH responsive throughout | ✅ Bash continued working; `systemctl is-system-running` = `running` |
+| No 75s `_kgspRpcRecvPoll` lock-hold stall (G8) | ✅ Total cleanup ~6ms — pre-loop guard worked |
+| G5 rate-limit at API_GPU_ATTACHED_SANITY_CHECK (#776) | ✅ ONE line, not 10+ |
+| G6 RmLogGpuCrash sink-check (#461) | ✅ "skipping crash log to avoid diagnostic-RPC cascade" — no DUMP_PROTOBUF_COMPONENT fn 78 RPC issued |
+| G9 kfsp arithmetic-invariant guard (audit site #12) | ✅ "dead-bus read on EMEMC; aborting EMEM write" — guard fired exactly as designed |
+| gpu_user_shared_data.c:248 cleanup-path absorbs IS_LOST (audit site #13) | ✅ NV_CHECK_OK graceful return — no panic |
+| PCIe bus release sequence clean | ✅ 04 → 05-11 → 12-1e → 1f-2b → 03-2b in microseconds |
+
+**Known gap surfaced (non-fatal):**
+
+`osinit.c:2464` (audit site #11, `RmShutdownAdapter` post-`gpuStateDestroy`) — the `NV_ASSERT(rmStatus == NV_OK)` was NOT converted to `NV_ASSERT_OR_GPU_LOST` in the v4 implementation. It fires `nvAssertFailedNoLog` (soft assert, no panic) but is the only known gap. This site was identified in the audit but not picked up by the Phase 1A implementer's v3-pattern sweep (likely because the existing pattern was bare `NV_ASSERT(rmStatus == NV_OK)` — slightly different from the `(status == NV_OK || status == NV_ERR_GPU_IN_FULLCHIP_RESET)` pattern the v3 sweep matched). Suggest adding to a follow-on C5 v4.1 sub-cycle.
+
+**Comparison to Run 3 (v3 / aorus.16):**
+
+| Metric | Run 3 (v3) | Run 4 (v4) |
+|---|---|---|
+| Host state after yank | SILENT WEDGE ~60s post-yank | RUNNING, fully responsive |
+| Recovery required | 2x forced reboot | None — clean teardown |
+| Cleanup time | ∞ (never completed) | ~6ms |
+| Detector log lines | scattered across cascade | ONE canonical |
+| `nvidia_drm` teardown | hung >5min | clean |
+| `RmLogGpuCrash` | issued DUMP_PROTOBUF_COMPONENT (5-45s wedge per #461) | skipped |
+| PCIe bus release | n/a (host wedged before release) | clean cascade through 03-2b |
+| `systemctl is-system-running` | unresponsive | `running` |
+
+**Post-yank state:**
+- `/sys/bus/pci/devices/0000:04:00.0/` removed (PCIe-clean teardown)
+- nvidia-device-plugin pod: 1/1 Running (still)
+- nvidia-driver-injector pod: 1/1 Running (still, no extra restart from yank)
+- Forensic capture: `/var/log/mission-1-archaeology/E07-Run4.snapshot.txt`, `/var/log/mission-1-archaeology/E07-Run4-aorus17/post-yank.tar.gz`
+
+**Verdict:** **PASS.** v4 architecture's central design promise — converting the cable-yank wedge class into a contained, survivable event — is validated. Phase 1 exit gate's first criterion met. Remaining Phase 4 gates: power-off wedge regression test + 7-day production soak.
+
+**Follow-on items for v4.1:**
+1. Convert `osinit.c:2464` to `NV_ASSERT_OR_GPU_LOST` (the unconverted site that fired `nvAssertFailedNoLog` — known gap from Phase 1A scope).
