@@ -1,0 +1,114 @@
+# PINPOINT-1 — post-close-exit window telemetry for F40 wedge-site identification
+#
+# Adds 9 lightweight nv_printf markers to nvidia_close_callback in the window
+# BETWEEN A4's close-exit log and the end of the function. The wedge journal
+# from cycle 2 (2026-05-28 21:54) showed A4's close-exit firing with the chip
+# still responding to MMIO, then silence — so the wedge fires somewhere in
+# this ~8-line window. The pinpoint patch logs at every step so the last
+# marker before silence identifies the exact wedge site.
+#
+# Sites added (in execution order):
+#   1. post-close-exit bRemove=N   — captures bRemove value (critical: tells
+#                                     us whether pci_stop_and_remove is even
+#                                     reachable in our scenario)
+#   2. post-free-private           — after nv_free_file_private cleanup
+#   3. path-A-pre-lock-destroy     — only fires if nv->removed && usage==0
+#   4. path-A-post-kfree-nvl       — only fires if Path A took
+#   5. path-B-post-unlock-ldata    — only fires if Path B took
+#   6. path-B-pre-pci-remove       — about to call pci_stop_and_remove_bus_device
+#                                     (smoking-gun candidate)
+#   7. path-B-post-pci-remove      — pci_stop_and_remove returned
+#   8. pre-kmem-free               — about to nv_kmem_cache_free_stack
+#   9. callback-exit               — function fully returned
+#
+# Pure observability: no logic changes, no MMIO, no register access. Builds
+# on top of the production C1-C5 + E1 + A1-A5 patch stack. NOT for production
+# (not in manifest) — discard after the wedge step is identified.
+#
+# Test procedure:
+#   1. Apply this patch to the patched source tree during image build.
+#   2. Rebuild the injector image with the patch applied.
+#   3. Boot the host; bring the GPU through fix-bar1.sh (no --bind);
+#      manually modprobe nvidia + nvidia-smi -L without engaging persistence
+#      → host wedges.
+#   4. Reboot.
+#   5. Read prior-boot kernel journal:
+#        journalctl -k -b -1 --no-pager | grep -E 'tb_egpu \[POSTCLOSE\]'
+#      The last [POSTCLOSE] site logged before silence identifies the wedge site.
+#
+# Interpretation table:
+#   - Last log = "post-close-exit bRemove=0"          → wedge in path B
+#                                                       BEFORE the pci_stop_and_remove
+#                                                       branch (so it's NOT
+#                                                       pci_stop_and_remove)
+#   - Last log = "post-close-exit bRemove=1"          → confirms bRemove fires
+#                                                       AND that we hang in
+#                                                       nv_free_file_private
+#   - Last log = "post-free-private"                  → wedge between free and
+#                                                       Path A/B branch
+#   - Last log = "path-B-post-unlock-ldata"           → wedge before pci_remove
+#                                                       (e.g. in bRemove check)
+#   - Last log = "path-B-pre-pci-remove"              → SMOKING GUN — wedge IS
+#                                                       in pci_stop_and_remove_bus_device
+#   - Last log = "path-B-post-pci-remove"             → pci_remove returned;
+#                                                       wedge is in
+#                                                       nv_kmem_cache_free_stack
+#                                                       or after callback returns
+#   - Last log = "pre-kmem-free"                      → wedge in kmem free
+#   - Last log = "callback-exit"                      → wedge AFTER callback
+#                                                       returns — async power
+#                                                       transition, kworker,
+#                                                       interrupt, or kernel
+#                                                       scheduler activity
+#
+# Author: nvidia-driver-injector contributors
+# Date:   2026-05-28
+# License: MIT
+
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -2252,7 +2252,16 @@
+         tb_egpu_close_diag(nvl, "close-exit", _tb_uc, _tb_uc == 0);
+     }
+ 
++    /*
++     * PINPOINT-1 (experimental): post-close-exit telemetry.  Captures the
++     * bRemove value and brackets each subsequent teardown step until the
++     * function returns.  The last marker before kernel silence identifies
++     * the F40 wedge site.  Pure observability — no MMIO, no logic change.
++     */
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [POSTCLOSE]: site=post-close-exit bRemove=%d\n", bRemove);
++
+     nv_free_file_private(nvlfp);
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [POSTCLOSE]: site=post-free-private\n");
+ 
+     /*
+      * In case of surprise removal of device, we have 2 cases as below:
+@@ -2270,20 +2279,27 @@
+      */
+     if ((atomic64_read(&nvl->usage_count) == 0) && nv->removed)
+     {
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [POSTCLOSE]: site=path-A-pre-lock-destroy\n");
+         nv_lock_destroy_locks(sp, nv);
+         NV_KFREE(nvl, sizeof(nv_linux_state_t));
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [POSTCLOSE]: site=path-A-post-kfree-nvl\n");
+     }
+     else
+     {
+         up(&nvl->ldata_lock);
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [POSTCLOSE]: site=path-B-post-unlock-ldata\n");
+ 
+         if (bRemove)
+         {
++            nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [POSTCLOSE]: site=path-B-pre-pci-remove\n");
+             pci_stop_and_remove_bus_device(nvl->pci_dev);
++            nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [POSTCLOSE]: site=path-B-post-pci-remove\n");
+         }
+     }
+ 
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [POSTCLOSE]: site=pre-kmem-free\n");
+     nv_kmem_cache_free_stack(sp);
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [POSTCLOSE]: site=callback-exit\n");
+ }
+ 
+ static void nvidia_close_deferred(void *data)

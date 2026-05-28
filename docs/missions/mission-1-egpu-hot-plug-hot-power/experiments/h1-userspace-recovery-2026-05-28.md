@@ -374,6 +374,124 @@ Note: `nvidia-smi -pm 1` is the deprecated legacy persistence interface; the ker
 
 **Distinct from root cause:** persistence prevention does not address why the chip's PCIe equalization state diverges. It routes around the close-path that surfaces the divergence. Open root-cause questions are listed under "Untested" below.
 
+## Close-path coverage analysis (post-mortem)
+
+After the wedge + persistence fix, a follow-on source audit asked: did the C5 crash-safety series actually intend to make persistence optional, and if so, why didn't it catch this case? Findings:
+
+### What C5/A2/A3 actually modify in the close path
+
+| Patch | nvidia_close_callback | nv_stop_device | bRemove logic | pci_stop_and_remove |
+|---|---|---|---|---|
+| C5-crash-safety | G7 guard on `nvidia_dev_get`/`_put` (tolerate `NV_ERR_GPU_IS_LOST` on refcount drop); G10 lock-free dead-bus query | (none) | (none) | (none) |
+| A2-bus-loss-watchdog | (none) | (none) | (none) | (none) |
+| A3-recovery | (none) | (none) | (none) | (none) |
+| A4-close-path-telemetry | 4 passive log sites (close-entry / pre-stop / post-shutdown / close-exit) | (1 of the 4 sites fires here) | (none) | (none) |
+
+C5's design coverage assumption: **if close-path goes wrong, a detector will fire on an MMIO-dead signal, the sink will mark GPU lost, and close will complete cleanly.** This is the "chip-died-aware" failure model. C5 closes the wedge class it was designed against, and the patches do their job for that class.
+
+What C5 does NOT model: **chip-responsive-but-internally-incompletely-initialized.** In our cycle 2 wedge, every MMIO read at every detection site succeeded (PMC_BOOT_0 readable throughout). No detector had a signal to fire on. The wedge fired in chip-touching kernel work that runs *after* C5's coverage boundary.
+
+### RmShutdownAdapter vs RmDisableAdapter — the chip-side delta
+
+The close path branches in `nv_stop_device` based on `NV_FLAG_PERSISTENT_SW_STATE`. Reading `osinit.c`:
+
+**`RmDisableAdapter` (persistence path)** — explicitly the lighter teardown:
+1. `intrSetIntrEn(pIntr, INTERRUPT_TYPE_DISABLED)` — disables chip interrupts
+2. Marks `IN_TIMEOUT_RECOVERY` if in SBR / full-chip reset
+3. Locks clients + GPU lock
+4. `rmapiDelPendingDevices` / `rmapiSetDelPendingClientResourcesFromGpuMask`
+5. `nv_stop_rc_timer`
+6. `teardownCoreLogic` if flagged
+7. `krcWatchdogShutdown` if `FIFO_WATCHDOG` flag set
+8. `gpuStateUnload(pGpu, GPU_STATE_DEFAULT)` — unloads but does not destroy
+9. Releases locks, returns
+
+**`RmShutdownAdapter` (non-persistence path)** — everything above PLUS the destructive set:
+- `RmDestroyPowerManagement(nv)` — tears down PM state
+- `gpuStateDestroy(pGpu)` — destroys (not just unloads) chip state
+- `dceclientDceRmInit(pGpu, ..., NV_FALSE)` — DCE firmware shutdown
+- `RmDisableDeviceClks(nv)` (Tegra-only path, skipped on desktop)
+- `RmFreeX86EmuState(pGpu)` — x86 emulator state cleanup
+- `gpumgrDetachGpu(gpuInstance)` + `gpumgrDestroyDevice(deviceInstance)` — full GPU manager detach
+- `RmTeardownDeviceDma(nv)` — tears down DMA mappings
+- `RmClearPrivateState(nv)`
+- `RmUnInitAcpiMethods(pSys)`
+- `RmTeardownRegisters(nv)` — tears down register / BAR mappings
+
+The persistence path *skips* the destructive items. Of the extras, three perform chip-touching work that depends on the chip's PCIe/memory/clock state being internally consistent: **`gpuStateDestroy`**, **`RmTeardownDeviceDma`**, **`RmTeardownRegisters`**. On a userspace-recovered chip with Phy16Sta bits clear, LTR=0, and other BIOS-init state missing, one of these is the plausible wedge site.
+
+### Why the patches *intentionally* didn't cover this
+
+This is a scope question, not a defect. C5 was designed to make persistence optional **for the chip-died failure class** — and it does. Our wedge belongs to a different class (chip-responsive but partially-initialized) that wasn't in scope. Closing it would require either:
+
+- **A new detector class** — pre-shutdown sanity check that classifies "chip looks alive at MMIO but internal state is inconsistent" and routes through the sink before `RmShutdownAdapter` runs the destructive steps
+- **Step-level hardening inside `RmShutdownAdapter`** — wrap `gpuStateDestroy` / `RmTeardownDeviceDma` / `RmTeardownRegisters` in timeouts that abort cleanly on unresponsive chip ops
+- **External-GPU policy** — E1 already flags TB-attached devices; could skip the destructive teardown steps for those (effectively making persistence the default policy for external GPUs)
+- **Chip-state-aware recovery** — fix the chip-state divergence at recovery time so RmShutdownAdapter's expectations hold (deferred until we know how, and possibly infeasible from userspace per the equalization-replication ruling)
+
+None of these are in C5/A2/A3's current scope. They are candidate work items if we want persistence to be truly optional across all failure classes.
+
+## Cycle 4 — PINPOINT-1 instrumented re-test (2026-05-29 09:14 UTC+10)
+
+After the cycle-2 wedge + chip-state-divergence diff + persistence-mode confirmation, an experimental telemetry patch (`patches/experimental/PINPOINT-1-post-close-exit-telemetry.patch`) was drafted to identify exactly which step in `nvidia_close_callback`'s post-`close-exit` window hangs on a userspace-recovered chip. The patch adds 9 `nv_printf` markers from `post-close-exit` through `callback-exit`, including the `bRemove` value captured at the first marker. It's pure observability — no MMIO, no logic changes.
+
+Image `apnex/nvidia-driver-injector:595.71.05-aorus.17-pinpoint1` was built with the experimental patch applied on top of the production C1-C5 + E1 + A1-A5 stack via a new `APPLY_EXPERIMENTAL_PATCH=` Dockerfile build-arg gate. Host was rebooted into the new image (cold-plug, BAR1=32GB).
+
+### What the cycle-4 test produced
+
+Same trigger sequence as cycle 2: TB deauth/reauth → `fix-bar1.sh` (no `--bind`) → `modprobe nvidia` → `nvidia-smi -L`. The PINPOINT-1 markers fired through `callback-exit`:
+
+```
+[CLOSE]:    site=close-entry     usage_count=1 (LAST-CLOSE)  WPR2=0x07f4a000 wpr2_up:YES
+[CLOSE]:    site=pre-stop        usage_count=1 (LAST-CLOSE)  WPR2=0x07f4a000 wpr2_up:YES
+[CLOSE]:    site=post-shutdown   usage_count=0 (LAST-CLOSE)  WPR2=0x00000000 wpr2_up:no
+[CLOSE]:    site=close-exit      usage_count=0 (LAST-CLOSE)  WPR2=0x00000000 wpr2_up:no
+[POSTCLOSE]: site=post-close-exit bRemove=0       ← bRemove FALSE
+[POSTCLOSE]: site=post-free-private
+[POSTCLOSE]: site=path-B-post-unlock-ldata        ← Path B taken
+[POSTCLOSE]: site=pre-kmem-free                   ← pci_stop_and_remove skipped (bRemove=0)
+[POSTCLOSE]: site=callback-exit                   ← function returned cleanly
+```
+
+**The host did NOT wedge.**
+
+### Two implications
+
+1. **`pci_stop_and_remove_bus_device` is ruled out as the wedge mechanism.** `bRemove` consistently reads 0 on this hardware, including on a userspace-recovered chip at the LAST-CLOSE of an unbinding nvidia-smi process. The "smoking gun" candidate from the cycle-2 post-mortem was wrong. `rm_get_device_remove_flag()` is returning false in both healthy and recovered cases — RM is NOT marking the GPU for removal here.
+
+2. **The cycle-2 wedge was not deterministic under the stated trigger sequence.** The PINPOINT-1 re-test replicated the trigger exactly and the close path completed through `callback-exit`. Either F40 is probabilistic, has an additional load-bearing factor we haven't identified, or the cycle-2 wedge was a different mechanism that we conflated with this trigger.
+
+### What's different between cycle 2 and cycle 4
+
+| Factor | Cycle 2 (wedge) | Cycle 4 (no wedge) |
+|---|---|---|
+| Uptime at wedge attempt | ~30 min | ~5 min (fresh cold boot) |
+| Prior chip activity | cycle 1's nvbandwidth + multiple bind/close iterations | only injector's startup persistence engagement |
+| Last operation before trigger | rmmod after cycle 1 workload | injector's graceful `uninstall` |
+| Telemetry depth | A4 only (couldn't see post-close-exit) | A4 + PINPOINT-1 (visible through `callback-exit`) |
+| `bRemove` at LAST-CLOSE | unknown | 0 |
+
+The most plausible additional factor: cycle 2's chip had been WARMED by actual workload (nvbandwidth memory allocation, kernel launches). Cycle 4's chip was probed and queried only, no FB-memory use. The chip-internal state after a warm workload may differ from cold-just-probed state in ways that affect downstream close-path behaviour.
+
+### Catalog impact
+
+`fake-5090/failure-modes/F40` confidence downgraded from `field-bug` to `hypothesis` with a Reproducibility caveat section enumerating the open characterization questions:
+
+- Does extended-sequence repetition trigger the wedge? (cycle 5 — N consecutive deauth/recover/bind/close cycles)
+- Does pre-loading the chip with workload (nvbandwidth) reproduce cycle-2 conditions?
+- Does longer uptime between cold-boot and wedge attempt matter?
+- If none of those reproduce: cycle 2's wedge may have been a different failure mode entirely
+
+### Verdict-table updates
+
+| Phase | Cycle 2 (yesterday) | Cycle 4 (today) | Net |
+|---|---|---|---|
+| Close-path lifecycle WITHOUT persistence | ❌ wedge (n=1) | ✅ clean completion (n=1) | **n=1 wedge, n=1 no-wedge — non-deterministic under documented trigger** |
+| `bRemove` value at LAST-CLOSE | unknown | 0 | `pci_stop_and_remove_bus_device` ruled out |
+| Persistence-mode prevention | ✅ n=2 (cycles 3a, 3b) | n/a (didn't test persistence-engaged path in cycle 4) | still valid as mitigation |
+
+Persistence-mode mitigation **remains the documented operator practice** because it costs nothing and provably prevents at least one observed wedge. Whether it's strictly necessary on every userspace-recovered chip is now an open question pending cycle-5 results.
+
 ## Untested as of this writeup
 
 - **Sustained load stability** — only ~10 min observation after the persistence-prevention cycle, n=2 short workload runs (nvbandwidth)

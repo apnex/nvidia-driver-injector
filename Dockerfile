@@ -132,6 +132,21 @@ RUN cd /src/nvidia-open-gpu-kernel-modules && \
     echo "composed patch set applied cleanly to ${NVIDIA_OPEN_TAG} source" && \
     rm -f /tmp/apply-list
 
+# Optional: apply experimental patches (not in production manifest).
+# Pass --build-arg APPLY_EXPERIMENTAL_PATCH=patches/experimental/<file>.patch
+# at build time to inject a diagnostic patch on top of the production set.
+# Default empty = production build, no experimental patches applied.
+ARG APPLY_EXPERIMENTAL_PATCH=
+RUN if [ -n "${APPLY_EXPERIMENTAL_PATCH}" ]; then \
+        cd /src/nvidia-open-gpu-kernel-modules && \
+        echo "applying experimental patch: ${APPLY_EXPERIMENTAL_PATCH}" && \
+        git apply --check "/src/${APPLY_EXPERIMENTAL_PATCH}" && \
+        git apply "/src/${APPLY_EXPERIMENTAL_PATCH}" && \
+        echo "experimental patch applied cleanly"; \
+    else \
+        echo "no experimental patch — production build"; \
+    fi
+
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
