@@ -1,7 +1,25 @@
-# Exp 3a — pciehp slot 12 power cycle on healthy GPU — **USERSPACE WORKAROUND FOR H1 DISCOVERED**
+# Exp 3a — pciehp slot 12 power cycle on healthy GPU — **CLAIMS RETRACTED**
+
+> **⚠️ RETRACTED 2026-05-28 22:30 UTC** — the "userspace workaround for H1"
+> conclusion below was wrong. Exp 3b (companion experiment on broken-BAR1
+> starting state) showed slot cycle does NOT recover from broken-BAR1; it
+> just re-allocates bridges to match whatever the chip is currently
+> advertising. See `slot12-poweroff-Exp3b-2026-05-28.md` for the
+> falsification + the actual H1 mechanism (chip ReBAR Control register
+> persistent state). A subsequent setpci hack attempting to manually set
+> chip ReBAR state then slot-cycle wedged the host. Original content
+> below is preserved for honest record of the mistake.
+>
+> Apology to the reader: I claimed a workaround based on an experiment
+> that only tested healthy-state preservation, not broken-state recovery.
+> That was premature-success-overreach per
+> `feedback_premature_success_overreach_pattern_2026_05_26`. The script
+> tools/fix-bar1.sh that was built on this finding has been removed.
+
+---
 
 **Date:** 2026-05-28 09:16-09:17 UTC
-**Status:** 🎯 **BREAKTHROUGH** — slot power cycle via pciehp gives BAR1=32GB on re-power, where all previous re-enumeration paths gave broken-BAR1 (256MB)
+**Status:** ~~🎯 BREAKTHROUGH~~ → **falsified by Exp 3b same day**
 **Setup:** aorus.17 v4 base, fresh cold-plug after reboot from Exp 1, BAR1=32GiB, consumers running, persistence engaged.
 
 ## Hypothesis
