@@ -32,7 +32,20 @@ Two patch tiers, in increasing order of complexity. F40b ships the lower tier fi
 
 ### Tier 1 — probe-time poison flag (preferred, lowest blast radius)
 
-**Signature confidence: HIGH (n=4 sentinel-present-with-wedge + n=1 sentinel-absent-without-wedge as of 2026-05-29 evening Test #1 REDO).** Reading `0x110094` and getting back the sentinel `0xbadf2100` is empirically necessary AND sufficient to gate the F40 wedge: every wedge reproduction showed the sentinel; the one reproduction attempt where the sentinel was absent (Test #1 REDO, 5 cycles) did not wedge. See §"Precondition refinement" in the F40 catalog for the n=5 dataset.
+**Signature confidence: PARTIALLY FALSIFIED 2026-05-29 evening (Test #1 FULLPRE).** Earlier same day this section claimed "HIGH (n=4 sentinel-present-with-wedge + n=1 sentinel-absent-without-wedge)" and "empirically necessary AND sufficient." Test #1 FULLPRE produced the missing cell: **n=1 sentinel-absent-WITH-wedge** — the wedge fired without the sentinel ever being emitted to the kernel journal. The "necessary" claim is therefore false. The signal correlates (n=4 of 5 wedges) but does not gate. As a single-register canary, it would catch most but not all wedges. The forensics report (`/var/log/mission-1-archaeology/c1-test1-fullpre-wedge-2026-05-29/FORENSICS-REPORT.md`) has the data.
+
+Additionally, the **wedge-site assumption** built into Tier 2's wrap recommendation is partially falsified: bpftrace captured cycle 1 cleanly (5 ENTER / 5 RETURN: `nv_open_device`, `nv_stop_device`, `nv_shutdown_adapter`) but captured **zero** cycle 2 events. The wedge fires BEFORE `nv_open_device` is reached. Wrapping `RmInitAdapter` (which `nv_open_device` would call) does not help if the wedge fires earlier in the syscall path.
+
+**New leading site: PCI runtime-PM resume.** The 58-sec gap between cycle 1 and cycle 2 in Test #1 FULLPRE was long enough for runtime auto-suspend to fire (Linux default = 5 s idle). Cycle 2's `open()` would trigger `pci_pm_runtime_resume` BEFORE any nvidia.ko callback runs. On the userspace-recovered chip, the D3→D0 PCIe link retrain / GSP restore is the candidate hang site. This is testable with one differential experiment: re-run the precondition sequence with `power/control=on` on the GPU + audio function before cycle 1.
+
+Tier 1's design path forward (pending the differential test result):
+
+- **If runtime-PM resume IS the wedge site:** the cheapest fix is `pm_runtime_forbid(&pdev->dev)` at probe time for E1-classified GPUs. This pins the device in D0; no auto-suspend, no resume cycle, no D3→D0 chip-touching at next open. Production persistence engagement achieves similar effect through a different mechanism (usage_count > 0 keeps things active); `pm_runtime_forbid` is direct and applies even when the driver is bound but no userspace process is keeping it open. Trade-off: ~30 W idle vs ~few W D3. Acceptable for an eGPU on a desktop NUC where chip idle dominates.
+- **If runtime-PM resume is NOT the wedge site:** the wrap must move even earlier — to `nvidia_open` entry, or to a pre-callback hook. This is much more invasive and we'd need more characterization (full kernel-side bpftrace covering pci_pm/runtime_pm/device_release_driver_internal + a wedge cycle that captures the actual orphan ENTER).
+
+The original Tier 1 (read `0x110094`, set flag, refuse re-init) is preserved below but is now ONE input among possibly several, not the primary gate. It may still be useful in combination with PM behavior changes.
+
+(Below, retained from the original Tier 1 design.)
 
 At probe time, detect the userspace-recovered chip-state divergent signature: any read of `0x110094` returning the sentinel `0xbadf2100` is sufficient (this is the same sentinel `gpuHandleSanityCheckRegReadError_GH100` already warns on — we just elevate it to a poison decision). If detected:
 
