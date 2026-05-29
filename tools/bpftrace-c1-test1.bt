@@ -1,0 +1,65 @@
+#!/usr/bin/env bpftrace
+/*
+ * C1 Test #1 — userspace-recovered chip + 2x nvidia-smi -L wedge characterization.
+ *
+ * Targets the OPEN-path re-init hypothesis: a clean LAST-CLOSE leaves the
+ * chip in a state where the NEXT open's first-fd-init path hangs.
+ *
+ * Run AFTER `modprobe nvidia` (kprobes need the module loaded).
+ *
+ * Probe coverage strategy:
+ *   - nv_open_device       traceable kprobe — entry/return of every open
+ *   - nv_stop_device       traceable kprobe — entry/return of every close
+ *   - nv_shutdown_adapter  traceable kprobe — destructive teardown at LAST-CLOSE
+ *
+ * RmInitAdapter is the suspected wedge site but is NOT traceable as a plain
+ * kprobe (marked `notrace` in the source or resolved to cold-text). We
+ * surrogate via nv_open_device which BRACKETS the call chain that includes
+ * RmInitAdapter: a "nv_open_device ENTER" with NO matching RETURN pins the
+ * wedge to somewhere inside the open-path's chip-init descent.
+ *
+ * Config: missing_probes=warn so a single unattachable probe doesn't kill
+ * the whole script. The cycle-1 run will surface which probes attached.
+ *
+ * Author: aorus-egpu project
+ * License: MIT
+ */
+
+config = {
+    missing_probes = "warn"
+}
+
+BEGIN {
+    printf("[c1-t1] bpftrace attached. Watching open/close/shutdown.\n");
+}
+
+kprobe:nv_open_device {
+    printf("[c1-t1] %llu %s[%d] CPU%d nv_open_device ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:nv_open_device {
+    printf("[c1-t1] %llu %s[%d] CPU%d nv_open_device RETURN retval=%d\n",
+           nsecs, comm, pid, cpu, retval);
+}
+
+kprobe:nv_stop_device {
+    printf("[c1-t1] %llu %s[%d] CPU%d nv_stop_device ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:nv_stop_device {
+    printf("[c1-t1] %llu %s[%d] CPU%d nv_stop_device RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+kprobe:nv_shutdown_adapter {
+    printf("[c1-t1] %llu %s[%d] CPU%d nv_shutdown_adapter ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:nv_shutdown_adapter {
+    printf("[c1-t1] %llu %s[%d] CPU%d nv_shutdown_adapter RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+END {
+    printf("[c1-t1] bpftrace detached.\n");
+}

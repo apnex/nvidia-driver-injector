@@ -1,17 +1,111 @@
-# F40b — structural fix for the destructive-teardown wedge class
+# F40b — structural fix for the chip re-init wedge class
 
-**Date:** 2026-05-29
-**Status:** Design phase — pending characterization (C1–C4) before implementation
+**Date:** 2026-05-29 evening (revised)
+**Status:** Design phase — initial design REPLACED below per Test #1 (2026-05-29 evening) findings
 **Scope:** NVIDIA driver fork (this project) — independent of E27 (Linux kernel)
-**Cross-refs:** `fake-5090/failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md`; `docs/missions/.../experiments/h1-userspace-recovery-2026-05-28.md`
+**Cross-refs:** `fake-5090/failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md` (§Mechanism, revised 2026-05-29 evening); `docs/missions/.../experiments/h1-userspace-recovery-2026-05-28.md`
+
+## What changed (2026-05-29 evening)
+
+Test #1 (2x `nvidia-smi -L` cycle on userspace-recovered chip, forensics at `/var/log/mission-1-archaeology/c1-test1-wedge-2026-05-29/`) produced a clean, fast, controllable reproduction of F40. The data falsifies the original F40b wrap-site recommendation:
+
+- **Cycle 1 close-path completed cleanly.** A4 logged `post-shutdown` with `WPR2 → 0`; `close-exit` fired; the host stayed responsive.
+- **Cycle 2 (`nvidia-smi -L` 2 seconds later) wedged the host immediately.** No further kernel journal output after the cycle-2 start kmsg marker.
+
+The F40 wedge mechanism is **chip re-init hanging on the OPEN path after a clean LAST-CLOSE**, not destructive teardown hanging on the CLOSE path. The original F40b design's bounded-wait wrapper around `nv_shutdown_adapter` would not help — shutdown completes fine.
+
+The revised F40b design (below) wraps the right code site and adds a probe-time poison flag as the cheapest correct fix.
+
+The original F40b design (the §"Three-layer architecture" section further down) is preserved verbatim for historical traceability but is **superseded by §"Revised architecture (2026-05-29 evening)" below**.
 
 ## Purpose
 
-Close the F40 failure class structurally in our nvidia.ko fork. F40 is "the destructive teardown wedges the host on a chip in a state the driver doesn't fully model" — currently observed when the chip is in the userspace-recovered state from `fix-bar1.sh`, but the failure class is broader than that single trigger.
+Close the F40 failure class structurally in our nvidia.ko fork. F40 is "the chip re-init wedges the host on a chip in a state the driver doesn't fully model" — currently observed when the chip is in the userspace-recovered state from `fix-bar1.sh`, but the failure class is broader than that single trigger.
 
 Goal: tear down the device correctly (free resources, clean kernel-side state) WITHOUT freezing the host if the chip won't cooperate.
 
 This fix is **independent of E27**. E27 (Linux kernel patch for F41) prevents the userspace-recovered chip state in the TB-hot-add case; F40b makes the driver resilient to any analogous chip state from any cause. Either fix alone resolves the user-visible failure; together they're defense in depth.
+
+## Revised architecture (2026-05-29 evening)
+
+Two patch tiers, in increasing order of complexity. F40b ships the lower tier first; the higher tier is only built if the lower tier is found insufficient.
+
+### Tier 1 — probe-time poison flag (preferred, lowest blast radius)
+
+At probe time, detect the userspace-recovered chip-state divergent signature: any read of `0x110094` returning the sentinel `0xbadf2100` is sufficient (this is the same sentinel `gpuHandleSanityCheckRegReadError_GH100` already warns on — we just elevate it to a poison decision). If detected:
+
+1. Set a per-device flag `NV_FLAG_FRAGILE_CHIP_REINIT`.
+2. Bind to the device and allow the first OPEN → MMIO → CLOSE cycle (A4 telemetry has confirmed the first cycle is safe on n=4 reproductions).
+3. On the NEXT `nv_open_device` after a `LAST-CLOSE` with `NV_FLAG_FRAGILE_CHIP_REINIT` set, return `-EIO` instead of running first-fd-init / `RmInitAdapter`. Log a single line explaining what's happening so userspace knows to issue a PCI re-enum (or engage persistence) before retrying.
+
+This dodges the wedge by **refusing to enter the hanging operation**. No bounded-wait worker required, no PCIe link manipulation, no sink-state escalation. The chip is preserved in its "MMIO-responsive, GSP-off" state and remains recoverable via either reboot or PCI re-enum.
+
+Variant A (stricter): set the flag on probe and never re-init at all on flagged devices. Production safety wins; one MMIO probe per probe is the entire chip touch budget.
+
+Variant B (production-permissive): set the flag on probe and re-init at most once before refusing. To be validated by characterization — currently we do NOT have data that the n-th re-init survives on a userspace-recovered chip.
+
+Recommend Variant A by default; revisit if production breaks.
+
+### Tier 2 — bounded-wait wrap around re-init (if Tier 1 insufficient)
+
+If the divergent-state signature proves unreliable as a poison-flag trigger (e.g., signature varies across chip generations or false-positives on healthy chips), fall back to:
+
+1. **Bounded-wait wrapper** around `nv_open_device`'s first-fd-init branch — specifically the call into `RmInitAdapter`. Schedule the init call on a worker thread; main thread (the open syscall) waits with a configurable timeout. If the worker hangs in MMIO, the open syscall returns `-EIO`.
+2. **PCIe link-disable fallback on timeout** — once the worker is presumed wedged, write the `PCI_EXP_LNKCTL_LD` bit on the parent bridge to force-disable the link. Subsequent MMIO from the wedged worker fails fast (CRS abort or `0xFFFFFFFF` reads). The worker can then exit cleanly.
+3. **C5 sink-state escalation with new detector class.** Fire `cleanupGpuLostStateAtomic(pGpu, DETECTOR_REINIT_TIMEOUT)`. C5's existing sink-state propagation handles the rest.
+
+The bounded-wait timeout is empirically derivable from a "healthy re-init" baseline measurement on a cold-plug chip. Target: `2 × max(healthy_RmInitAdapter_time)`.
+
+Risk: TB-tunneled bridges may not honor `PCI_EXP_LNKCTL_LD` identically to standard PCIe bridges (per `feedback_lspci_lnkcap_tb_virtual`). We need to validate the primitive separately before relying on it here.
+
+### What stays the same as the original F40b design
+
+- **C5 sink-state model** is unchanged — it's the right escalation primitive. Only the detector name changes (`DETECTOR_REINIT_TIMEOUT` not `DETECTOR_TEARDOWN_TIMEOUT`).
+- **F40a (probe-time persistence engagement) is still useful** but for a different reason: with persistence engaged, `usage_count` never returns to 0, `LAST-CLOSE` never fires `nv_shutdown_adapter`, the chip never enters the post-shutdown state, the re-init path is never reached. F40a is now framed as "stay out of the wedge state machine entirely" not "detect-and-prevent."
+- **Decoupling from E27 still holds.** E27 prevents F41 → no userspace-recovered chip state → no F40 trigger. F40b makes the driver resilient if F41 fires anyway (or if a similar chip-state divergence comes from another cause).
+
+### Phased implementation plan (revised)
+
+| Phase | Work | Validation gate |
+|---|---|---|
+| **F40b.1 (rev)** | Add `NV_FLAG_FRAGILE_CHIP_REINIT` flag + probe-time poison detector reading `0x110094` for the sentinel. Wire to `nv_open_device`'s first-fd-init branch: if flag set + post-LAST-CLOSE re-init imminent, return `-EIO`. | On userspace-recovered chip: cycle 1 succeeds, cycle 2 returns `-EIO` cleanly (no wedge). On cold-plug chip: both cycles succeed (flag not set). |
+| **F40b.2 (rev)** | Implement `nv_force_pcie_link_disable(struct pci_dev *)` + standalone validation on TB-tunneled bridge (same as original F40b.1; required for Tier 2). | MMIO fails fast within bounded time on the TB-tunneled GPU bridge. |
+| **F40b.3 (rev)** | Tier 2 — implement bounded-wait wrapper around `RmInitAdapter` call site. Wire to flag-OR-fallback policy. | On userspace-recovered chip with simulated Tier 1 false-negative: timeout fires, link-disable executes, open returns `-EIO`, host alive. |
+| **F40b.4 (rev)** | Add `DETECTOR_REINIT_TIMEOUT` to C5's detector enum. Audit `gpuStateDestroy` and friends for sink-state awareness on the re-init failure path. | No `NV_ASSERT_FAILED` during lost-mode handling on flagged devices. |
+| **F40b.5 (rev)** | Patch series finalization, commit, docs update, fake-5090 substrate update (open-2-wedges-not-close-1 model). | PR-grade artifact. |
+
+Estimated effort: 1–2 days for Tier 1 alone (poison flag + open-path gate). 3–4 days for both tiers.
+
+### Coverage matrix (revised)
+
+| Failure path | Currently | After F40b Tier 1 | After F40b Tier 2 | After E27 | After all |
+|---|---|---|---|---|---|
+| Re-open after LAST-CLOSE on userspace-recovered chip (the F40 case) | wedge | open returns `-EIO` (clean) | wrapped + link-disable on hang | precondition absent | safe |
+| rmmod / driver-unbind path on userspace-recovered chip | wedge (via the rebind/re-init half of the cycle) | rebind returns `-EIO` on the open after rmmod+modprobe | wrapped re-init | precondition absent | safe |
+| PCIe surprise removal (cable yank) | C5 covers | unchanged | unchanged | unchanged | unchanged |
+| Chip-state divergence from non-F41 cause (hypothetical) | wedge | safe IF divergent signature still surfaces at probe; else degenerate to wedge | safe (bounded-wait catches regardless of detection) | NOT covered (E27 only fixes F41) | safe |
+
+Tier 1 alone covers the documented failure class. Tier 2 covers hypothetical variants where the probe-time signature differs.
+
+### Open design questions (revised)
+
+1. **Is `0x110094 == 0xbadf2100` the right poison signature?** Stable across chip generations? False-positive on any healthy cold-plug chip? Needs cold-plug-baseline verification (cheap, no wedge cost — just read the register on a healthy chip).
+2. **Tier 1 Variant A vs Variant B** — refuse all re-init, or allow at most one. Requires data we don't have. Conservative default: Variant A. Revisit if production breaks.
+3. **Should F40a (probe-time persistence engagement) be folded into the same patch series, or stay separate?** Both fix the same field bug from different angles. Recommendation: separate patches, same series, ordered F40a → F40b Tier 1 → F40b Tier 2.
+
+### Status next-steps (revised)
+
+1. Verify the `0x110094` sentinel does not false-positive on a healthy cold-plug chip (cheap, no wedge cost — read the register on the live host). One transition.
+2. Implement Tier 1 prototype as a small patch.
+3. Test on userspace-recovered chip (the F40 trigger). Validate `-EIO` return on cycle 2 with no wedge.
+4. Run cycle-3 to confirm Tier 1 doesn't break the recovery path.
+5. If Tier 1 holds on n≥3 reproductions, ship it. Tier 2 only if Tier 1 proves brittle in field.
+
+---
+
+# Historical original design (superseded — kept for traceability)
+
+The text below is the design as of 2026-05-29 morning, BEFORE the Test #1 reproduction (2026-05-29 evening) showed the wedge is in re-init not in teardown. It is preserved verbatim so the reasoning path is reviewable.
 
 ## Principle
 
