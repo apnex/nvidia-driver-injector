@@ -109,6 +109,34 @@ Test B v2 (with bpftrace running) showed the FULL CLEAN-FAIL path: AER fires, C5
 
 **Empirical support for this Tier 2 design**: Test B v2 demonstrated the END-STATE we want (AER fires, C5 catches it, returns -EIO cleanly), proving the C5 sink machinery is correct. But TBv2-n2 demonstrated that the AER path is NOT reliably taken — same setup, race went the wrong way, wedge fired. The bounded-wait wrapper forces the same END-STATE deterministically by setting `pci_dev_disconnected` + sink-state on timeout regardless of whether AER fires naturally.
 
+### IMPLEMENTED + VALIDATED 2026-05-29 evening (n=2)
+
+The A6 patch (`patches/addon/A6-f40b-bounded-wait-open.patch`, committed at injector-repo c8d3c68) implements this Tier 2 design as `nv_open_device_for_nvlfp_bounded()`:
+
+- Heap-allocated, refcounted work struct (`struct nv_f40b_open_work`) for safe concurrent lifetime management
+- Scheduled on `system_long_wq`
+- `wait_for_completion_timeout(&w->done, msecs_to_jiffies(NVreg_TbEgpuOpenTimeoutMs))`
+- On timeout: `rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_AER_FATAL)` + return -EIO; worker is leaked
+- Gated by `NVreg_TbEgpuOpenTimeoutMs > 0` AND `nv->is_external_gpu`; non-eGPU and disabled paths bypass the wrapper
+
+F40B-TEST validation (both runs same boot, IDENTICAL F40 precondition: deploy + persistence + nvbandwidth + uninstall + TB recycle + fix-bar1 + modprobe with A6-built nv.ko):
+
+| Run | Cycle 1 (nvidia-smi -L) | Cycle 2 (bash exec 3</dev/nvidia0) | Total wait | Host alive? |
+|---|---|---|---|---|
+| 19:48 | rc=0, close-path clean | rc=1, EIO, `Input/output error` | 201.7 ms | ✓ |
+| 19:50 | rc=0, close-path clean | rc=1, EIO, `Input/output error` | 203.5 ms | ✓ |
+
+Kernel markers in both runs:
+```
+[F40b]: open scheduled to bounded worker (timeout=200 ms)
+[F40b]: open completed within budget rc=0          ← cycle 1 opens (foreground, fast)
+[F40b]: open scheduled to bounded worker (timeout=200 ms)
+[F40b]: open timed out after 200 ms — declaring GPU lost (detector_class=3 DETECTOR_AER_FATAL); worker leaked, will exit when MMIO fails-fast post-sink-set
+tb_egpu recover: trigger gated (sink-set: GPU already declared lost (C5 sink)); emitting PERMANENT_FAIL
+```
+
+**The F40 wedge class is now structurally closed at n=2 validation.**
+
 **Implementation locus**: `nv_open_device_for_nvlfp` at `kernel-open/nvidia/nv.c:~1794`. Wrap its body in the bounded-wait pattern. The C5 sink-state machinery is already correct; only the wrap site changes.
 
 **Timeout value**: 200 ms is a safe default (4× the 50 ms CTO). Can be a module parameter for tuning.
