@@ -85,7 +85,7 @@ Recommend Variant A by default; revisit if production breaks.
 
 ### Tier 2 — bounded-wait wrap around re-init (PROMOTED to primary structural fix, 2026-05-29 evening)
 
-**Status promotion (2026-05-29 evening):** based on Test B v2 + VERIFY data (see F40 catalog §"BREAKTHROUGH"), Tier 2 is the structural fix. Tier 1's sentinel-based detection is brittle (n=2 sentinel-absent-with-wedge); Tier 0 (probe-time persistence) is a workaround not a fix. Tier 2 deterministically engineers the AER+sink-state behavior that Test B v2 produced by accident through bpftrace timing.
+**Status promotion (2026-05-29 evening):** based on Test B v2 + VERIFY + TBv2-n2 data (see F40 catalog §"Mechanism pinned, but AER+C5 path is NOT reliable"), Tier 2 is the structural fix. The race is non-deterministic — Test B v2 caught the failure via AER+C5; VERIFY and TBv2-n2 (the n=2 repro of Test B v2 with identical setup) both wedged. The AER+C5 path is observed n=1 of 3 attempts. Tier 1's sentinel-based detection is brittle (n=2 sentinel-absent-with-wedge); Tier 0 (probe-time persistence) is a workaround not a fix. Tier 2 deterministically engineers the AER+sink-state behavior that Test B v2 achieved through lucky timing — but does so without depending on AER firing reliably.
 
 **Mechanism (as proven by Test B v2 + VERIFY)**:
 
@@ -107,7 +107,7 @@ Test B v2 (with bpftrace running) showed the FULL CLEAN-FAIL path: AER fires, C5
    - Return -EIO from the open syscall
 3. **The wedged worker (if any)** will eventually exit because its in-flight MMIO will fail-fast once `pci_dev_disconnected` is set. The thread is leaked (no `cancel_work_sync` because that would itself block on the wedged worker); leak is bounded per cycle, recovered at next reboot.
 
-**This Tier 2 design now has direct empirical support** — Test B v2 IS the structural close, achieved accidentally. We just need to engineer the timing deterministically.
+**Empirical support for this Tier 2 design**: Test B v2 demonstrated the END-STATE we want (AER fires, C5 catches it, returns -EIO cleanly), proving the C5 sink machinery is correct. But TBv2-n2 demonstrated that the AER path is NOT reliably taken — same setup, race went the wrong way, wedge fired. The bounded-wait wrapper forces the same END-STATE deterministically by setting `pci_dev_disconnected` + sink-state on timeout regardless of whether AER fires naturally.
 
 **Implementation locus**: `nv_open_device_for_nvlfp` at `kernel-open/nvidia/nv.c:~1794`. Wrap its body in the bounded-wait pattern. The C5 sink-state machinery is already correct; only the wrap site changes.
 
