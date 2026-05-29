@@ -1,0 +1,51 @@
+# v5 architecture deep review — queued (2026-05-29)
+
+**Status:** Out of scope for immediate work. Captured so it doesn't get forgotten.
+
+## Observation
+
+The injector patch stack (C1-C5, E1, A1-A6, with A7/A8/A9 imminent) has been built incrementally over multiple iteration cycles (v1 → v2 → v3 → v4+). Each patch was written under a specific failure-mode understanding that has, in several cases, since shifted. Examples of evolution evident in today's work alone:
+
+- **F40 catalog**: originally framed as a teardown wedge in `RmShutdownAdapter`. Investigation through the day proved it's actually a chip re-init MMIO race in `RmInitAdapter`'s open-path. The catalog was cleaned up this evening to lead with the corrected mechanism, but the patch C5 / A3 / A2 still reference the older framing in places.
+- **F40b**: design doc went through Tier 0 / Tier 1 / Tier 2 over the day, then walked back the "AER+C5 is reliable" claim after the n=2 reproducibility check failed. A6 landed as Tier 2; A7+A8+A9 are bolt-ons on top of Tier 2. If we'd known what we know now at the start, F40b might have been one larger patch instead of three siblings.
+- **C5**: documented as v4 (cascade-class-design-v4); has accumulated detector classes that were added as new failure modes were catalogued. Some may be redundant or could be unified.
+- **A3**: also v4-target-ready. Its `force_trigger` sysfs surface is test-only; could be folded or removed.
+- **PINPOINT patches**: were diagnostic-only and are now obsolete (PINPOINT-1, -2, -3 in `patches/experimental/`). Should be deleted but were preserved during the investigation.
+
+## Hypothesis worth testing in v5
+
+If we re-architected the patch stack starting from current understanding (mechanism pinned, F40b structural close validated, in-driver recovery target articulated), we would likely:
+
+1. **Consolidate the F40 family** into fewer, larger patches: one for detection (current A6 + A7 rmmod-path), one for observability (A8 sysfs), one for in-driver recovery (A9). Possibly merge A7 into A6 since both implement the same bounded-wait primitive on adjacent failure sites.
+2. **Refine C5's sink primitive** to expose a more orthogonal interface for callers (open-path, rmmod-path, future failure paths). The detector enum has grown organically; some classes overlap.
+3. **Simplify A3's state machine** now that A8 will introduce a recovery-state-machine pattern that A3 could share. A3's `pre_schedule_gates` is the right primitive; the rest could be a thinner consumer of it.
+4. **Retire PINPOINT patches** outright. They've served their purpose (diagnostic phases are complete). Keep their content in the historical investigation archive only.
+5. **Test the patch set against the original NVIDIA source code surface** to see whether some patches are now unnecessary (i.e., upstream has moved closer to the behaviour we wanted) or whether some should split / merge to match upstream's natural seams.
+
+## Process suggestion when we get to v5
+
+Per-patch deep dive, in order:
+1. Re-read the patch's intent doc against the F40 catalog (and other failure modes the patch touches).
+2. Re-read the patch's code against the vanilla NVIDIA source for that version (`595.71.05`).
+3. Ask: "if we were writing this for the first time today, knowing what we know, would this look the same?"
+4. Categorise: (a) keep as-is, (b) simplify, (c) merge with sibling, (d) split, (e) delete (subsumed by another patch or by upstream change).
+
+Then a cross-cutting consolidation pass that triangulates:
+- Patch intent docs (what we said we'd do)
+- Failure mode catalog (what the problem actually is)
+- Current code (what we actually built)
+- Vanilla source (what upstream looks like)
+
+Each axis is a corner of a quad — disagreements between corners are the refactor opportunities.
+
+## What this doc is NOT
+
+- Not a blocker for current work. A7 (rmmod-path wrapper), A8 (sysfs), A9 (in-driver recovery) all proceed under current scope.
+- Not a commitment to a specific v5 timeline. The trigger is "current incremental work has stabilised enough that a focused architectural pass is the right next investment" — sometime after A9 lands and the soak gates pass.
+- Not a list of bugs. The current stack works (validated n=2 for F40b today). This is about code aesthetics, maintainability, and reviewer-friendliness of the patch set.
+
+## Cross-refs
+
+- F40 catalog (refreshed today): `fake-5090/failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md`
+- Existing patch intents: `docs/patch-intents/`
+- In-driver recovery target design (sibling): `docs/missions/mission-1-egpu-hot-plug-hot-power/design/in-driver-recovery-target-2026-05-29.md`

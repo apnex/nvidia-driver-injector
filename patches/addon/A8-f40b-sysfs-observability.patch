@@ -1,0 +1,216 @@
+# A7-f40b-sysfs-observability — per-PCI-device sysfs surface for F40b state + counters
+#
+# Adds 5 read-only sysfs attributes under each E1-classified eGPU's PCI device:
+#
+#   tb_egpu_state              healthy | recovering | lost-temporary | lost-permanent
+#   tb_egpu_f40b_fires         monotonic counter of F40b timeout fires (incremented by A6)
+#   tb_egpu_recovery_count     monotonic counter of successful recoveries (set by A8)
+#   tb_egpu_recovery_failures  monotonic counter of failed recoveries (set by A8)
+#   tb_egpu_last_recovery_ns   ktime_get_ns() of last successful recovery (set by A8)
+#
+# Registration is via nv_pci_driver.driver.dev_groups — the kernel handles
+# add/remove automatically when the device binds/unbinds.  No probe-path
+# changes needed.
+#
+# Implementation notes:
+#   - Single-GPU assumption: a global state struct in nv.c (refactor to
+#     per-device when adding multi-GPU support).
+#   - Counter type: atomic_t / atomic64_t for thread-safe increments.
+#   - State transitions: A7 only handles the first one (healthy -> lost-
+#     temporary on F40b fire).  A8 will add recovering / lost-permanent /
+#     return-to-healthy.
+#   - The recovery_succeeded() and recovery_failed() helpers are defined
+#     ahead of A8's needs so A8 can be a pure caller addition.
+#
+# Dependencies: A6 (F40b bounded-wait wrapper provides the timeout-fired hook
+# site).  Does not depend on E1 directly — the global state is updated only
+# from A6's E1-gated timeout path, so non-eGPU devices show perpetually-zero
+# counters and 'healthy' state, which is correct.
+#
+# Telemetry tier: nominal (state + counters surface for monitors; no kernel
+# log emission — that's A6's job).  Mandatory-tier telemetry will come with
+# A8's recovery state machine.
+#
+# Author: nvidia-driver-injector contributors
+# Date:   2026-05-29
+# License: MIT
+
+diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
+
+diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
+index c02a9975..73f9288d 100644
+--- a/kernel-open/nvidia/nv-pci.c
++++ b/kernel-open/nvidia/nv-pci.c
+@@ -3040,6 +3040,10 @@ static const struct pci_error_handlers nv_pci_err_handlers = {
+     .cor_error_detected = nv_pci_cor_error_detected,
+ };
+ 
++/* A7: F40b sysfs observability attribute group, defined in nv.c.
++ * The kernel registers/unregisters these automatically on bind/unbind. */
++extern const struct attribute_group *nv_tb_egpu_dev_groups[];
++
+ struct pci_driver nv_pci_driver = {
+     .name      = MODULE_NAME,
+     .id_table  = nv_pci_table,
+@@ -3054,6 +3058,7 @@ struct pci_driver nv_pci_driver = {
+     .driver.pm = &nv_pm_ops,
+ #endif
+     .driver.probe_type = PROBE_FORCE_SYNCHRONOUS,
++    .driver.dev_groups = nv_tb_egpu_dev_groups,
+     .err_handler       = &nv_pci_err_handlers,
+ };
+ 
+diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
+index a9e5b847..c313e93e 100644
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -1822,6 +1822,138 @@ MODULE_PARM_DESC(NVreg_TbEgpuOpenTimeoutMs,
+     "(default 200ms = 4x PCIe Completion Timeout).  On timeout, declare GPU "
+     "lost via C5 sink and return -EIO.  0 = disabled (synchronous path).");
+ 
++/* === A7: F40b sysfs observability surface ===
++ *
++ * Exposes 5 read-only per-PCI-device sysfs attributes:
++ *   tb_egpu_state              healthy | recovering | lost-temporary | lost-permanent
++ *   tb_egpu_f40b_fires         monotonic counter of F40b timeout fires (A6)
++ *   tb_egpu_recovery_count     monotonic counter of successful in-driver recoveries (set by A8)
++ *   tb_egpu_recovery_failures  monotonic counter of failed in-driver recovery attempts (set by A8)
++ *   tb_egpu_last_recovery_ns   ktime_get_ns() of last successful recovery (set by A8)
++ *
++ * Registration: via nv_pci_driver.driver.dev_groups (set in nv-pci.c) — the
++ * kernel handles add/remove automatically when the device binds/unbinds.
++ *
++ * Single-GPU assumption: a global state struct is sufficient for this project's
++ * deployment (one eGPU per host).  When multi-GPU support is added, refactor
++ * to per-device storage via nv_linux_state_t.
++ */
++
++enum nv_tb_egpu_state {
++    NV_TB_EGPU_STATE_HEALTHY        = 0,
++    NV_TB_EGPU_STATE_RECOVERING     = 1,
++    NV_TB_EGPU_STATE_LOST_TEMPORARY = 2,
++    NV_TB_EGPU_STATE_LOST_PERMANENT = 3,
++};
++
++static struct {
++    atomic_t   state;
++    atomic_t   f40b_fires;
++    atomic_t   recovery_count;
++    atomic_t   recovery_failures;
++    atomic64_t last_recovery_ns;
++} nv_tb_egpu_metrics = {
++    .state             = ATOMIC_INIT(NV_TB_EGPU_STATE_HEALTHY),
++    .f40b_fires        = ATOMIC_INIT(0),
++    .recovery_count    = ATOMIC_INIT(0),
++    .recovery_failures = ATOMIC_INIT(0),
++    .last_recovery_ns  = ATOMIC64_INIT(0),
++};
++
++static const char *nv_tb_egpu_state_str(int s)
++{
++    switch (s) {
++    case NV_TB_EGPU_STATE_HEALTHY:        return "healthy";
++    case NV_TB_EGPU_STATE_RECOVERING:     return "recovering";
++    case NV_TB_EGPU_STATE_LOST_TEMPORARY: return "lost-temporary";
++    case NV_TB_EGPU_STATE_LOST_PERMANENT: return "lost-permanent";
++    default:                               return "unknown";
++    }
++}
++
++/* Called by A6's bounded-wait wrapper on timeout (F40b fire). */
++void nv_tb_egpu_f40b_fired(void)
++{
++    atomic_inc(&nv_tb_egpu_metrics.f40b_fires);
++    atomic_set(&nv_tb_egpu_metrics.state, NV_TB_EGPU_STATE_LOST_TEMPORARY);
++}
++
++/* Reserved for A8 — increments recovery_count and resets state to healthy. */
++void nv_tb_egpu_recovery_succeeded(void)
++{
++    atomic_inc(&nv_tb_egpu_metrics.recovery_count);
++    atomic64_set(&nv_tb_egpu_metrics.last_recovery_ns, ktime_get_ns());
++    atomic_set(&nv_tb_egpu_metrics.state, NV_TB_EGPU_STATE_HEALTHY);
++}
++
++/* Reserved for A8 — increments recovery_failures.  State transition (to
++ * lost-temporary on retry or lost-permanent on surrender) is the caller's
++ * responsibility based on policy. */
++void nv_tb_egpu_recovery_failed(int permanent)
++{
++    atomic_inc(&nv_tb_egpu_metrics.recovery_failures);
++    atomic_set(&nv_tb_egpu_metrics.state,
++        permanent ? NV_TB_EGPU_STATE_LOST_PERMANENT : NV_TB_EGPU_STATE_LOST_TEMPORARY);
++}
++
++/* sysfs show functions */
++
++static ssize_t tb_egpu_state_show(struct device *dev,
++                                   struct device_attribute *attr, char *buf)
++{
++    return sysfs_emit(buf, "%s\n",
++        nv_tb_egpu_state_str(atomic_read(&nv_tb_egpu_metrics.state)));
++}
++static DEVICE_ATTR_RO(tb_egpu_state);
++
++static ssize_t tb_egpu_f40b_fires_show(struct device *dev,
++                                        struct device_attribute *attr, char *buf)
++{
++    return sysfs_emit(buf, "%d\n", atomic_read(&nv_tb_egpu_metrics.f40b_fires));
++}
++static DEVICE_ATTR_RO(tb_egpu_f40b_fires);
++
++static ssize_t tb_egpu_recovery_count_show(struct device *dev,
++                                            struct device_attribute *attr, char *buf)
++{
++    return sysfs_emit(buf, "%d\n", atomic_read(&nv_tb_egpu_metrics.recovery_count));
++}
++static DEVICE_ATTR_RO(tb_egpu_recovery_count);
++
++static ssize_t tb_egpu_recovery_failures_show(struct device *dev,
++                                               struct device_attribute *attr, char *buf)
++{
++    return sysfs_emit(buf, "%d\n", atomic_read(&nv_tb_egpu_metrics.recovery_failures));
++}
++static DEVICE_ATTR_RO(tb_egpu_recovery_failures);
++
++static ssize_t tb_egpu_last_recovery_ns_show(struct device *dev,
++                                              struct device_attribute *attr, char *buf)
++{
++    return sysfs_emit(buf, "%llu\n",
++        (unsigned long long)atomic64_read(&nv_tb_egpu_metrics.last_recovery_ns));
++}
++static DEVICE_ATTR_RO(tb_egpu_last_recovery_ns);
++
++static struct attribute *nv_tb_egpu_attrs[] = {
++    &dev_attr_tb_egpu_state.attr,
++    &dev_attr_tb_egpu_f40b_fires.attr,
++    &dev_attr_tb_egpu_recovery_count.attr,
++    &dev_attr_tb_egpu_recovery_failures.attr,
++    &dev_attr_tb_egpu_last_recovery_ns.attr,
++    NULL,
++};
++
++static const struct attribute_group nv_tb_egpu_attr_group = {
++    .attrs = nv_tb_egpu_attrs,
++};
++
++/* Consumed by nv_pci_driver.driver.dev_groups in nv-pci.c */
++const struct attribute_group *nv_tb_egpu_dev_groups[] = {
++    &nv_tb_egpu_attr_group,
++    NULL,
++};
++
+ struct nv_f40b_open_work {
+     struct work_struct       work;
+     struct completion        done;
+@@ -1904,6 +2036,10 @@ static int nv_open_device_for_nvlfp_bounded(
+          * next sink-aware check and abort, allowing the worker to exit. */
+         rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_AER_FATAL);
+ 
++        /* A7: record this F40b fire and transition state to lost-temporary.
++         * Counter + state are visible at /sys/bus/pci/devices/<bdf>/tb_egpu_* */
++        nv_tb_egpu_f40b_fired();
++
+         rc = -EIO;
+     }
+ 

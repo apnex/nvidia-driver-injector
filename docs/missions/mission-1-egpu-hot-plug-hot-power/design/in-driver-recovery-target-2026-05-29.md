@@ -1,13 +1,14 @@
 # In-driver recovery — target architecture (2026-05-29)
 
 **Date:** 2026-05-29 evening
-**Status:** Design — informs A7 (sysfs observability) + A8 (in-driver recovery state machine)
+**Status:** Design — informs A7 (rmmod-path bounded-wait wrapper) + A8 (sysfs observability) + A9 (in-driver recovery state machine)
 **Scope:** Long-term direction for the eGPU stack's response to F40-class wedge conditions
 **Cross-refs:**
 - F40 catalog (fake-5090): `failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md`
 - F40b structural fix design: `F40b-structural-fix-2026-05-29.md` (same directory)
-- A7 patch intent: `docs/patch-intents/A7-f40b-sysfs-observability.md` (forthcoming)
-- A8 patch intent: `docs/patch-intents/A8-f40b-in-driver-recovery.md` (forthcoming)
+- A7 patch intent: `docs/patch-intents/A7-f40b-bounded-wait-shutdown.md` (forthcoming — rmmod-path symmetric counterpart of A6)
+- A8 patch intent: `docs/patch-intents/A8-f40b-sysfs-observability.md` (forthcoming)
+- A9 patch intent: `docs/patch-intents/A9-f40b-in-driver-recovery.md` (forthcoming)
 - Project memory: `feedback_native_in_driver_hardening` (the destination preference)
 
 ## Purpose
@@ -43,10 +44,11 @@ Several recent project patches are foundational pieces of a Linux-side TDR equiv
 | Lever M (in A3's lineage) | PCIe bus reset orchestration | The "reset the engine" primitive Windows calls `DxgkDdiResetEngine` |
 | E1 (egpu-detection) | `nv->is_external_gpu` classifier | Adapter-type discriminator (gates Win-only behaviour) |
 | **A6 (F40b — this evening)** | Bounded-wait wrapper for open-path MMIO | Per-syscall deadline detection (workload-level) for the open syscall |
-| **A7 (forthcoming)** | sysfs observability for the F40b/recovery state machine | DXG-equivalent state tracking, exposed for monitors |
-| **A8 (forthcoming)** | In-driver recovery state machine triggered by F40b | The chip-side reset + state restoration glue |
+| **A7 (forthcoming)** | Bounded-wait wrapper for rmmod-path MMIO (`nv_shutdown_adapter`) | Per-syscall deadline detection (workload-level) for the rmmod path — symmetric to A6 for the FORENSICS-attested rmmod-path wedge class |
+| **A8 (forthcoming)** | sysfs observability for the F40b/recovery state machine | DXG-equivalent state tracking, exposed for monitors |
+| **A9 (forthcoming)** | In-driver recovery state machine triggered by F40b | The chip-side reset + state restoration glue |
 
-The pattern is consistent: each patch closes a specific failure class with a kernel-side response, leaving userspace to consume errors but not orchestrate recovery. After A7+A8, the F40 case has the same property the Windows TDR cases have — detection, response, recovery, observability — all in-driver.
+The pattern is consistent: each patch closes a specific failure class with a kernel-side response, leaving userspace to consume errors but not orchestrate recovery. After A7+A8+A9, the F40 case has the same property the Windows TDR cases have — detection (open + rmmod paths), response, recovery, observability — all in-driver.
 
 ## Target architecture
 
@@ -65,11 +67,12 @@ The pattern is consistent: each patch closes a specific failure class with a ker
 │                                                              │
 │  Detection layer:                                            │
 │    • F40b bounded-wait wrapper on open path (A6 — current)   │
+│    • F40b bounded-wait wrapper on rmmod path (A7 — target)   │
 │    • A2 bus-loss watchdog (existing)                         │
 │    • C3 GPU-lost retry (existing)                            │
 │    • C5 sink-state propagation (existing)                    │
 │                                                              │
-│  Recovery layer (A8 — target):                               │
+│  Recovery layer (A9 — target):                               │
 │    • Recovery state machine, scheduled on detection          │
 │    • pci_reset_bus(pdev)         ← chip-side reset           │
 │    • Thunderbolt rebind via tb_*  ← TB-aware reset           │
@@ -79,7 +82,7 @@ The pattern is consistent: each patch closes a specific failure class with a ker
 │    • Multi-attempt with backoff (A3-style H1/H2/H3 gates)    │
 │    • After N attempts: permanent-fail, state → lost-perm     │
 │                                                              │
-│  Observability layer (A7 — target):                          │
+│  Observability layer (A8 — target):                          │
 │    • /sys/bus/pci/devices/.../tb_egpu_state                  │
 │    • /sys/bus/pci/devices/.../tb_egpu_recovery_count         │
 │    • /sys/bus/pci/devices/.../tb_egpu_recovery_failures      │
@@ -119,21 +122,29 @@ The justification for uevent in the network and DRM cases is that mainline alrea
 
 ## What needs to be built
 
-### A7 — sysfs observability (this round, smaller patch)
+### A7 — rmmod-path bounded-wait wrapper (this round, smallest patch)
+
+- Mirror A6's bounded-wait wrapper for the chip-touching MMIO inside `nv_shutdown_adapter` on the rmmod / `nv_pci_remove` path
+- Gated on `nv->is_external_gpu` + `NVreg_TbEgpuShutdownTimeoutMs > 0`
+- On timeout: set C5 sink-state, skip chip-touching teardown steps, allow remove callback to complete cleanly so rmmod returns
+- Closes the rmmod-path F40-class wedge attested by the 20:52 FORENSICS report (the wedge that A6 alone cannot prevent)
+- Estimated size: ~30-50 lines of patch (smaller than A6 because the wrapper pattern is already established)
+
+### A8 — sysfs observability (this round, smaller patch)
 
 - Add four per-PCI-device sysfs attributes via the standard `device_attribute` mechanism
-- Hook the attribute backing values to the F40b state machine that already exists (after A6)
+- Hook the attribute backing values to the F40b state machine that already exists (after A6 + A7)
 - No behaviour change beyond exposing state
 - Estimated size: ~50-80 lines of patch
 
-### A8 — in-driver recovery state machine (later round, larger patch)
+### A9 — in-driver recovery state machine (later round, larger patch)
 
 - New file `kernel-open/nvidia/nv-f40b-recovery.c` (or extend existing recovery file)
 - Recovery worker registered on F40b timeout path
 - Multi-attempt state machine using A3-style gates (H1/H2/H3) — leverage Lever M's existing primitives
 - TB rebind glue: call into `tb_switch_authorize` / `tb_unauthorize` from kernel
 - BAR1 restore: `pci_resize_resource()` calls matching what fix-bar1.sh does from userspace
-- Counter increments wired to A7's sysfs attributes
+- Counter increments wired to A8's sysfs attributes
 - Estimated size: ~300-500 lines of patch (the largest part is the TB rebind glue and the recovery state machine; the rest reuses existing primitives)
 
 ## Open design questions
@@ -142,12 +153,13 @@ The justification for uevent in the network and DRM cases is that mainline alrea
 2. **Should recovery be transparent or visible?** Windows TDR returns `DXGI_ERROR_DEVICE_REMOVED` to apps even on successful recovery — apps must recreate their device. Linux equivalent: should the in-flight open syscall be re-tried internally (return success after recovery) or should it always return -EIO and let userspace retry? Latter is simpler and matches Windows semantics.
 3. **Recovery escalation.** After how many recovery failures do we declare `lost-permanent`? Windows uses 3-strikes-in-60-sec. We'd want similar but tunable via NVreg.
 4. **Thunderbolt rebind from kernel.** Verify the `tb_switch_*` APIs exposed by `drivers/thunderbolt` are sufficient for what we need to do from nvidia.ko. If not, we may need to drop down to direct sysfs writes (`pci_write_config_word` to PCIe link control on the parent bridge) — less elegant but bypasses the cross-module API question.
-5. **Coexistence with current operator-driven recovery.** While A8 is in development, the operator-driven sequence is still available. After A8 lands, do we deprecate the userspace recovery path entirely or keep it as an escape hatch? Recommended: keep it documented as the recovery-of-last-resort if A8 has bugs.
+5. **Coexistence with current operator-driven recovery.** While A9 is in development, the operator-driven sequence is still available. After A9 lands, do we deprecate the userspace recovery path entirely or keep it as an escape hatch? Recommended: keep it documented as the recovery-of-last-resort if A9 has bugs.
 
 ## Status / next-steps
 
 1. ✅ A6 implemented + validated (2026-05-29 evening, F40B-TEST n=2)
-2. **A7 next** — sysfs observability surface, small patch (this is what we're tackling next per user direction)
-3. A8 — full in-driver recovery state machine, larger patch (designed in A8 patch intent, revisit before implementation)
-4. After A7+A8 land, deprecate the userspace recovery path (or keep as escape hatch)
-5. Future: extend the same approach (in-driver recovery, sysfs observability) to other failure classes (close-path wedges, surprise-removal cascade, etc.)
+2. **A7 next** — rmmod-path bounded-wait wrapper (symmetric to A6; closes the FORENSICS-attested rmmod-path wedge)
+3. **A8 alongside A7** — sysfs observability surface (small patch, batched with A7 per the (C) recommendation in the FORENSICS report)
+4. A9 — full in-driver recovery state machine, larger patch (designed in A9 patch intent, revisit before implementation)
+5. After A7+A8+A9 land, deprecate the userspace recovery path (or keep as escape hatch)
+6. Future: extend the same approach (in-driver recovery, sysfs observability) to other failure classes (close-path wedges, surprise-removal cascade, etc.)

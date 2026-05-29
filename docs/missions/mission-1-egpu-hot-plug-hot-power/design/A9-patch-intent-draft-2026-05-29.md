@@ -1,32 +1,32 @@
-# A8 patch intent (DRAFT — not yet bound to manifest)
+# A9 patch intent (DRAFT — not yet bound to manifest)
 
 **Date:** 2026-05-29 evening
-**Status:** Draft — design captured pre-implementation; will graduate to `docs/patch-intents/A8-f40b-in-driver-recovery.md` (and a manifest row) when implementation begins
+**Status:** Draft — design captured pre-implementation; will graduate to `docs/patch-intents/A9-f40b-in-driver-recovery.md` (and a manifest row) when implementation begins
 **Cross-refs:**
 - `in-driver-recovery-target-2026-05-29.md` (sibling design doc — the architectural context)
 - `F40b-structural-fix-2026-05-29.md` (sibling design doc — the current Tier 2 fix this builds on)
-- `../../patch-intents/A3-recovery.md` (analogous existing state machine; A8 reuses its primitives)
+- `../../patch-intents/A3-recovery.md` (analogous existing state machine; A9 reuses its primitives)
 - `../../patch-intent-schema.md` (the schema this draft will conform to when promoted)
 
-> When this draft is promoted to `docs/patch-intents/A8-f40b-in-driver-recovery.md`, the frontmatter below will be authoritative and intent-lint will enforce it. Until then this is design prose.
+> When this draft is promoted to `docs/patch-intents/A9-f40b-in-driver-recovery.md`, the frontmatter below will be authoritative and intent-lint will enforce it. Until then this is design prose.
 
-## Proposed frontmatter (will become the lint-checked spec once A8 implementation starts)
+## Proposed frontmatter (will become the lint-checked spec once A9 implementation starts)
 
 ```yaml
-id: A8-f40b-in-driver-recovery
+id: A9-f40b-in-driver-recovery
 layer: addon
-source-branch: a8-f40b-in-driver-recovery
+source-branch: a9-f40b-in-driver-recovery
 upstream-candidacy: n/a
 telemetry-tier: mandatory
 status: draft
-related-patches: [A1-pcie-primitives, A3-recovery, A6-f40b-bounded-wait-open, A7-f40b-sysfs-observability, C5-crash-safety, E1-egpu-detection]
+related-patches: [A1-pcie-primitives, A3-recovery, A6-f40b-bounded-wait-open, A7-f40b-bounded-wait-shutdown, A8-f40b-sysfs-observability, C5-crash-safety, E1-egpu-detection]
 ```
 
-# A8-f40b-in-driver-recovery — In-Driver Recovery State Machine for F40b-Triggered Wedges
+# A9-f40b-in-driver-recovery — In-Driver Recovery State Machine for F40b-Triggered Wedges
 
 ## Purpose
 
-Eliminate the userspace orchestration round-trip currently required to recover from F40-class wedges. After A6 (F40b Tier 2 bounded-wait wrapper) catches the wedge condition and returns -EIO, the chip is in a C5-sink-set lost state and is unusable until the operator runs the documented `rmmod + TB cycle + fix-bar1 + modprobe` sequence (~17 seconds wall-clock). A8 moves that sequence into the driver: on F40b timeout, schedule a recovery worker that performs the chip-side reset, BAR restoration, and re-probe entirely in kernel context, then clears the sink. Userspace sees a brief -EIO followed by a healthy GPU on retry, ~5-10 seconds later. No rmmod/modprobe round-trip, no DaemonSet watchdog, no external service. Matches the Windows TDR reference model (see `docs/missions/mission-1-egpu-hot-plug-hot-power/design/in-driver-recovery-target-2026-05-29.md`).
+Eliminate the userspace orchestration round-trip currently required to recover from F40-class wedges. After A6 (F40b Tier 2 bounded-wait wrapper) catches the wedge condition and returns -EIO, the chip is in a C5-sink-set lost state and is unusable until the operator runs the documented `rmmod + TB cycle + fix-bar1 + modprobe` sequence (~17 seconds wall-clock). A9 moves that sequence into the driver: on F40b timeout, schedule a recovery worker that performs the chip-side reset, BAR restoration, and re-probe entirely in kernel context, then clears the sink. Userspace sees a brief -EIO followed by a healthy GPU on retry, ~5-10 seconds later. No rmmod/modprobe round-trip, no DaemonSet watchdog, no external service. Matches the Windows TDR reference model (see `docs/missions/mission-1-egpu-hot-plug-hot-power/design/in-driver-recovery-target-2026-05-29.md`).
 
 ## Requirements
 
@@ -40,9 +40,9 @@ The recovery worker MUST be scheduled exactly when A6's `nv_open_device_for_nvlf
 
 When all gates pass, the F40b timeout path SHALL:
 
-1. Set C5 sink-state via `rm_cleanup_gpu_lost_state(... NV_GPU_LOST_DETECTOR_F40B_OPEN_TIMEOUT)` (new detector value; see Telemetry contract). The current A6 code uses `NV_GPU_LOST_DETECTOR_AER_FATAL` as a placeholder; A8 SHALL introduce a dedicated detector class to enable correct telemetry routing.
-2. Increment `tb_egpu_f40b_fires` counter (exposed by A7).
-3. Transition state to `recovering` (exposed by A7's `tb_egpu_state` attribute).
+1. Set C5 sink-state via `rm_cleanup_gpu_lost_state(... NV_GPU_LOST_DETECTOR_F40B_OPEN_TIMEOUT)` (new detector value; see Telemetry contract). The current A6 code uses `NV_GPU_LOST_DETECTOR_AER_FATAL` as a placeholder; A9 SHALL introduce a dedicated detector class to enable correct telemetry routing.
+2. Increment `tb_egpu_f40b_fires` counter (exposed by A8).
+3. Transition state to `recovering` (exposed by A8's `tb_egpu_state` attribute).
 4. Schedule the recovery worker via the existing A3 work queue (or a dedicated F40b-recovery work queue — implementation choice).
 5. Return -EIO to the syscall caller (unchanged from A6 behaviour).
 
@@ -143,36 +143,36 @@ AND   the next F40b fire (if it happens) SHALL re-evaluate gates and may try aga
 
 ### Requirement: Driver SHALL coexist cleanly with A3's existing bus-reset recovery state machine
 
-The recovery state machine introduced by A8 MAY share infrastructure with A3 (pre-schedule gates, work queue, counter publication) but MUST NOT cause A3's recovery to be triggered spuriously, and MUST NOT cause A8's recovery to be skipped when A3 is the legitimate trigger source.
+The recovery state machine introduced by A9 MAY share infrastructure with A3 (pre-schedule gates, work queue, counter publication) but MUST NOT cause A3's recovery to be triggered spuriously, and MUST NOT cause A9's recovery to be skipped when A3 is the legitimate trigger source.
 
-When both A3 and A8 are eligible to trigger recovery for the same chip:
+When both A3 and A9 are eligible to trigger recovery for the same chip:
 
 - A3's existing post-rmInit-FAIL trigger SHALL continue to fire as documented in its intent.
-- A8's F40b timeout trigger SHALL fire ADDITIONALLY (not exclusively) — the two trigger sources are orthogonal.
-- The shared `pre_schedule_gates` SHALL apply to both — a single H1 (max attempts) counter covers both A3 and A8 fires.
-- Counters published via A3's existing sysfs attributes SHALL include A8 fires (i.e., A8 increments the same `attempt_count` that A3 reads).
+- A9's F40b timeout trigger SHALL fire ADDITIONALLY (not exclusively) — the two trigger sources are orthogonal.
+- The shared `pre_schedule_gates` SHALL apply to both — a single H1 (max attempts) counter covers both A3 and A9 fires.
+- Counters published via A3's existing sysfs attributes SHALL include A9 fires (i.e., A9 increments the same `attempt_count` that A3 reads).
 
-#### Scenario: Both A3 and A8 are triggers — gates are shared
+#### Scenario: Both A3 and A9 are triggers — gates are shared
 
 ```
-GIVEN nvidia.ko is loaded with both A3 and A8 enabled
+GIVEN nvidia.ko is loaded with both A3 and A9 enabled
 AND   the chip has been recovered N-1 times in the current period via A3's post-rmInit-FAIL path
-WHEN  F40b fires and tries to schedule A8 recovery
+WHEN  F40b fires and tries to schedule A9 recovery
 THEN  the shared H1 gate observes attempt_count = N-1
-AND   if N is the configured max, the gate fires and A8 SHALL surrender (state → lost-permanent)
-AND   if attempt_count < max, A8 SHALL proceed with recovery as normal
+AND   if N is the configured max, the gate fires and A9 SHALL surrender (state → lost-permanent)
+AND   if attempt_count < max, A9 SHALL proceed with recovery as normal
 ```
 
 ### Requirement: Driver SHALL drain pending recovery work and free state cleanly on remove
 
-When nvidia.ko is unloaded (rmmod) or the device is unbound, any pending or in-flight A8 recovery work item MUST be drained before the remove callback returns. State (work queue, counters, sink-aware flags) MUST be freed.
+When nvidia.ko is unloaded (rmmod) or the device is unbound, any pending or in-flight A9 recovery work item MUST be drained before the remove callback returns. State (work queue, counters, sink-aware flags) MUST be freed.
 
-The drain MUST NOT block indefinitely — if a work item is stuck (the very condition A8 is designed to handle), the drain SHALL time out at a documented bound and the remove callback SHALL proceed with a log warning. This is analogous to A6's "leaked worker" behaviour: a stuck recovery worker should not prevent driver unload.
+The drain MUST NOT block indefinitely — if a work item is stuck (the very condition A9 is designed to handle), the drain SHALL time out at a documented bound and the remove callback SHALL proceed with a log warning. This is analogous to A6's "leaked worker" behaviour: a stuck recovery worker should not prevent driver unload.
 
 #### Scenario: rmmod with pending recovery work succeeds within bounded time
 
 ```
-GIVEN A8 has scheduled a recovery work item that is currently running
+GIVEN A9 has scheduled a recovery work item that is currently running
 WHEN  the operator runs rmmod nvidia
 THEN  the remove callback SHALL initiate drain of the work queue
 AND   the drain SHALL wait up to NVreg_TbEgpuRecoverDrainTimeoutMs (default 1000ms)
@@ -182,18 +182,18 @@ AND   on timeout, the remove SHALL log "tb_egpu f40b-recover: drain timed out; a
 
 ## Scope boundary
 
-- A8 SHALL NOT address F41 (chip ReBAR Control register reset on TB hot-add). F41 is the chip-side root cause that puts the chip into the userspace-recovered state in the first place; A8 only handles the recovery once F40 fires.
-- A8 SHALL NOT recover from PCIe link-down hardware failures. If `pci_reset_bus` fails or returns "device not present," recovery is impossible from kernel space; the worker SHALL surrender and emit permanent-fail.
-- A8 SHALL NOT retry the failed open syscall. Userspace sees -EIO; userspace decides whether to retry. This matches Windows TDR semantics (DXGI_ERROR_DEVICE_REMOVED) and is simpler than syscall-level transparency.
-- A8 SHALL NOT attempt cross-module recovery (e.g., reset of unrelated PCI devices on the same bus segment). The recovery scope is strictly the eGPU and its upstream TB switch.
-- A8 SHALL NOT replace A3's existing recovery for the post-rmInit-FAIL path. The two recovery paths coexist; A8 adds a new trigger source (F40b timeout) and reuses A3's infrastructure where appropriate.
-- A8 SHALL NOT touch nvidia_uvm or the DRM stack. Those subsystems learn about the recovery via the existing sink-state propagation in C5.
+- A9 SHALL NOT address F41 (chip ReBAR Control register reset on TB hot-add). F41 is the chip-side root cause that puts the chip into the userspace-recovered state in the first place; A9 only handles the recovery once F40 fires.
+- A9 SHALL NOT recover from PCIe link-down hardware failures. If `pci_reset_bus` fails or returns "device not present," recovery is impossible from kernel space; the worker SHALL surrender and emit permanent-fail.
+- A9 SHALL NOT retry the failed open syscall. Userspace sees -EIO; userspace decides whether to retry. This matches Windows TDR semantics (DXGI_ERROR_DEVICE_REMOVED) and is simpler than syscall-level transparency.
+- A9 SHALL NOT attempt cross-module recovery (e.g., reset of unrelated PCI devices on the same bus segment). The recovery scope is strictly the eGPU and its upstream TB switch.
+- A9 SHALL NOT replace A3's existing recovery for the post-rmInit-FAIL path. The two recovery paths coexist; A9 adds a new trigger source (F40b timeout) and reuses A3's infrastructure where appropriate.
+- A9 SHALL NOT touch nvidia_uvm or the DRM stack. Those subsystems learn about the recovery via the existing sink-state propagation in C5.
 
 ## Telemetry contract
 
 | Event | Level | Format |
 |---|---|---|
-| **F40b fire scheduled A8 recovery (mandatory tier)** | **`NV_DBG_ERRORS` (err)** | `"tb_egpu f40b-recover: scheduling recovery (attempt=%d/%u, fire_count=%d, F40b_timeout_ms=%u)\n"` |
+| **F40b fire scheduled A9 recovery (mandatory tier)** | **`NV_DBG_ERRORS` (err)** | `"tb_egpu f40b-recover: scheduling recovery (attempt=%d/%u, fire_count=%d, F40b_timeout_ms=%u)\n"` |
 | F40b fire gated (master disable) | `NV_DBG_ERRORS` (err) | `"tb_egpu f40b-recover: scheduling gated (master disable); not recovering\n"` |
 | F40b fire gated (rate limit) | `NV_DBG_ERRORS` (err) | `"tb_egpu f40b-recover: scheduling gated (rate-limited (H2)); deferring\n"` |
 | F40b fire gated (surrender after N) | `NV_DBG_ERRORS` (err) | `"tb_egpu f40b-recover: scheduling gated (surrender after %d attempts); emitting PERMANENT_FAIL\n"` |
@@ -214,7 +214,7 @@ AND   on timeout, the remove SHALL log "tb_egpu f40b-recover: drain timed out; a
 
 The mandatory-tier events are: F40b fire scheduling recovery; verification RECOVERED-or-DISCONNECT. Every recovery cycle reaches at least one mandatory log line.
 
-A8 also writes to sysfs counters exposed by A7:
+A9 also writes to sysfs counters exposed by A8:
 - `tb_egpu_f40b_fires` — increments on every F40b fire (gated or not)
 - `tb_egpu_recovery_count` — increments on every verified RECOVERED outcome (shared with A3)
 - `tb_egpu_recovery_failures` — increments on every DISCONNECT / permanent-fail outcome (shared with A3)
@@ -225,9 +225,9 @@ A new C5 detector class `NV_GPU_LOST_DETECTOR_F40B_OPEN_TIMEOUT` SHALL be added 
 
 ## Provenance
 
-- **Source cluster**: addon — project-local; complements A3 (existing post-rmInit-FAIL recovery), depends on A6 (F40b detection), depends on A7 (sysfs publication surface).
+- **Source cluster**: addon — project-local; complements A3 (existing post-rmInit-FAIL recovery), depends on A6 (F40b detection), depends on A8 (sysfs publication surface).
 - **Vanilla baseline files**: `kernel-open/nvidia/nv.c` (new function `nv_f40b_schedule_recovery` added to A6's timeout path), `kernel-open/nvidia/nv-f40b-recovery.c` (new file, recovery state machine + work handler).
-- **Fork branch**: `a8-f40b-in-driver-recovery`.
+- **Fork branch**: `a9-f40b-in-driver-recovery`.
 - **Upstream candidacy**: n/a — addon layer, project-local; recovery state machines for specific failure classes are not generally upstreamable as-is.
 - **Upstream issues**:
   - F40 chip-side root cause: NVIDIA bug #979 (Blackwell eGPU over TB hard-lock) — see `project_issue_979_upstream_state_2026_05_22.md` memory.
