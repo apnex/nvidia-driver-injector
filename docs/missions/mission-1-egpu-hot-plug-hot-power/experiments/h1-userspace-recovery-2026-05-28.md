@@ -492,6 +492,85 @@ The most plausible additional factor: cycle 2's chip had been WARMED by actual w
 
 Persistence-mode mitigation **remains the documented operator practice** because it costs nothing and provably prevents at least one observed wedge. Whether it's strictly necessary on every userspace-recovered chip is now an open question pending cycle-5 results.
 
+## PINPOINT diagnostic cycle (2026-05-29)
+
+After F40 was identified as a coverage gap (post-mortem above), an instrumented diagnostic cycle was run to narrow the wedge site. Forensic archives: `/var/log/mission-1-archaeology/{pinpoint1-wedge-2026-05-29, pinpoint2-runtime-pm-falsification-2026-05-29, restore-attempt-wedge-2026-05-29}/`.
+
+### PINPOINT-1: 9 markers in nvidia_close_callback post-`close-exit` window
+
+Added markers at every step between A4's `close-exit` log and the function's `}`. Goal: identify whether the wedge fires in `pci_stop_and_remove_bus_device`, `nv_free_file_private`, `nv_kmem_cache_free_stack`, or outside the function entirely.
+
+Results (cycle 2 reproduction with PINPOINT-1 active):
+
+```
+[CLOSE]:    site=close-exit      usage_count=0 (LAST-CLOSE)  WPR2=0x00000000 wpr2_up:no
+[POSTCLOSE]: site=post-close-exit bRemove=0     ← bRemove FALSE
+[POSTCLOSE]: site=post-free-private
+[POSTCLOSE]: site=path-B-post-unlock-ldata     ← Path B (not nv->removed)
+[POSTCLOSE]: site=pre-kmem-free                ← skipped pci_stop_and_remove (bRemove=0)
+[POSTCLOSE]: site=callback-exit                ← function returned cleanly
+─── kernel printk goes silent here ───
+~5 min later: user-visible wedge manifests; reboot required
+```
+
+Two conclusive findings:
+
+1. **`pci_stop_and_remove_bus_device` is ruled out as the wedge mechanism.** `bRemove == 0` on every observed close (healthy AND userspace-recovered chip). The function is never reached from this code path on this hardware.
+2. **The wedge is OUTSIDE `nvidia_close_callback`.** Every marker through `callback-exit` fires. The function returns. Whatever wedges happens AFTER the close callback exits — in async or deferred kernel work — not in the synchronous close path.
+
+The ~5-min delay before user-visible symptoms confirms the wedge is in deferred kernel work scheduled by (or following) the close path. The earlier morning interpretation "host did not wedge" was a misread of timestamps — kernel printk DID stop at 09:14:01 immediately after the last marker; only userspace stayed alive until ~09:19:42 when downstream subsystems needed the wedged kernel state.
+
+### PINPOINT-2: 8 markers inside nv_shutdown_adapter + bpftrace + runtime-PM-disable
+
+Three diagnostics combined in one reboot cycle:
+
+- **PINPOINT-2** — markers at every step inside `nv_shutdown_adapter` (`entry → post-rm-disable-adapter → post-bh-q-stop → post-msix-cleanup → pre-rm-shutdown-adapter → post-rm-shutdown-adapter → exit`). Confirms each synchronous step completes.
+- **bpftrace** (`tools/bpftrace-wedge-watch.bt`) — attached to `pci_pm_runtime_suspend`, `pci_pm_runtime_resume`, `pm_runtime_work`, `device_release_driver_internal`, `pci_stop_and_remove_bus_device`, `workqueue:workqueue_execute_*`. Captures kernel async territory PINPOINT-N patches can't reach.
+- **Runtime PM disable** (`echo on > /sys/bus/pci/devices/0000:04:00.0/power/control` + audio function). Falsification test for the runtime-PM-suspend hypothesis.
+
+#### Run 1 — wedge cycle WITH runtime PM disabled
+
+Result: host alive **6m 30s** after `nvidia-smi -L` returned. Kernel printk responsive throughout. All PINPOINT markers fired cleanly. bpftrace captured 47 MB of activity:
+- `pci_pm_runtime_suspend`: **0 calls** during the test window
+- `pm_runtime_work`: 164 cycles, all matched (5–10 µs each)
+- No nvidia.ko deferred work observed
+
+This was initially interpreted as confirmation of the runtime-PM-suspend hypothesis. But yesterday's cycle 2 wedge fired at 5m 41s; our 6m 30s observation barely cleared that. Suggestive but not conclusive.
+
+#### Run 2 — restore-attempt wedge
+
+After Run 1's healthy observation window, attempted to restore production state: `echo > unbind` GPU + `rmmod nvidia_uvm` (already gone) + `rmmod nvidia` + apply DSes with production aorus.17 image. **Host wedged silently 5+ min into this sequence.** Kernel printk went silent between my `rmmod nvidia` (~09:59) and the eventual "nvidia-nvlink: Unregistered Nvlink Core" message at 10:04:46 — a 5-min gap with no SHUTDOWN markers (despite `rmmod` going through `nv_pci_remove_helper → nv_shutdown_adapter` per source). Reboot required.
+
+Two corrections to the runtime-PM hypothesis:
+
+1. **`power/control=on` does NOT prevent the wedge on the `rmmod` code path.** rmmod goes through `nv_pci_remove_helper → nv_shutdown_adapter` directly, bypassing both `nv_stop_device`'s persistence check AND the runtime-PM-disable sysfs mitigation.
+2. **Run 1's "6m+ survival" is at best partial evidence.** Either runtime PM is one of multiple async wedge mechanisms (and Run 1 just happened to avoid all of them long enough), or the actual wedge mechanism is something `power/control=on` happens to slow but not prevent.
+
+### Production mitigation remains persistence engagement (n=3 verified)
+
+| Scenario | Persistence engaged? | Result |
+|---|---|---|
+| Cycle 1 (cold-plug bind + workload) | Implicitly via UVM holding reference | n/a (no LAST-CLOSE happened during workload) |
+| Cycle 2 wedge attempt | NO | Wedge |
+| Today's cold-boot injector startup | YES (entrypoint) | Healthy |
+| `fix-bar1.sh --bind` recovery | YES | Healthy |
+| Post-restore re-bind | YES (entrypoint) | Healthy |
+| PINPOINT-2 test (Run 1) | NO; relied on power/control=on | Healthy *for 6m+ then unknown* |
+| Restore-attempt (Run 2) | Engaged at first, rmmod bypassed | Wedge |
+
+Persistence engagement reliably prevents the wedge on the `nv_stop_device → nv_shutdown_adapter` path by routing through `rm_disable_adapter` instead. The `nv_pci_remove → nv_pci_remove_helper → nv_shutdown_adapter` path (taken by `unbind`/`rmmod`/PCI hot-remove) does NOT honor persistence and CAN still wedge on userspace-recovered chip — but this path is not taken in normal production flow. Production uses the injector's `uninstall` subcommand (which the operator chose) or just leaves the driver loaded across operational events.
+
+### Updated production guidance
+
+For operators:
+- Use `tools/fix-bar1.sh --bind` for H1 recovery — engages persistence automatically.
+- Use injector's `uninstall` subcommand (`kubectl exec ... -- /entrypoint.sh uninstall`) for graceful module unload — but be aware on a userspace-recovered chip this MAY wedge; if so, hard-reboot. Production cold-plug chip uninstall is safe (n=multiple historical).
+- Avoid raw `rmmod nvidia` on a userspace-recovered chip — use the injector's path or just leave the driver loaded.
+
+For the injector codebase:
+- No driver-side change needed for the production close-path (persistence already covers it via the entrypoint).
+- E27 kernel patch (F41 fix) does NOT need to mitigate F40 — the F41 fix removes the chip-state divergence at recovery time, making the chip indistinguishable from cold-plug, which removes the wedge precondition for all paths.
+
 ## Untested as of this writeup
 
 - **Sustained load stability** — only ~10 min observation after the persistence-prevention cycle, n=2 short workload runs (nvbandwidth)

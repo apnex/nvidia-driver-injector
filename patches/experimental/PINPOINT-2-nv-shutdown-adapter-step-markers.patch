@@ -1,0 +1,98 @@
+# PINPOINT-2 — step-level markers inside nv_shutdown_adapter (companion to PINPOINT-1)
+#
+# PINPOINT-1 showed that nvidia_close_callback returns cleanly all the way
+# through callback-exit. The wedge is therefore AFTER the function returns.
+# PINPOINT-2 adds markers INSIDE nv_shutdown_adapter to verify each
+# synchronous step actually completes — useful as a sanity check, and as
+# a baseline for future variants where the wedge moves earlier.
+#
+# Markers added (in execution order inside nv_shutdown_adapter):
+#   1. site=entry                      — function entered
+#   2. site=post-rm-disable-adapter    — first sub-call (light persistence-path teardown)
+#   3. site=post-bh-q-stop             — bottom-half kthread queue stopped
+#   4. site=post-nvk-q-stop            — optional nvk queue stopped (conditional)
+#   5. site=pre-free-irq               — about to free_irq (non-MSIX path)
+#   6. site=post-free-irq              — IRQ freed
+#   7. site=post-pci-disable-msi       — MSI disabled (conditional)
+#   8. site=post-msix-cleanup          — MSIX cleanup done (conditional)
+#   9. site=pre-rm-shutdown-adapter    — about to call destructive RmShutdownAdapter
+#  10. site=post-rm-shutdown-adapter   — destructive RM teardown returned
+#  11. site=exit                       — function fully returned
+#
+# A4's existing tb_egpu [CLOSE] post-shutdown log fires AFTER this exit
+# marker. If we ever see a wedge between SHUTDOWN sites, that narrows the
+# wedge to a specific sync step. If we never see a wedge here (which is
+# expected per PINPOINT-1), this serves as a clean baseline + companion
+# data for the bpftrace-side investigation (kernel async territory).
+#
+# Pure observability: no logic changes, no MMIO, no register access.
+# Builds on top of the production C1-C5 + E1 + A1-A5 patch stack.
+# NOT for production (not in manifest).
+#
+# Author: nvidia-driver-injector contributors
+# Date:   2026-05-29
+# License: MIT
+
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -2013,15 +2013,19 @@
+                          nv_state_t *nv,
+                          nv_linux_state_t *nvl)
+ {
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [SHUTDOWN]: site=entry\n");
+     rm_disable_adapter(sp, nv);
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [SHUTDOWN]: site=post-rm-disable-adapter\n");
+ 
+     // It's safe to call nv_kthread_q_stop even if queue is not initialized
+     nv_kthread_q_stop(&nvl->bottom_half_q);
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [SHUTDOWN]: site=post-bh-q-stop\n");
+ 
+     if (nv->queue != NULL)
+     {
+         nv->queue = NULL;
+         nv_kthread_q_stop(&nvl->queue.nvk);
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [SHUTDOWN]: site=post-nvk-q-stop\n");
+     }
+ 
+     if (nvl->isr_bh_unlocked_mutex)
+@@ -2033,10 +2037,13 @@
+     if (!(nv->flags & NV_FLAG_USES_MSIX) &&
+         !(nv->flags & NV_FLAG_SOC_DISPLAY))
+     {
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [SHUTDOWN]: site=pre-free-irq\n");
+         free_irq(nv->interrupt_line, (void *)nvl);
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [SHUTDOWN]: site=post-free-irq\n");
+         if (nv->flags & NV_FLAG_USES_MSI)
+         {
+             NV_PCI_DISABLE_MSI(nvl->pci_dev);
++            nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [SHUTDOWN]: site=post-pci-disable-msi\n");
+             if(nvl->irq_count)
+                 NV_KFREE(nvl->irq_count, nvl->num_intr * sizeof(nv_irq_count_info_t));
+         }
+@@ -2053,6 +2060,7 @@
+         nv->flags &= ~NV_FLAG_USES_MSIX;
+         NV_KFREE(nvl->msix_entries, nvl->num_intr*sizeof(struct msix_entry));
+         NV_KFREE(nvl->irq_count, nvl->num_intr*sizeof(nv_irq_count_info_t));
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [SHUTDOWN]: site=post-msix-cleanup\n");
+     }
+ #endif
+ 
+@@ -2062,7 +2070,9 @@
+         nvl->msix_bh_mutex = NULL;
+     }
+ 
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [SHUTDOWN]: site=pre-rm-shutdown-adapter\n");
+     rm_shutdown_adapter(sp, nv);
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [SHUTDOWN]: site=post-rm-shutdown-adapter\n");
+ 
+     if (nv->flags & NV_FLAG_TRIGGER_FLR)
+     {
+@@ -2080,6 +2090,8 @@
+ 
+     if (nv_platform_use_auto_online(nvl))
+         nv_kthread_q_stop(&nvl->remove_numa_memory_q);
++
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [SHUTDOWN]: site=exit\n");
+ }
+ 
+ /*

@@ -1,0 +1,174 @@
+#!/usr/bin/env bpftrace
+/*
+ * bpftrace-wedge-watch.bt
+ *
+ * Captures kernel async activity in the window where PINPOINT-N markers
+ * end (immediately after `nvidia_close_callback` returns through
+ * `callback-exit`) and before the kernel printk goes silent.
+ *
+ * The F40 wedge is somewhere AFTER nvidia_close_callback returns. The
+ * 5-min-41s observed delay between close-completion and user-visible
+ * symptom suggests deferred kernel work scheduled by the close path.
+ * This script makes that deferred work observable.
+ *
+ * What we attach to:
+ *
+ *   1. tracepoint:workqueue:workqueue_execute_start
+ *      tracepoint:workqueue:workqueue_execute_end
+ *      — Every workqueue item starts and ends. If one starts but never
+ *        ends, that's our wedge site.
+ *
+ *   2. kprobe:pci_pm_runtime_suspend / pci_pm_runtime_resume
+ *      — When the PCI core invokes runtime-PM suspend/resume on a device.
+ *        nvidia 04:00.0 transition would fire here.
+ *
+ *   3. kprobe:pm_runtime_work
+ *      — The kernel workqueue function that processes deferred runtime-PM
+ *        state changes.
+ *
+ *   4. kprobe:device_release_driver_internal
+ *      — Driver unbind. Fires when nvidia.ko is rmmod'd or a device is
+ *        removed.
+ *
+ *   5. kprobe:nv_shutdown_adapter / nv_pci_remove
+ *      — nvidia.ko's destructive teardown entry points. Captures call
+ *        timing.
+ *
+ * Output is to stderr (which the operator should tee to a file before the
+ * wedge cycle). Per-event lines are timestamped at nanosecond precision.
+ * The wedge analysis script reads the file post-reboot and identifies
+ * the last "start" without a matching "end".
+ *
+ * Usage:
+ *   sudo BPFTRACE_MISSING_PROBES=warn \
+ *     bpftrace tools/bpftrace-wedge-watch.bt 2>&1 | \
+ *     tee /var/log/bpftrace-wedge-watch.log &
+ *
+ * The MISSING_PROBES=warn env var is required because the nvidia.ko
+ * symbols (nv_shutdown_adapter, nv_pci_remove_helper) are only resolvable
+ * when nvidia.ko is loaded. With warn, bpftrace attaches to whatever
+ * resolves and warns on the rest, allowing the script to start before
+ * nvidia.ko is loaded (or to keep running across an nvidia.ko unload).
+ *
+ * Then trigger the wedge cycle. Background process buffers via tee until
+ * killed (or until the kernel wedges enough to halt writes).
+ *
+ * Output line format:
+ *   <ts_ns> <CPU> <COMM>[<PID>] <EVENT> <DETAIL>
+ *
+ * Author: nvidia-driver-injector contributors
+ * Date:   2026-05-29
+ * License: MIT
+ */
+
+BEGIN {
+    printf("# bpftrace-wedge-watch start at ns=%llu\n", nsecs);
+    printf("# columns: ts_ns cpu comm[pid] event detail\n");
+}
+
+/*
+ * Workqueue execution — primary diagnostic. start-with-no-end identifies
+ * the wedge site.
+ */
+tracepoint:workqueue:workqueue_execute_start {
+    printf("%llu %d %s[%d] WQ_START function=%s work=0x%lx\n",
+           nsecs, cpu, comm, pid,
+           ksym(args->function), args->work);
+}
+
+tracepoint:workqueue:workqueue_execute_end {
+    printf("%llu %d %s[%d] WQ_END function=%s work=0x%lx\n",
+           nsecs, cpu, comm, pid,
+           ksym(args->function), args->work);
+}
+
+/*
+ * Runtime PM — the most plausible deferred work candidate. The chip's
+ * D3 transition is asynchronous; if it hangs on a userspace-recovered
+ * chip, this is where we'll see the entry without an exit.
+ */
+kprobe:pci_pm_runtime_suspend {
+    printf("%llu %d %s[%d] PM_SUSPEND_ENTER dev=0x%lx\n",
+           nsecs, cpu, comm, pid, arg0);
+}
+
+kretprobe:pci_pm_runtime_suspend {
+    printf("%llu %d %s[%d] PM_SUSPEND_RETURN ret=%d\n",
+           nsecs, cpu, comm, pid, retval);
+}
+
+kprobe:pci_pm_runtime_resume {
+    printf("%llu %d %s[%d] PM_RESUME_ENTER dev=0x%lx\n",
+           nsecs, cpu, comm, pid, arg0);
+}
+
+kretprobe:pci_pm_runtime_resume {
+    printf("%llu %d %s[%d] PM_RESUME_RETURN ret=%d\n",
+           nsecs, cpu, comm, pid, retval);
+}
+
+kprobe:pm_runtime_work {
+    printf("%llu %d %s[%d] PM_RUNTIME_WORK_ENTER\n",
+           nsecs, cpu, comm, pid);
+}
+
+kretprobe:pm_runtime_work {
+    printf("%llu %d %s[%d] PM_RUNTIME_WORK_RETURN\n",
+           nsecs, cpu, comm, pid);
+}
+
+/*
+ * Driver release — secondary diagnostic for the unbind path.
+ */
+kprobe:device_release_driver_internal {
+    printf("%llu %d %s[%d] DEVICE_RELEASE_ENTER\n",
+           nsecs, cpu, comm, pid);
+}
+
+kretprobe:device_release_driver_internal {
+    printf("%llu %d %s[%d] DEVICE_RELEASE_RETURN\n",
+           nsecs, cpu, comm, pid);
+}
+
+/*
+ * nvidia.ko entry points (only if kallsyms exports them; quiet on no-match).
+ */
+kprobe:nv_shutdown_adapter {
+    printf("%llu %d %s[%d] NV_SHUTDOWN_ADAPTER_ENTER\n",
+           nsecs, cpu, comm, pid);
+}
+
+kretprobe:nv_shutdown_adapter {
+    printf("%llu %d %s[%d] NV_SHUTDOWN_ADAPTER_RETURN\n",
+           nsecs, cpu, comm, pid);
+}
+
+kprobe:nv_pci_remove_helper {
+    printf("%llu %d %s[%d] NV_PCI_REMOVE_HELPER_ENTER\n",
+           nsecs, cpu, comm, pid);
+}
+
+kretprobe:nv_pci_remove_helper {
+    printf("%llu %d %s[%d] NV_PCI_REMOVE_HELPER_RETURN\n",
+           nsecs, cpu, comm, pid);
+}
+
+/*
+ * pci_stop_and_remove_bus_device — PINPOINT-1 ruled it out as the wedge
+ * site, but worth attaching as a sanity check. Should never fire from
+ * nvidia close-path in our scenario (bRemove==0); fires if anything
+ * unexpected calls it.
+ */
+kprobe:pci_stop_and_remove_bus_device {
+    printf("%llu %d %s[%d] PCI_STOP_REMOVE_ENTER\n",
+           nsecs, cpu, comm, pid);
+}
+
+kretprobe:pci_stop_and_remove_bus_device {
+    printf("%llu %d %s[%d] PCI_STOP_REMOVE_RETURN\n",
+           nsecs, cpu, comm, pid);
+}
+
+END {
+    printf("# bpftrace-wedge-watch end at ns=%llu\n", nsecs);
+}
