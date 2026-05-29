@@ -571,6 +571,33 @@ For the injector codebase:
 - No driver-side change needed for the production close-path (persistence already covers it via the entrypoint).
 - E27 kernel patch (F41 fix) does NOT need to mitigate F40 — the F41 fix removes the chip-state divergence at recovery time, making the chip indistinguishable from cold-plug, which removes the wedge precondition for all paths.
 
+## Next phase — characterization test sequence + structural fix design (2026-05-29 evening)
+
+After the F40 mechanism investigation above, the project goal was refined: **F40 should be closed structurally in our nvidia.ko fork via carefully-thought-out error handling**, not merely dodged at the operational level via persistence engagement (n=3 production-validated, but operational only). The persistence engagement remains the production mitigation today; F40b is the architectural answer.
+
+The structural F40b design is decoupled from E27 (the Linux kernel patch for F41) — either alone closes the user-visible failure; together they're defense in depth. Reference model is the Windows nvidia driver, which presumably handles this class via bounded driver-callback contracts, explicit chip-state validation, and PCIe-link-level fallback when the driver can't make progress.
+
+Canonical F40b design doc: `docs/missions/.../design/F40b-structural-fix-2026-05-29.md`.
+
+### Characterization test queue (run before implementation)
+
+| Test | What it answers | Cost |
+|---|---|---|
+| **C1** — PINPOINT-2 + bpftrace + `power/control=auto` (let the wedge fire WITH instrumentation) | Which kernel function actually hangs. Run 1 didn't wedge so bpftrace couldn't catch the wedge site; Run 2 wedged but had no bpftrace. C1 puts both together. | 1 reboot |
+| **C2** — PINPOINT-2 + bpftrace + rmmod-path on cold-plug chip | Whether the rmmod-path wedge is independent of chip-state (a separate failure mode) or only fires on the userspace-recovered precondition (same mechanism as the close-path wedge via a different entry point). | 1 reboot |
+| **C3** — Persistence + injector `uninstall` on userspace-recovered chip | Whether the production graceful-teardown path is safe on the recovered chip. If yes, the failure class manifests only on `unbind`/`rmmod` raw paths. If no, the production injector may have a latent risk. | 1 reboot |
+| **C4** — ftrace function_graph capture during wedge (only if C1 inconclusive) | Complete kernel call chain through the wedge moment. Heavy but exhaustive. | 1 reboot |
+
+The C1-C3 results inform F40b's timeout values, validate the PCIe link-disable fallback's behavior on TB-tunneled bridges, and determine whether the rmmod-path needs separate handling vs. is covered by the same fix. Patch design happens after C1-C3 land (and optionally C4 if needed).
+
+### What this writeup does NOT yet document
+
+- Results of C1-C4 (companion experiment writeups to follow)
+- Final F40b patch design specifics (timeout values, the exact set of functions wrapped, link-disable primitive behavior on TB hardware)
+- F41 / E27 kernel patch draft
+
+These are intentionally deferred until the characterization phase completes.
+
 ## Untested as of this writeup
 
 - **Sustained load stability** — only ~10 min observation after the persistence-prevention cycle, n=2 short workload runs (nvbandwidth)
