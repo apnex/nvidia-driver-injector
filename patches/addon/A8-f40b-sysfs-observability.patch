@@ -1,89 +1,146 @@
-# A7-f40b-sysfs-observability — per-PCI-device sysfs surface for F40b state + counters
+# A8-f40b-sysfs-observability — per-PCI-device sysfs surface for F40b state + counters.
 #
-# Adds 5 read-only sysfs attributes under each E1-classified eGPU's PCI device:
+# Adds 5 read-only sysfs attributes under each nvidia-bound PCI device:
 #
 #   tb_egpu_state              healthy | recovering | lost-temporary | lost-permanent
-#   tb_egpu_f40b_fires         monotonic counter of F40b timeout fires (incremented by A6)
-#   tb_egpu_recovery_count     monotonic counter of successful recoveries (set by A8)
-#   tb_egpu_recovery_failures  monotonic counter of failed recoveries (set by A8)
-#   tb_egpu_last_recovery_ns   ktime_get_ns() of last successful recovery (set by A8)
+#   tb_egpu_f40b_fires         counter of F40b timeout fires since last bind (A6 + A7)
+#   tb_egpu_recovery_count     counter of successful recoveries (set by A9)
+#   tb_egpu_recovery_failures  counter of failed recoveries (set by A9)
+#   tb_egpu_last_recovery_ns   ktime_get_ns() of last successful recovery (set by A9)
 #
-# Registration is via nv_pci_driver.driver.dev_groups — the kernel handles
-# add/remove automatically when the device binds/unbinds.  No probe-path
-# changes needed.
+# === v2: sysfs_create_group, NOT pci_driver.driver.dev_groups ===
 #
-# Implementation notes:
-#   - Single-GPU assumption: a global state struct in nv.c (refactor to
-#     per-device when adding multi-GPU support).
-#   - Counter type: atomic_t / atomic64_t for thread-safe increments.
-#   - State transitions: A7 only handles the first one (healthy -> lost-
-#     temporary on F40b fire).  A8 will add recovering / lost-permanent /
-#     return-to-healthy.
-#   - The recovery_succeeded() and recovery_failed() helpers are defined
-#     ahead of A8's needs so A8 can be a pure caller addition.
+# A8 v1 registered the attribute group via nv_pci_driver.driver.dev_groups.
+# It compiled and every symbol loaded (dev_attr_tb_egpu_* visible in
+# /proc/kallsyms), but produced ZERO sysfs paths at runtime.  Root cause:
+# __pci_register_driver() executes
 #
-# Dependencies: A6 (F40b bounded-wait wrapper provides the timeout-fired hook
-# site).  Does not depend on E1 directly — the global state is updated only
-# from A6's E1-gated timeout path, so non-eGPU devices show perpetually-zero
-# counters and 'healthy' state, which is correct.
+#     drv->driver.dev_groups = drv->dev_groups;
 #
-# Telemetry tier: nominal (state + counters surface for monitors; no kernel
-# log emission — that's A6's job).  Mandatory-tier telemetry will come with
-# A8's recovery state machine.
+# (drivers/pci/pci-driver.c) — clobbering the inner .driver.dev_groups field
+# v1 set with the NULL *outer* pci_driver.dev_groups.  Verified empirically on
+# aorus.19 (A7 Test A/B: attrs absent at /sys/bus/pci/devices/<bdf>/).
+#
+# v2 mirrors the proven addon A2 (Q-watchdog) / A3 (recovery) idiom: explicit
+# sysfs_create_group on &nvl->pci_dev->dev.kobj at probe, sysfs_remove_group at
+# remove, with the A3 fail-soft policy (NV_DBG_INFO log, if(nvl->pci_dev) guard,
+# non-fatal so the driver binds regardless).
+#
+# Implementation:
+#   - New TU nv-tb-egpu-metrics.{c,h} (relocated from the v1 nv.c inline block,
+#     mirroring A1/A2/A3 file geometry: new .c + .h + nvidia-sources.Kbuild line).
+#   - tb_egpu_metrics_init(nvl) wired into nv_pci_probe after tb_egpu_qwd_init.
+#   - tb_egpu_metrics_stop(nvl) wired into nv_pci_remove_helper before
+#     tb_egpu_qwd_stop.
+#   - nv.c wires nv_tb_egpu_f40b_fired() into BOTH F40b timeout branches: A6's
+#     open-path (nv_open_device_for_nvlfp_bounded) and A7's shutdown-path
+#     (nv_f40b_shutdown_bounded).  The shutdown path is the dominant fire class
+#     (A7 Test A: fires on every healthy rmmod), so counting it honours A7's
+#     contract that A8 increments a single counter for both A6 and A7 fires.
+#   - The v1 dev_groups field on nv_pci_driver and the nv_tb_egpu_dev_groups[]
+#     wrapper are gone.
+#
+# Reset-on-bind: tb_egpu_metrics_init calls nv_tb_egpu_metrics_reset() before
+# publishing the group, zeroing counters + state=healthy each bind generation.
+# The metrics struct is module-static single-instance (single-eGPU posture), so
+# without this an unbind-rebind (DaemonSet pod restart) would re-expose stale
+# counters from the prior bind.
+#
+# Dependencies: A6 (open-path hook site) + A7 (shutdown-path hook site).
+# Single-GPU assumption: module-global metrics; refactor to per-device storage
+# via nv_linux_state_t when multi-GPU support is needed.
+#
+# Telemetry tier: nominal (machine-readable state + counters; no kernel-log
+# emission — that is A6/A7's job, and A9's for the recovery state machine).
+#
+# Adversarially reviewed 2026-05-30 (4-lens workflow + per-finding verify):
+# no use-after-free (module-static metrics; group removed before any teardown),
+# reset-vs-reader race safe (kernfs active-reference draining), atomic types
+# consistent, sysfs_emit buffer-safe.
 #
 # Author: nvidia-driver-injector contributors
-# Date:   2026-05-29
+# Date:   2026-05-30
 # License: MIT
 
 diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
-
-diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
-index c02a9975..73f9288d 100644
+index c02a9975..ed7c9aa1 100644
 --- a/kernel-open/nvidia/nv-pci.c
 +++ b/kernel-open/nvidia/nv-pci.c
-@@ -3040,6 +3040,10 @@ static const struct pci_error_handlers nv_pci_err_handlers = {
-     .cor_error_detected = nv_pci_cor_error_detected,
- };
+@@ -29,6 +29,7 @@
+ #include "nv-reg.h"
+ #include "nv-tb-egpu-qwd.h"      /* tb_egpu Q-watchdog (addon A2) */
+ #include "nv-tb-egpu-recover.h"  /* tb_egpu recovery state machine (addon A3) */
++#include "nv-tb-egpu-metrics.h"  /* tb_egpu F40b sysfs observability (addon A8) */
  
-+/* A7: F40b sysfs observability attribute group, defined in nv.c.
-+ * The kernel registers/unregisters these automatically on bind/unbind. */
-+extern const struct attribute_group *nv_tb_egpu_dev_groups[];
+ #if defined(NV_VGPU_KVM_BUILD)
+ #include "nv-vgpu-vfio-interface.h"
+@@ -2304,6 +2305,14 @@ nv_pci_probe
+      */
+     (void)tb_egpu_qwd_init(nvl);
+ 
++    /*
++     * tb_egpu F40b observability (addon A8): publish the read-only sysfs
++     * surface (state + F40b/recovery counters) on the device kobj. Resets
++     * metrics to a clean generation first, so an unbind-rebind starts fresh.
++     * Non-fatal on failure — the driver binds regardless.
++     */
++    (void)tb_egpu_metrics_init(nvl);
 +
- struct pci_driver nv_pci_driver = {
-     .name      = MODULE_NAME,
-     .id_table  = nv_pci_table,
-@@ -3054,6 +3058,7 @@ struct pci_driver nv_pci_driver = {
-     .driver.pm = &nv_pm_ops,
- #endif
-     .driver.probe_type = PROBE_FORCE_SYNCHRONOUS,
-+    .driver.dev_groups = nv_tb_egpu_dev_groups,
-     .err_handler       = &nv_pci_err_handlers,
- };
+     nv_kmem_cache_free_stack(sp);
  
-diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
-index a9e5b847..c313e93e 100644
---- a/kernel-open/nvidia/nv.c
-+++ b/kernel-open/nvidia/nv.c
-@@ -1822,6 +1822,138 @@ MODULE_PARM_DESC(NVreg_TbEgpuOpenTimeoutMs,
-     "(default 200ms = 4x PCIe Completion Timeout).  On timeout, declare GPU "
-     "lost via C5 sink and return -EIO.  0 = disabled (synchronous path).");
+     return 0;
+@@ -2386,6 +2395,13 @@ static void nv_pci_remove_helper(struct pci_dev *pci_dev, bool block_if_gpu_in_u
+      */
+     tb_egpu_qwd_stop(nvl);
  
-+/* === A7: F40b sysfs observability surface ===
++    /*
++     * tb_egpu F40b observability (addon A8): remove the sysfs surface
++     * before state teardown. Benign no-op if it was never created; no
++     * backing state to free (metrics struct is module-static).
++     */
++    tb_egpu_metrics_stop(nvl);
++
+     /*
+      * tb_egpu recovery (addon A3): drain any pending recovery work
+      * and free per-pdev state before nvl is torn down.
+diff --git a/kernel-open/nvidia/nv-tb-egpu-metrics.c b/kernel-open/nvidia/nv-tb-egpu-metrics.c
+new file mode 100644
+index 00000000..3f990435
+--- /dev/null
++++ b/kernel-open/nvidia/nv-tb-egpu-metrics.c
+@@ -0,0 +1,209 @@
++/*
++ * SPDX-FileCopyrightText: nvidia-driver-injector contributors
++ * SPDX-License-Identifier: MIT
 + *
-+ * Exposes 5 read-only per-PCI-device sysfs attributes:
-+ *   tb_egpu_state              healthy | recovering | lost-temporary | lost-permanent
-+ *   tb_egpu_f40b_fires         monotonic counter of F40b timeout fires (A6)
-+ *   tb_egpu_recovery_count     monotonic counter of successful in-driver recoveries (set by A8)
-+ *   tb_egpu_recovery_failures  monotonic counter of failed in-driver recovery attempts (set by A8)
-+ *   tb_egpu_last_recovery_ns   ktime_get_ns() of last successful recovery (set by A8)
++ * nv-tb-egpu-metrics.c — Thunderbolt-eGPU F40b observability surface (addon A8).
 + *
-+ * Registration: via nv_pci_driver.driver.dev_groups (set in nv-pci.c) — the
-+ * kernel handles add/remove automatically when the device binds/unbinds.
++ * See nv-tb-egpu-metrics.h for the design rationale (including why A8 v2 uses
++ * sysfs_create_group rather than the v1 pci_driver.driver.dev_groups, which the
++ * kernel's __pci_register_driver clobbers to NULL).
 + *
-+ * Single-GPU assumption: a global state struct is sufficient for this project's
-+ * deployment (one eGPU per host).  When multi-GPU support is added, refactor
-+ * to per-device storage via nv_linux_state_t.
++ * The backing metrics struct is module-global single-instance (single-eGPU
++ * deployment posture). The attribute group attaches per-device on the PCI
++ * device kobj; the storage is shared. tb_egpu_metrics_init resets the metrics
++ * to a clean generation before publishing the group, so an unbind-rebind
++ * (DaemonSet pod restart) does not surface stale counters from the prior bind.
 + */
++
++#include "nv-tb-egpu-metrics.h"
++#include "nv-linux.h"
++#include "nv-pci-types.h"
++
++#include <linux/atomic.h>
++#include <linux/device.h>
++#include <linux/kobject.h>
++#include <linux/ktime.h>
++#include <linux/pci.h>
++#include <linux/sysfs.h>
++#include <linux/types.h>
++
++/* -----------------------------------------------------------------------
++ * Module-global metrics state
++ * --------------------------------------------------------------------- */
 +
 +enum nv_tb_egpu_state {
 +    NV_TB_EGPU_STATE_HEALTHY        = 0,
@@ -117,14 +174,34 @@ index a9e5b847..c313e93e 100644
 +    }
 +}
 +
-+/* Called by A6's bounded-wait wrapper on timeout (F40b fire). */
++/*
++ * Reset all metrics to a clean generation. Called at the top of
++ * tb_egpu_metrics_init (i.e. at each device bind) BEFORE the sysfs group is
++ * published, so a DaemonSet pod restart / unbind-rebind starts from
++ * state=healthy / counters=0 rather than re-exposing the prior bind's counters
++ * (the metrics struct is module-static and otherwise never reset).
++ */
++static void nv_tb_egpu_metrics_reset(void)
++{
++    atomic_set(&nv_tb_egpu_metrics.state, NV_TB_EGPU_STATE_HEALTHY);
++    atomic_set(&nv_tb_egpu_metrics.f40b_fires, 0);
++    atomic_set(&nv_tb_egpu_metrics.recovery_count, 0);
++    atomic_set(&nv_tb_egpu_metrics.recovery_failures, 0);
++    atomic64_set(&nv_tb_egpu_metrics.last_recovery_ns, 0);
++}
++
++/* -----------------------------------------------------------------------
++ * Write surface (hooks called from elsewhere in the driver)
++ * --------------------------------------------------------------------- */
++
++/* Called by A6's bounded-wait open-path wrapper on timeout (F40b fire). */
 +void nv_tb_egpu_f40b_fired(void)
 +{
 +    atomic_inc(&nv_tb_egpu_metrics.f40b_fires);
 +    atomic_set(&nv_tb_egpu_metrics.state, NV_TB_EGPU_STATE_LOST_TEMPORARY);
 +}
 +
-+/* Reserved for A8 — increments recovery_count and resets state to healthy. */
++/* Reserved for A9 — increments recovery_count and resets state to healthy. */
 +void nv_tb_egpu_recovery_succeeded(void)
 +{
 +    atomic_inc(&nv_tb_egpu_metrics.recovery_count);
@@ -132,20 +209,22 @@ index a9e5b847..c313e93e 100644
 +    atomic_set(&nv_tb_egpu_metrics.state, NV_TB_EGPU_STATE_HEALTHY);
 +}
 +
-+/* Reserved for A8 — increments recovery_failures.  State transition (to
-+ * lost-temporary on retry or lost-permanent on surrender) is the caller's
-+ * responsibility based on policy. */
++/* Reserved for A9 — increments recovery_failures.  State transition (to
++ * lost-temporary on retry or lost-permanent on surrender) follows policy. */
 +void nv_tb_egpu_recovery_failed(int permanent)
 +{
 +    atomic_inc(&nv_tb_egpu_metrics.recovery_failures);
 +    atomic_set(&nv_tb_egpu_metrics.state,
-+        permanent ? NV_TB_EGPU_STATE_LOST_PERMANENT : NV_TB_EGPU_STATE_LOST_TEMPORARY);
++        permanent ? NV_TB_EGPU_STATE_LOST_PERMANENT
++                  : NV_TB_EGPU_STATE_LOST_TEMPORARY);
 +}
 +
-+/* sysfs show functions */
++/* -----------------------------------------------------------------------
++ * sysfs show functions (read the module-global metrics directly)
++ * --------------------------------------------------------------------- */
 +
 +static ssize_t tb_egpu_state_show(struct device *dev,
-+                                   struct device_attribute *attr, char *buf)
++                                  struct device_attribute *attr, char *buf)
 +{
 +    return sysfs_emit(buf, "%s\n",
 +        nv_tb_egpu_state_str(atomic_read(&nv_tb_egpu_metrics.state)));
@@ -153,35 +232,35 @@ index a9e5b847..c313e93e 100644
 +static DEVICE_ATTR_RO(tb_egpu_state);
 +
 +static ssize_t tb_egpu_f40b_fires_show(struct device *dev,
-+                                        struct device_attribute *attr, char *buf)
++                                       struct device_attribute *attr, char *buf)
 +{
 +    return sysfs_emit(buf, "%d\n", atomic_read(&nv_tb_egpu_metrics.f40b_fires));
 +}
 +static DEVICE_ATTR_RO(tb_egpu_f40b_fires);
 +
 +static ssize_t tb_egpu_recovery_count_show(struct device *dev,
-+                                            struct device_attribute *attr, char *buf)
++                                           struct device_attribute *attr, char *buf)
 +{
 +    return sysfs_emit(buf, "%d\n", atomic_read(&nv_tb_egpu_metrics.recovery_count));
 +}
 +static DEVICE_ATTR_RO(tb_egpu_recovery_count);
 +
 +static ssize_t tb_egpu_recovery_failures_show(struct device *dev,
-+                                               struct device_attribute *attr, char *buf)
++                                              struct device_attribute *attr, char *buf)
 +{
 +    return sysfs_emit(buf, "%d\n", atomic_read(&nv_tb_egpu_metrics.recovery_failures));
 +}
 +static DEVICE_ATTR_RO(tb_egpu_recovery_failures);
 +
 +static ssize_t tb_egpu_last_recovery_ns_show(struct device *dev,
-+                                              struct device_attribute *attr, char *buf)
++                                             struct device_attribute *attr, char *buf)
 +{
 +    return sysfs_emit(buf, "%llu\n",
 +        (unsigned long long)atomic64_read(&nv_tb_egpu_metrics.last_recovery_ns));
 +}
 +static DEVICE_ATTR_RO(tb_egpu_last_recovery_ns);
 +
-+static struct attribute *nv_tb_egpu_attrs[] = {
++static struct attribute *tb_egpu_metrics_attrs[] = {
 +    &dev_attr_tb_egpu_state.attr,
 +    &dev_attr_tb_egpu_f40b_fires.attr,
 +    &dev_attr_tb_egpu_recovery_count.attr,
@@ -190,27 +269,184 @@ index a9e5b847..c313e93e 100644
 +    NULL,
 +};
 +
-+static const struct attribute_group nv_tb_egpu_attr_group = {
-+    .attrs = nv_tb_egpu_attrs,
++static const struct attribute_group tb_egpu_metrics_attr_group = {
++    .attrs = tb_egpu_metrics_attrs,
 +};
 +
-+/* Consumed by nv_pci_driver.driver.dev_groups in nv-pci.c */
-+const struct attribute_group *nv_tb_egpu_dev_groups[] = {
-+    &nv_tb_egpu_attr_group,
-+    NULL,
-+};
++/* -----------------------------------------------------------------------
++ * Lifecycle (mirrors tb_egpu_recover_init / _stop and tb_egpu_qwd_init / _stop)
++ * --------------------------------------------------------------------- */
 +
- struct nv_f40b_open_work {
-     struct work_struct       work;
-     struct completion        done;
-@@ -1904,6 +2036,10 @@ static int nv_open_device_for_nvlfp_bounded(
++int tb_egpu_metrics_init(nv_linux_state_t *nvl)
++{
++    nv_state_t *nv;
++
++    if (!nvl)
++        return 0;
++
++    nv = NV_STATE_PTR(nvl);
++
++    /* Start each bind generation clean (graft: reset-on-bind). The metrics
++     * struct is module-static, so without this an unbind-rebind would surface
++     * stale counters from the prior bind. */
++    nv_tb_egpu_metrics_reset();
++
++    /* Publish sysfs surface. Failure is non-fatal — the driver still binds,
++     * just without userspace-visible counters. Mirrors A2/A3. */
++    if (nvl->pci_dev)
++    {
++        int rc = sysfs_create_group(&nvl->pci_dev->dev.kobj,
++                                    &tb_egpu_metrics_attr_group);
++        if (rc != 0)
++            NV_DEV_PRINTF(NV_DBG_INFO, nv,
++                "tb_egpu metrics: sysfs_create_group failed: %d\n", rc);
++    }
++
++    return 0;
++}
++
++void tb_egpu_metrics_stop(nv_linux_state_t *nvl)
++{
++    if (!nvl)
++        return;
++
++    /* Remove sysfs surface. Benign no-op if it was never created. No backing
++     * state to free — the metrics struct is module-static. */
++    if (nvl->pci_dev)
++    {
++        sysfs_remove_group(&nvl->pci_dev->dev.kobj,
++                           &tb_egpu_metrics_attr_group);
++    }
++}
+diff --git a/kernel-open/nvidia/nv-tb-egpu-metrics.h b/kernel-open/nvidia/nv-tb-egpu-metrics.h
+new file mode 100644
+index 00000000..326138ce
+--- /dev/null
++++ b/kernel-open/nvidia/nv-tb-egpu-metrics.h
+@@ -0,0 +1,75 @@
++/*
++ * SPDX-FileCopyrightText: nvidia-driver-injector contributors
++ * SPDX-License-Identifier: MIT
++ *
++ * nv-tb-egpu-metrics.h — Thunderbolt-eGPU F40b observability surface (addon A8).
++ *
++ * Exposes the F40b state machine's state + counters as read-only per-PCI-device
++ * sysfs attributes, registered via sysfs_create_group on the device kobj at
++ * probe time (mirroring the addon A2/A3 idiom). Five attributes appear under
++ * /sys/bus/pci/devices/<DBDF>/ when nvidia.ko binds, and disappear on unbind:
++ *
++ *   tb_egpu_state              healthy | recovering | lost-temporary | lost-permanent
++ *   tb_egpu_f40b_fires         monotonic counter of F40b timeout fires (A6)
++ *   tb_egpu_recovery_count     monotonic counter of successful recoveries (A9)
++ *   tb_egpu_recovery_failures  monotonic counter of failed recovery attempts (A9)
++ *   tb_egpu_last_recovery_ns   ktime_get_ns() of last successful recovery (A9)
++ *
++ * Registration mechanism (A8 v2): explicit sysfs_create_group at probe /
++ * sysfs_remove_group at remove, on &nvl->pci_dev->dev.kobj, exactly as A2's
++ * Q-watchdog and A3's recovery state machine do. A8 v1 used
++ * pci_driver.driver.dev_groups, which compiled and loaded all symbols but
++ * produced ZERO sysfs paths at runtime: __pci_register_driver() executes
++ * `drv->driver.dev_groups = drv->dev_groups;` (drivers/pci/pci-driver.c),
++ * clobbering the inner .driver.dev_groups field A8 v1 set with the NULL outer
++ * pci_driver.dev_groups. The sysfs_create_group approach is immune to that
++ * clobber and is proven on this driver by A2/A3.
++ *
++ * Single-GPU assumption: the backing metrics struct is module-global
++ * single-instance (one eGPU per host, this project's deployment posture). The
++ * attribute group attaches per-device, but the backing storage is shared. On
++ * each device bind the counters are reset to zero and state to 'healthy'
++ * (tb_egpu_metrics_init), so a DaemonSet pod restart / unbind-rebind starts a
++ * clean generation rather than re-exposing stale counters from the prior bind.
++ * Multi-GPU support would require per-device storage via nv_linux_state_t.
++ *
++ * The three hooks below are the write surface, called from elsewhere in the
++ * driver:
++ *   nv_tb_egpu_f40b_fired()        — A6's bounded-wait open-path timeout (live)
++ *   nv_tb_egpu_recovery_succeeded()— A9's recovery state machine (forthcoming)
++ *   nv_tb_egpu_recovery_failed()   — A9's recovery state machine (forthcoming)
++ *
++ * Telemetry tier: nominal. This TU emits no kernel-log lines; A6 (and A9) own
++ * the human-readable markers. A8's job is the machine-readable surface.
++ */
++
++#ifndef _NV_TB_EGPU_METRICS_H_
++#define _NV_TB_EGPU_METRICS_H_
++
++struct nv_linux_state_s;
++typedef struct nv_linux_state_s nv_linux_state_t;
++
++/* Lifecycle — called from nv_pci_probe / nv_pci_remove_helper, mirroring the
++ * A2/A3 init/stop pattern. Init resets metrics to a clean generation then
++ * registers the sysfs group; stop removes the group. Both guard on nvl->pci_dev
++ * and are non-fatal on sysfs failure (the driver still binds). */
++int  tb_egpu_metrics_init(nv_linux_state_t *nvl);
++void tb_egpu_metrics_stop(nv_linux_state_t *nvl);
++
++/*
++ * Write surface. Module-global single-instance metrics; safe to call from any
++ * context (atomic ops only, no sleeping).
++ *
++ *   nv_tb_egpu_f40b_fired()         f40b_fires++; state -> lost-temporary.
++ *                                   Called by A6's open-path timeout (live).
++ *   nv_tb_egpu_recovery_succeeded() recovery_count++; last_recovery_ns := now;
++ *                                   state -> healthy. Reserved for A9.
++ *   nv_tb_egpu_recovery_failed()    recovery_failures++; state -> lost-permanent
++ *                                   if permanent != 0 else lost-temporary.
++ *                                   Reserved for A9.
++ */
++void nv_tb_egpu_f40b_fired(void);
++void nv_tb_egpu_recovery_succeeded(void);
++void nv_tb_egpu_recovery_failed(int permanent);
++
++#endif /* _NV_TB_EGPU_METRICS_H_ */
+diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
+index efa7169f..273719fd 100644
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -57,6 +57,7 @@
+ #include "nv-caps-imex.h"
+ #include "nv-tb-egpu-recover.h"  /* tb_egpu recovery (addon A3) */
+ #include "nv-tb-egpu-close.h"    /* tb_egpu close-path telemetry (addon A4) */
++#include "nv-tb-egpu-metrics.h"  /* tb_egpu F40b sysfs observability (addon A8) */
+ 
+ /*
+  * Commit aefb2f2e619b ("x86/bugs: Rename CONFIG_RETPOLINE =>
+@@ -1904,6 +1905,10 @@ static int nv_open_device_for_nvlfp_bounded(
           * next sink-aware check and abort, allowing the worker to exit. */
          rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_AER_FATAL);
  
-+        /* A7: record this F40b fire and transition state to lost-temporary.
++        /* A8: record this F40b fire and transition state to lost-temporary.
 +         * Counter + state are visible at /sys/bus/pci/devices/<bdf>/tb_egpu_* */
 +        nv_tb_egpu_f40b_fired();
 +
          rc = -EIO;
      }
  
+@@ -2262,6 +2267,15 @@ static void nv_f40b_shutdown_bounded(
+          * wrap (if this was the rm_disable_adapter wrap) will fast-fail
+          * because the sink is set. */
+         rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_AER_FATAL);
++
++        /* A8: record this F40b fire and transition state to lost-temporary.
++         * The shutdown/rmmod path is the DOMINANT F40b fire class (A7 Test A:
++         * fires on every healthy rmmod) — counting it here is what makes
++         * tb_egpu_f40b_fires honour A7's "single counter for both A6 and A7
++         * fires" contract.  Placed once in the shared helper (per-timeout),
++         * not at the two call sites, so each genuine MMIO timeout counts once.
++         * Counter + state are visible at /sys/bus/pci/devices/<bdf>/tb_egpu_* */
++        nv_tb_egpu_f40b_fired();
+     }
+ 
+     nv_f40b_shutdown_work_put(w);    /* drop caller's ref; worker still has 1 if running */
+diff --git a/kernel-open/nvidia/nvidia-sources.Kbuild b/kernel-open/nvidia/nvidia-sources.Kbuild
+index f2a5caf6..d216a312 100644
+--- a/kernel-open/nvidia/nvidia-sources.Kbuild
++++ b/kernel-open/nvidia/nvidia-sources.Kbuild
+@@ -15,6 +15,7 @@ NVIDIA_SOURCES += nvidia/nv-tb-egpu-pcie.c
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-qwd.c
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-recover.c
+ NVIDIA_SOURCES += nvidia/nv-tb-egpu-close.c
++NVIDIA_SOURCES += nvidia/nv-tb-egpu-metrics.c
+ NVIDIA_SOURCES += nvidia/nv-dmabuf.c
+ NVIDIA_SOURCES += nvidia/nv-nano-timer.c
+ NVIDIA_SOURCES += nvidia/nv-acpi.c
