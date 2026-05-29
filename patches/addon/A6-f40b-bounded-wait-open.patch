@@ -1,0 +1,192 @@
+# A6 — F40b Tier 2 bounded-wait wrapper for nv_open_device_for_nvlfp.
+#
+# Closes the F40 wedge class (host wedge on cycle 2 open of /dev/nvidia0
+# after a clean LAST-CLOSE on a userspace-recovered eGPU chip).
+#
+# Mechanism (pinned 2026-05-29 evening via Test B v2 + VERIFY +
+# TBv2-n2; see fake-5090/failure-modes/F40-... and
+# docs/missions/.../design/F40b-structural-fix-2026-05-29.md):
+#
+# Chip-touching MMIO inside RmInitAdapter on a userspace-recovered chip
+# hangs indefinitely (the chip doesn't produce a PCIe completion).  The
+# kernel deadlocks before AER processing can run, so the C5 recovery
+# infrastructure (which IS correct in design) never fires.  Test B v2
+# observed the happy-path race outcome (AER fired in time, C5 caught
+# it, -EIO returned cleanly); VERIFY and TBv2-n2 observed the wedge
+# outcome (no AER, kernel-wide freeze, hard reboot required).
+#
+# This patch makes the happy-path outcome deterministic by wrapping the
+# chip-touching call in a bounded-wait pattern:
+#
+# 1. Schedule nv_open_device_for_nvlfp on system_long_wq with a
+#    refcounted heap-allocated work struct.
+# 2. Syscall thread waits with timeout (default 200ms = 4x PCIe CTO).
+# 3. On completion within timeout: propagate the worker's rc.
+# 4. On timeout: call rm_cleanup_gpu_lost_state(sp, nv, 
+#    NV_GPU_LOST_DETECTOR_AER_FATAL) to declare the GPU lost via the
+#    C5 sink primitive, return -EIO.  The leaked worker eventually
+#    exits when its MMIO fails-fast post-sink-set.
+#
+# Gated by:
+#   NVreg_TbEgpuOpenTimeoutMs > 0  (module param, default 200ms; 0 = off)
+#   nv->flags & is_external_gpu  (E1-classified eGPU only)
+#
+# Non-eGPU paths and the disabled (timeout=0) path fall through to the
+# original synchronous nv_open_device_for_nvlfp() call — zero behaviour
+# change for non-eGPU users.
+#
+# Only the foreground branch of nvidia_open is wrapped this round.  The
+# background (O_NONBLOCK) path runs in the nv_open_q kthread and shares
+# the same MMIO hazard but is much less commonly hit (only used by
+# clients that explicitly pass O_NONBLOCK with NVreg_EnableNonblockingOpen).
+#
+# Dependencies: C5 (rm_cleanup_gpu_lost_state + NV_GPU_LOST_DETECTOR_*
+# enum), E1 (is_external_gpu).
+#
+
+diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
+index c27955fb..d462171f 100644
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -1771,6 +1771,128 @@ static int nv_open_device_for_nvlfp(
+     return nvlfp->open_rc;
+ }
+ 
++/* === F40b: bounded-wait wrapper for nv_open_device_for_nvlfp ===
++ *
++ * Without this wrapper, chip-touching MMIO inside RmInitAdapter can hang
++ * indefinitely on a userspace-recovered chip (F40 wedge — see
++ * docs/missions/.../design/F40b-structural-fix-2026-05-29.md).  The hang
++ * deadlocks the entire kernel before the kernel's AER state machine can
++ * fire, so the C5 recovery path never runs.
++ *
++ * The wrapper schedules the chip-touching init on a kernel worker, lets
++ * the syscall thread wait with a configurable timeout (default 200 ms =
++ * 4x PCIe Completion Timeout), and on timeout declares the GPU lost via
++ * the C5 sink primitive rm_cleanup_gpu_lost_state() and returns -EIO.
++ *
++ * The end-state on timeout matches what AER+C5 produce on a successful
++ * race (see Test B v2 forensics): sink-set, PERMANENT_FAIL, -EIO to
++ * userspace.  This wrapper makes the outcome deterministic instead of
++ * timing-dependent.
++ *
++ * Gated by:
++ *   NVreg_TbEgpuOpenTimeoutMs > 0   AND
++ *   nv->is_external_gpu is true (E1-classified eGPU)
++ *
++ * Non-eGPU and disabled paths fall through to the original synchronous
++ * nv_open_device_for_nvlfp() call (zero behaviour change).
++ */
++
++unsigned int NVreg_TbEgpuOpenTimeoutMs = 200;
++module_param(NVreg_TbEgpuOpenTimeoutMs, uint, 0644);
++MODULE_PARM_DESC(NVreg_TbEgpuOpenTimeoutMs,
++    "F40b: timeout in ms for chip-touching open path on E1-classified eGPUs "
++    "(default 200ms = 4x PCIe Completion Timeout).  On timeout, declare GPU "
++    "lost via C5 sink and return -EIO.  0 = disabled (synchronous path).");
++
++struct nv_f40b_open_work {
++    struct work_struct       work;
++    struct completion        done;
++    nv_state_t              *nv;
++    nvidia_stack_t          *sp;
++    nv_linux_file_private_t *nvlfp;
++    int                      rc;
++    atomic_t                 refcount;
++};
++
++static void nv_f40b_open_work_put(struct nv_f40b_open_work *w)
++{
++    if (atomic_dec_and_test(&w->refcount))
++        kfree(w);
++}
++
++static void nv_f40b_open_worker(struct work_struct *ws)
++{
++    struct nv_f40b_open_work *w = container_of(ws, struct nv_f40b_open_work, work);
++
++    w->rc = nv_open_device_for_nvlfp(w->nv, w->sp, w->nvlfp);
++    complete(&w->done);
++    nv_f40b_open_work_put(w);
++}
++
++static int nv_open_device_for_nvlfp_bounded(
++    nv_state_t              *nv,
++    nvidia_stack_t          *sp,
++    nv_linux_file_private_t *nvlfp
++)
++{
++    struct nv_f40b_open_work *w;
++    unsigned int              timeout_ms = NVreg_TbEgpuOpenTimeoutMs;
++    long                      jiffies_left;
++    int                       rc;
++
++    /* Feature gates: disabled or non-eGPU → original synchronous path */
++    if (timeout_ms == 0)
++        return nv_open_device_for_nvlfp(nv, sp, nvlfp);
++
++    if (!nv->is_external_gpu)
++        return nv_open_device_for_nvlfp(nv, sp, nvlfp);
++
++    w = kzalloc(sizeof(*w), GFP_KERNEL);
++    if (w == NULL)
++        return -ENOMEM;
++
++    INIT_WORK(&w->work, nv_f40b_open_worker);
++    init_completion(&w->done);
++    w->nv     = nv;
++    w->sp     = sp;
++    w->nvlfp  = nvlfp;
++    atomic_set(&w->refcount, 2);   /* one ref for caller, one for worker */
++
++    nv_printf(NV_DBG_ERRORS,
++        "NVRM: tb_egpu [F40b]: open scheduled to bounded worker "
++        "(timeout=%u ms)\n", timeout_ms);
++
++    queue_work(system_long_wq, &w->work);
++
++    jiffies_left = wait_for_completion_timeout(&w->done,
++                                                msecs_to_jiffies(timeout_ms));
++
++    if (jiffies_left > 0)
++    {
++        rc = w->rc;
++        nv_printf(NV_DBG_ERRORS,
++            "NVRM: tb_egpu [F40b]: open completed within budget rc=%d\n", rc);
++    }
++    else
++    {
++        nv_printf(NV_DBG_ERRORS,
++            "NVRM: tb_egpu [F40b]: open timed out after %u ms — declaring GPU "
++            "lost (detector_class=3 DETECTOR_AER_FATAL); worker leaked, will "
++            "exit when MMIO fails-fast post-sink-set\n", timeout_ms);
++
++        /* C5 sink primitive — sets PDB_PROP_GPU_IS_LOST and propagates to
++         * subsequent RM operations.  The leaked worker's nv_open_device call
++         * (still in flight inside RmInitAdapter) will see the sink at the
++         * next sink-aware check and abort, allowing the worker to exit. */
++        rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_AER_FATAL);
++
++        rc = -EIO;
++    }
++
++    nv_f40b_open_work_put(w);    /* drop caller's ref; worker still has 1 if running */
++    return rc;
++}
++
+ static void nvidia_open_deferred(void *nvlfp_raw)
+ {
+     nv_linux_file_private_t *nvlfp = (nv_linux_file_private_t *) nvlfp_raw;
+@@ -1926,7 +2048,11 @@ nvidia_open(
+ 
+         UNLOCK_NV_LINUX_DEVICES();
+ 
+-        rc = nv_open_device_for_nvlfp(nv, nvlfp->sp, nvlfp);
++        /* F40b: bounded-wait wrapper protects against PCIe Completion Timeout
++         * MMIO hangs on userspace-recovered eGPU chips (n=12 reproductions
++         * 2026-05-29).  Non-eGPU or feature-disabled paths fall through to
++         * the original synchronous call. */
++        rc = nv_open_device_for_nvlfp_bounded(nv, nvlfp->sp, nvlfp);
+ 
+         /* Only add open file tracking where nvl->usage_count is incremented */
+         if (rc == 0)

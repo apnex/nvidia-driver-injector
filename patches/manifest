@@ -21,3 +21,4 @@
   A3-recovery                addon  -              fork:a3-recovery
   A4-close-path-telemetry    addon  -              fork:a4-close-path-telemetry
   A5-version-and-toggles     addon  -              fork:a5-version-and-toggles
+  A6-f40b-bounded-wait-open  addon  -              fork:a6-f40b-bounded-wait-open
