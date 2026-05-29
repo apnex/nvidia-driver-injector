@@ -12,7 +12,7 @@ related-patches: [C5-crash-safety, E1-egpu-detection, A6-f40b-bounded-wait-open,
 
 ## Purpose
 
-Close the F40-class rmmod-path host-wedge directly attested by the 2026-05-29 20:52 forensics report (`/var/log/mission-1-archaeology/a7-deploy-wedge-2026-05-29/FORENSICS-REPORT.md`). With A6 alone, a userspace-recovered Blackwell eGPU lets cycle-1 open succeed, cycle-2 open trigger F40b and `-EIO` cleanly — BUT a subsequent rmmod (k8s pod restart, image upgrade, manual `rmmod nvidia`) hits the same chip-touching MMIO hazard via `nv_pci_remove → nv_shutdown_adapter → rm_disable_adapter / rm_shutdown_adapter` and wedges the host. A7 wraps both of those chip-touching RM calls inside `nv_shutdown_adapter` in the same bounded-wait primitive A6 uses, generalised to accept any `void (*)(nvidia_stack_t *, nv_state_t *)` RM call. On timeout, A7 declares the GPU lost via the C5 sink primitive and lets `nv_shutdown_adapter` proceed with its host-side safe-synchronous teardown so `nv_pci_remove` returns and rmmod completes — the host does not wedge. The leaked worker exits when sink-aware MMIO inside RM fails-fast. See `docs/missions/mission-1-egpu-hot-plug-hot-power/design/in-driver-recovery-target-2026-05-29.md` for the broader detection-layer architecture A6+A7 sit inside.
+Close the F40-shutdown-arm host-wedge first attested by the 2026-05-29 20:52 forensics report (`/var/log/mission-1-archaeology/a7-deploy-wedge-2026-05-29/FORENSICS-REPORT.md`) and validated as STRUCTURAL by A7 Test A n=2 (2026-05-29 evening, see `docs/missions/mission-1-egpu-hot-plug-hot-power/design/A7-test-A-validation-2026-05-29.md`). The original framing for A7 — based on the 20:52 forensics inference — was "F40-precondition chip + rmmod → wedge." A7 Test A n=2 sharpened this to: **every healthy rmmod on this hardware hits the rm_shutdown_adapter MMIO hang**, independent of F40-precondition state. The rmmod-path chip-touching MMIO hang is structural to this driver + chip + TB-tunnel combination, not edge-case. A7 wraps `rm_disable_adapter` and `rm_shutdown_adapter` inside `nv_shutdown_adapter` in the same bounded-wait primitive A6 uses, generalised to accept any `void (*)(nvidia_stack_t *, nv_state_t *)` RM call. On timeout, A7 declares the GPU lost via the C5 sink primitive and lets `nv_shutdown_adapter` proceed with its host-side safe-synchronous teardown so `nv_pci_remove` returns and rmmod completes — the host does not wedge. The leaked worker exits when sink-aware MMIO inside RM fails-fast. **A7 is load-bearing for production**: without it, every routine pod restart, image upgrade, or manual `rmmod nvidia` risks the host wedge the 20:52 forensics report attests to. See `docs/missions/mission-1-egpu-hot-plug-hot-power/design/in-driver-recovery-target-2026-05-29.md` for the broader detection-layer architecture A6+A7 sit inside.
 
 ## Requirements
 
@@ -88,16 +88,21 @@ AND   the wrapper SHALL return to nv_shutdown_adapter without further action
 AND   nv_shutdown_adapter SHALL proceed to nv_kthread_q_stop on the bottom_half_q (next teardown step)
 ```
 
-#### Scenario: rm_shutdown_adapter completes-fast post-sink-set
+#### Scenario: rm_shutdown_adapter completes-fast post-sink-set (PREDICTED, not yet validated)
 
 ```
-GIVEN the first wrapper (rm_disable_adapter) timed out and set the C5 sink
+GIVEN the first wrapper (rm_disable_adapter) timed out and set the C5 sink, OR A6 has set the sink earlier in the boot via a cycle-2 open
 AND   nv_shutdown_adapter has finished host-side teardown steps and reaches the rm_shutdown_adapter wrap
 WHEN  the second wrapper schedules rm_shutdown_adapter
-THEN  RM closed code SHALL observe the sink at the next sink-aware check and fast-fail
-AND   the worker SHALL return quickly (well within the 200 ms budget)
-AND   the wrapper SHALL emit "tb_egpu [F40b]: rm_shutdown_adapter completed within budget"
-AND   no second sink-set SHALL be required (the sink is already set)
+THEN  RM closed code SHOULD observe the sink at the next sink-aware check and fast-fail
+AND   the worker SHOULD return quickly (well within the 200 ms budget)
+AND   the wrapper SHOULD emit "tb_egpu [F40b]: rm_shutdown_adapter completed within budget"
+AND   no second sink-set SHOULD be required (the sink is already set)
+
+Validation status: Test A n=2 (healthy chip, no prior sink-set) observed rm_shutdown_adapter timing out at 200 ms. This scenario predicts that a prior sink-set causes rm_shutdown_adapter to fast-fail instead — but tonight's data is consistent with TWO equally-valid interpretations:
+  (a) The structural hang IS sink-state-dependent and a prior sink would short-circuit it (Test B will validate).
+  (b) The structural hang is INDEPENDENT of sink-state and rm_shutdown_adapter would time out even with a prior sink. In this case A7's timeout branch fires twice (once for sink-set, once for the structural hang), still containing the wedge.
+Both interpretations preserve host-survival. SHOULD vs MUST language used here because the fast-pass is a secondary optimisation; the load-bearing guarantee is the timeout branch.
 ```
 
 ### Requirement: On timeout SHALL declare GPU lost via C5 sink and skip the wedged call so nv_shutdown_adapter continues
@@ -113,18 +118,45 @@ The wrapper MUST NOT attempt to cancel, join, or otherwise interfere with the in
 
 The detector class passed to `rm_cleanup_gpu_lost_state` SHALL be `NV_GPU_LOST_DETECTOR_AER_FATAL` (value 3) as a placeholder, matching A6's placeholder usage. A future patch (A9) introduces a dedicated `NV_GPU_LOST_DETECTOR_F40B_SHUTDOWN_TIMEOUT` detector class; until then, AER_FATAL is the closest existing semantically-correct detector class.
 
-#### Scenario: rmmod on wedged chip — A7 contains the wedge and lets rmmod return
+#### Scenario: rmmod on healthy chip — rm_shutdown_adapter times out, A7 contains it (VALIDATED n=2 in Test A 2026-05-29)
+
+```
+GIVEN nvidia.ko is loaded with NVreg_TbEgpuShutdownTimeoutMs=200 (default)
+AND   the eGPU is in healthy state (BAR1=32GiB, P8, no prior F40 fire, no userspace-recovered substrate, no sink set)
+AND   persistence mode is engaged
+WHEN  the operator runs `kubectl exec <injector-pod> -- /entrypoint.sh uninstall` and nv_pci_remove_helper reaches nv_shutdown_adapter
+THEN  the rm_disable_adapter wrapper SHALL emit "scheduled to bounded worker (timeout=200 ms)"
+AND   rm_disable_adapter SHALL return within budget (chip is responsive at this point in the teardown)
+AND   the wrapper SHALL emit "rm_disable_adapter completed within budget"
+AND   nv_shutdown_adapter SHALL proceed with host-side teardown (kthread stops, IRQ teardown, MSI-X mutex frees)
+AND   the rm_shutdown_adapter wrapper SHALL emit "scheduled to bounded worker (timeout=200 ms)"
+AND   rm_shutdown_adapter SHALL NOT return within budget — wait_for_completion_timeout SHALL return 0 after approximately 200 ms
+AND   the wrapper SHALL emit "rm_shutdown_adapter timed out after 200 ms — declaring GPU lost (detector_class=3 DETECTOR_AER_FATAL); worker leaked, will exit when MMIO fails-fast post-sink-set"
+AND   the wrapper SHALL call rm_cleanup_gpu_lost_state with NV_GPU_LOST_DETECTOR_AER_FATAL
+AND   nv_shutdown_adapter SHALL proceed with remaining teardown (FLR check, NUMA memory queue stop)
+AND   nv_pci_remove_helper SHALL continue and complete
+AND   "nvidia-nvlink: Unregistered Nvlink Core" SHALL appear in the kernel log
+AND   rmmod SHALL return with exit code 0 within ~1 second wall-clock
+AND   the host SHALL remain responsive (no kernel-wide wedge, no reboot required)
+AND   chip substrate SHALL remain healthy (BAR1=32GiB) for subsequent modprobe to bind cleanly
+
+Observation 2026-05-29 21:56:55 (n=1) and 22:06:35 (n=2): byte-identical kernel-log signatures across both runs; chip recovered cleanly on each reload.
+```
+
+#### Scenario: rmmod on F40-precondition (userspace-recovered) chip — A7 still contains the wedge
 
 ```
 GIVEN nvidia.ko is loaded with NVreg_TbEgpuShutdownTimeoutMs=200 and the eGPU is in the F40-precondition state (userspace-recovered)
-WHEN  the operator runs `rmmod nvidia` and nv_pci_remove_helper reaches nv_shutdown_adapter, whose rm_disable_adapter wrapper schedules a worker that hangs in chip-touching MMIO
-THEN  wait_for_completion_timeout SHALL return 0 after approximately 200 ms
-AND   the wrapper SHALL emit "tb_egpu [F40b]: rm_disable_adapter timed out after 200 ms — declaring GPU lost (detector_class=3 DETECTOR_AER_FATAL); worker leaked, will exit when MMIO fails-fast post-sink-set"
-AND   the wrapper SHALL call rm_cleanup_gpu_lost_state with NV_GPU_LOST_DETECTOR_AER_FATAL
-AND   nv_shutdown_adapter SHALL proceed with nv_kthread_q_stop, IRQ teardown, msix mutex free, and the second wrapped rm_shutdown_adapter call (which fast-fails post-sink-set)
-AND   nv_pci_remove_helper SHALL continue and complete
+WHEN  the operator runs `rmmod nvidia` and nv_pci_remove_helper reaches nv_shutdown_adapter
+THEN  rm_disable_adapter MAY time out (chip-state-dependent — Test A n=2 saw rm_disable_adapter complete within budget on healthy chips, but F40-precondition chips MAY behave differently)
+AND   IF rm_disable_adapter times out, the wrapper SHALL set sink and continue per the timeout requirement above
+AND   the rm_shutdown_adapter wrapper SHALL emit "scheduled to bounded worker (timeout=200 ms)"
+AND   rm_shutdown_adapter SHALL either time out (and A7 sets sink) OR fast-fail (if A6 has already set sink from a prior cycle-2 open in the same boot)
+AND   nv_pci_remove_helper SHALL continue and complete in either case
 AND   rmmod SHALL return with exit code 0 within ~500 ms wall-clock
 AND   the host SHALL remain responsive (no kernel-wide wedge, no reboot required)
+
+Note: this scenario is NOT yet validated empirically. The 2026-05-29 20:52 forensics report is the only documented F40-precondition + rmmod event, and that wedged BEFORE A7 was deployed. Test B (planned) will exercise this scenario to verify the predicted "rm_shutdown_adapter fast-fails after A6 sink-set" behaviour or refute it (in which case A7's timeout still contains the wedge — host-survival is the load-bearing guarantee, fast-pass is a secondary optimisation).
 ```
 
 #### Scenario: rmmod after F40b open fired — chip already sink-set, A7 fast-passes
@@ -190,8 +222,11 @@ Userspace consumers SHOULD monitor for the "timed out" line via `journalctl -k -
 
 ## Provenance
 
-- **Source cluster**: addon — project-local; F40-class wedge containment, symmetric to A6 on the rmmod path. The F40 chip-side root cause is NVIDIA bug #979 (`project_issue_979_upstream_state_2026_05_22.md`) and is out of scope for our fork; A7 is the kernel-side containment for the rmmod path, attested by the 2026-05-29 20:52 forensics report.
+- **Source cluster**: addon — project-local; F40-shutdown-arm wedge containment, symmetric to A6 on the open path. The F40 chip-side root cause is NVIDIA bug #979 (`project_issue_979_upstream_state_2026_05_22.md`) and is out of scope for our fork; A7 is the kernel-side containment for the rmmod path. The original trigger was the 2026-05-29 20:52 forensics report (`/var/log/mission-1-archaeology/a7-deploy-wedge-2026-05-29/FORENSICS-REPORT.md`); the n=2 validation that promoted the patch from "defense before A9 lands" to "load-bearing on every rmmod" is the 2026-05-29 evening A7 Test A.
+- **Empirical validation (2026-05-29 evening, n=2)**: see `docs/missions/mission-1-egpu-hot-plug-hot-power/design/A7-test-A-validation-2026-05-29.md`. Test A ran `kubectl exec entrypoint.sh uninstall` against a healthy aorus.19 deployment twice (21:56:55 and 22:06:35); both runs produced byte-identical kernel-log signatures: rm_disable_adapter completed within budget, rm_shutdown_adapter timed out at 200 ms, sink set, nvlink unregistered, rmmod returned, host alive. Reproducibility 2/2 = 100%. The structural-vs-precondition conclusion is provisional pending wider parameter sweep (chip cold-load timing, CUDA workload history, ASPM state, etc.).
 - **Vanilla baseline files**: `kernel-open/nvidia/nv.c` (insertion of `nv_f40b_shutdown_bounded`, supporting `struct nv_f40b_shutdown_work` / worker / put primitives, and `NVreg_TbEgpuShutdownTimeoutMs` immediately before `nv_shutdown_adapter`; modification of the two RM call sites inside `nv_shutdown_adapter` to invoke the wrapper).
-- **Fork branch**: `a7-f40b-bounded-wait-shutdown`.
+- **Fork branch**: `a7-f40b-bounded-wait-shutdown` (in `/root/open-gpu-kernel-modules`; not yet pushed to apnex fork).
+- **Injector main commit**: `429615c` (2026-05-29 evening; A7 patch + A8 patch + A6/A7/A8 intent docs + renumber + v5 deep-review placeholder).
+- **Image first deployed**: `apnex/nvidia-driver-injector:595.71.05-aorus.19` (built + imported to k3s containerd + DaemonSet rolled 2026-05-29 21:35 wall-clock).
 - **Upstream candidacy**: n/a — addon layer. Same rationale as A6: the bounded-wait wrapper is specific to the F40 wedge class on TB-attached Blackwell eGPUs and depends on E1's `is_external_gpu` classifier (also addon). Upstream candidacy would require both (a) C5's sink primitive in mainline form, and (b) a generalised "chip-touching MMIO can hang" framework that does not exist in upstream nvidia-open today.
 - **Upstream issues**: NVIDIA bug #979 (Blackwell eGPU over Thunderbolt hard-lock) — open, no NVIDIA response in 5 months as of 2026-05-22.
