@@ -83,7 +83,39 @@ Variant B (production-permissive): set the flag on probe and re-init at most onc
 
 Recommend Variant A by default; revisit if production breaks.
 
-### Tier 2 — bounded-wait wrap around re-init (if Tier 1 insufficient)
+### Tier 2 — bounded-wait wrap around re-init (PROMOTED to primary structural fix, 2026-05-29 evening)
+
+**Status promotion (2026-05-29 evening):** based on Test B v2 + VERIFY data (see F40 catalog §"BREAKTHROUGH"), Tier 2 is the structural fix. Tier 1's sentinel-based detection is brittle (n=2 sentinel-absent-with-wedge); Tier 0 (probe-time persistence) is a workaround not a fix. Tier 2 deterministically engineers the AER+sink-state behavior that Test B v2 produced by accident through bpftrace timing.
+
+**Mechanism (as proven by Test B v2 + VERIFY)**:
+
+The F40 wedge is a PCIe Completion Timeout AER race:
+- chip-touching MMIO in `RmInitAdapter` on a userspace-recovered chip
+- chip does not produce a completion → PCIe Completion Timeout (50 ms default) fires
+- AER signals a Non-Fatal Uncorrectable Error (UESta=0x00004000 = Completion Timeout bit)
+- C5's `pci_error_handlers.error_detected` callback IS registered and CAN handle it cleanly (returns -EIO via sink-state)
+- BUT: without enough scheduling slack, the kernel deadlocks before AER handler runs, host wedges
+
+Test B v2 (with bpftrace running) showed the FULL CLEAN-FAIL path: AER fires, C5 catches, `nvidia_open` returns -EIO, bash gets EIO. VERIFY (no bpftrace) showed the deadlock path. The difference was timing-only.
+
+**The fix engineers Test B v2's outcome deterministically:**
+
+1. **Bounded-wait wrapper** around `nv_open_device_for_nvlfp` — schedule the chip-touching init call on a kthread/workqueue. Main thread (the open syscall) waits with a configurable timeout. Target timeout > 50 ms (longer than PCIe CTO so AER has time to fire naturally).
+2. **On timeout**:
+   - `pci_dev_set_disconnected(pdev)` — mark the device as kernel-disconnected; future MMIO from the wedged worker will fail-fast
+   - Fire `cleanupGpuLostStateAtomic(pGpu, DETECTOR_REINIT_TIMEOUT)` — C5 sink-set
+   - Return -EIO from the open syscall
+3. **The wedged worker (if any)** will eventually exit because its in-flight MMIO will fail-fast once `pci_dev_disconnected` is set. The thread is leaked (no `cancel_work_sync` because that would itself block on the wedged worker); leak is bounded per cycle, recovered at next reboot.
+
+**This Tier 2 design now has direct empirical support** — Test B v2 IS the structural close, achieved accidentally. We just need to engineer the timing deterministically.
+
+**Implementation locus**: `nv_open_device_for_nvlfp` at `kernel-open/nvidia/nv.c:~1794`. Wrap its body in the bounded-wait pattern. The C5 sink-state machinery is already correct; only the wrap site changes.
+
+**Timeout value**: 200 ms is a safe default (4× the 50 ms CTO). Can be a module parameter for tuning.
+
+**Risk note on PCIe link-disable fallback**: TB-tunneled bridges may not honor `PCI_EXP_LNKCTL_LD` identically to standard PCIe bridges (per `feedback_lspci_lnkcap_tb_virtual`). The Tier 2 design above does NOT require LNKCTL_LD — `pci_dev_set_disconnected` is the simpler and correct mechanism. The earlier draft's LNKCTL_LD fallback can be removed.
+
+**Original Tier 2 draft (preserved for reference):**
 
 If the divergent-state signature proves unreliable as a poison-flag trigger (e.g., signature varies across chip generations or false-positives on healthy chips), fall back to:
 
