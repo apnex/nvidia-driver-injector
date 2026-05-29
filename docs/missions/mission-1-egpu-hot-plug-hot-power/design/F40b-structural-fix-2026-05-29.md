@@ -32,6 +32,8 @@ Two patch tiers, in increasing order of complexity. F40b ships the lower tier fi
 
 ### Tier 1 — probe-time poison flag (preferred, lowest blast radius)
 
+**Signature confidence: HIGH (n=4 sentinel-present-with-wedge + n=1 sentinel-absent-without-wedge as of 2026-05-29 evening Test #1 REDO).** Reading `0x110094` and getting back the sentinel `0xbadf2100` is empirically necessary AND sufficient to gate the F40 wedge: every wedge reproduction showed the sentinel; the one reproduction attempt where the sentinel was absent (Test #1 REDO, 5 cycles) did not wedge. See §"Precondition refinement" in the F40 catalog for the n=5 dataset.
+
 At probe time, detect the userspace-recovered chip-state divergent signature: any read of `0x110094` returning the sentinel `0xbadf2100` is sufficient (this is the same sentinel `gpuHandleSanityCheckRegReadError_GH100` already warns on — we just elevate it to a poison decision). If detected:
 
 1. Set a per-device flag `NV_FLAG_FRAGILE_CHIP_REINIT`.
@@ -89,7 +91,7 @@ Tier 1 alone covers the documented failure class. Tier 2 covers hypothetical var
 
 ### Open design questions (revised)
 
-1. **Is `0x110094 == 0xbadf2100` the right poison signature?** Stable across chip generations? False-positive on any healthy cold-plug chip? Needs cold-plug-baseline verification (cheap, no wedge cost — just read the register on a healthy chip).
+1. **Is `0x110094 == 0xbadf2100` the right poison signature?** ANSWERED partial-positive on this hardware (n=5 as of Test #1 REDO, 2026-05-29 evening) — signature present in every wedge, absent in the one no-wedge case. Still open: stability across chip generations (only GH100/RTX 5090 Blackwell tested), false-positive on any other chip family, behavior under partial recovery (e.g., if `0x110094` reads `0xbadf2100` on probe but then changes on subsequent MMIO).
 2. **Tier 1 Variant A vs Variant B** — refuse all re-init, or allow at most one. Requires data we don't have. Conservative default: Variant A. Revisit if production breaks.
 3. **Should F40a (probe-time persistence engagement) be folded into the same patch series, or stay separate?** Both fix the same field bug from different angles. Recommendation: separate patches, same series, ordered F40a → F40b Tier 1 → F40b Tier 2.
 
