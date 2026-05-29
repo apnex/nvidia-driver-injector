@@ -28,11 +28,33 @@ This fix is **independent of E27**. E27 (Linux kernel patch for F41) prevents th
 
 ## Revised architecture (2026-05-29 evening)
 
-Two patch tiers, in increasing order of complexity. F40b ships the lower tier first; the higher tier is only built if the lower tier is found insufficient.
+> **Framing correction (2026-05-29 late evening):** the tiers below are STOPGAPS, not the structural close. Per the project's user-directive on 2026-05-29 morning ("the actual failure class should be structurally closed in the nvidia driver via carefully thought out error handling EVEN WITHOUT E27"), the perfect answer requires identifying the actual hanging function and wrapping IT — not avoiding the state machine the function lives in. After five wedge reproductions on 2026-05-29 we have ruled out `RmInitAdapter`, `pci_pm_runtime_resume`, and the `0x110094` sentinel as the gate; the wedge fires somewhere in the open syscall path BEFORE `nv_open_device` is reached and we have not yet instrumented that span. PINPOINT-3 (markers inside `nvidia_open`'s file_operations callback, before the queue-to-`nv_open_q` step) is the queued next characterization step. The bounded-wait + sink-state structural fix can only be designed once PINPOINT-3 identifies the site.
+>
+> Until then, Tier 0 (below) is the shippable in-driver stopgap. It matches what production already does in userspace via `nvidia-smi -pm 1`. It is debt-shaped per `feedback_native_in_driver_hardening` (in-driver, but a dodge) and explicitly does NOT close the failure class on the rmmod / driver-unbind path — yesterday's PINPOINT-2 Run 2 "restore-attempt" wedge on the rmmod+modprobe cycle is not addressed by Tier 0.
 
-### Tier 1 — probe-time poison flag (preferred, lowest blast radius)
+Three patch tiers, in increasing order of complexity. Tier 0 is the cheap in-driver stopgap; Tier 1 + Tier 2 are speculative architectures pending PINPOINT-3.
 
-**Signature confidence: PARTIALLY FALSIFIED 2026-05-29 evening (Test #1 FULLPRE).** Earlier same day this section claimed "HIGH (n=4 sentinel-present-with-wedge + n=1 sentinel-absent-without-wedge)" and "empirically necessary AND sufficient." Test #1 FULLPRE produced the missing cell: **n=1 sentinel-absent-WITH-wedge** — the wedge fired without the sentinel ever being emitted to the kernel journal. The "necessary" claim is therefore false. The signal correlates (n=4 of 5 wedges) but does not gate. As a single-register canary, it would catch most but not all wedges. The forensics report (`/var/log/mission-1-archaeology/c1-test1-fullpre-wedge-2026-05-29/FORENSICS-REPORT.md`) has the data.
+### Tier 0 (NEW, recommended as stopgap) — probe-time persistence force-engage for E1 GPUs
+
+**Status: stopgap. Ships immediately. Does NOT close the failure class structurally.**
+
+At probe time, if `os_pci_is_thunderbolt_attached` returns true (the E1 detection), set `NV_FLAG_PERSISTENT_SW_STATE` on the device automatically. From then on, `usage_count` doesn't matter for the chip-state lifecycle — the chip stays initialized until module unload.
+
+Mechanism: persistence keeps `usage_count > 0`, so LAST-CLOSE never fires `nv_shutdown_adapter`, so the chip never enters the post-shutdown "MMIO-responsive, GSP-off" state, so the cycle-2 trigger never has a precondition to wedge on. The actual wedging code is never reached.
+
+This is identical in effect to what the injector entrypoint already does via `nvidia-smi -pm 1` shortly after probe. Moving it into the driver eliminates the small userspace-engagement window AND removes one of the injector's userspace dependencies (per the native-in-driver hardening direction).
+
+**What Tier 0 does NOT do:**
+- It does not fix the `rmmod` / driver-unbind path. `rmmod nvidia` fires `nv_pci_remove_helper → nv_shutdown_adapter` regardless of persistence flag. The next `modprobe`'s first open then re-inits from a userspace-recovered chip — same wedge precondition. PINPOINT-2 Run 2 yesterday confirmed this case wedges.
+- It does not identify or close the underlying init-on-divergent-chip-hangs mechanism. The wedge condition still exists; we just stay out of its state space until module unload.
+
+Implementation cost: a few lines in `nv_pci_probe`. Validation: existing production runs that engage persistence are the regression-witness — Tier 0 reaches the same end state via a different mechanism.
+
+### Tier 1 — probe-time poison flag (speculative, downgraded)
+
+**Signature confidence: PARTIALLY FALSIFIED 2026-05-29 evening (Test #1 FULLPRE + Differential test).** Two wedge runs (n=2 of 5) showed the `0x110094 == 0xbadf2100` sentinel absent. The Differential test (power/control=on) also ruled out runtime-PM resume as the wedge site. Tier 1 retained below for traceability and as a possible secondary signal; not the primary fix path.
+
+(Original Tier 1 writeup, preserved for traceability:) Earlier same day this section claimed "HIGH (n=4 sentinel-present-with-wedge + n=1 sentinel-absent-without-wedge)" and "empirically necessary AND sufficient." Two wedges later we have n=2 sentinel-absent-WITH-wedge. The "necessary" claim is false. The signal correlates (n=3 of 5 wedges where probe-time emission was actually observed) but does not gate. As a single-register canary, it would miss the un-sentineled wedges entirely. Forensics: `/var/log/mission-1-archaeology/c1-test1-fullpre-wedge-2026-05-29/FORENSICS-REPORT.md` and `/var/log/mission-1-archaeology/diff-test-wedge-2026-05-29/FORENSICS-REPORT.md`.
 
 Additionally, the **wedge-site assumption** built into Tier 2's wrap recommendation is partially falsified: bpftrace captured cycle 1 cleanly (5 ENTER / 5 RETURN: `nv_open_device`, `nv_stop_device`, `nv_shutdown_adapter`) but captured **zero** cycle 2 events. The wedge fires BEFORE `nv_open_device` is reached. Wrapping `RmInitAdapter` (which `nv_open_device` would call) does not help if the wedge fires earlier in the syscall path.
 

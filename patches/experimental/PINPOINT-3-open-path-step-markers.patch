@@ -1,0 +1,144 @@
+# PINPOINT-3 — open-path step markers for F40 cycle-2 wedge site identification.
+#
+# After three falsifications on 2026-05-29 (sentinel-as-canary, RmInitAdapter-as-site,
+# pci_pm_runtime_resume-as-site), we know the F40 wedge fires on cycle 2's open syscall
+# BEFORE nv_open_device is reached. This patch instruments nvidia_open + nvidia_open_deferred
+# with nv_printf markers at every step so the LAST marker before kernel silence pins the
+# wedge site. Same approach as PINPOINT-1 (close-callback) and PINPOINT-2 (shutdown internals).
+#
+# Pure observability — no logic changes, no MMIO, no register access. NOT for production.
+# Applied via the Dockerfile APPLY_EXPERIMENTAL_PATCH build arg.
+#
+# Test procedure: see docs/missions/.../design/F40b-structural-fix-2026-05-29.md
+#
+# Author: nvidia-driver-injector contributors
+# Date:   2026-05-29
+# License: MIT
+
+diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
+index c27955fb..1ab1d559 100644
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -1776,6 +1776,7 @@ static void nvidia_open_deferred(void *nvlfp_raw)
+     nv_linux_file_private_t *nvlfp = (nv_linux_file_private_t *) nvlfp_raw;
+     nv_linux_state_t *nvl = nvlfp->deferred_open_nvl;
+     int rc;
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=deferred-entry pid=%d\n", current->pid);
+ 
+     /*
+      * Deferred opens and device removal are synchronized via
+@@ -1791,8 +1792,12 @@ static void nvidia_open_deferred(void *nvlfp_raw)
+      * So, it is safe to proceed without nv_system_pm_lock here (in fact, it
+      * must not be taken to ensure nvl->open_q can make forward progress).
+      */
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=deferred-pre-ldata-lock pid=%d\n", current->pid);
+     down(&nvl->ldata_lock);
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=deferred-post-ldata-lock pid=%d\n", current->pid);
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=deferred-pre-init pid=%d\n", current->pid);
+     rc = nv_open_device_for_nvlfp(NV_STATE_PTR(nvl), nvlfp->sp, nvlfp);
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=deferred-post-init pid=%d rc=%d\n", current->pid, rc);
+ 
+     /* Only add open file tracking where nvl->usage_count is incremented */
+     if (rc == 0)
+@@ -1801,6 +1806,7 @@ static void nvidia_open_deferred(void *nvlfp_raw)
+     up(&nvl->ldata_lock);
+ 
+     complete_all(&nvlfp->open_complete);
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=deferred-exit pid=%d\n", current->pid);
+ }
+ 
+ /*
+@@ -1866,6 +1872,7 @@ nvidia_open(
+     int rc = 0;
+     nv_linux_file_private_t *nvlfp = NULL;
+     nvidia_stack_t *sp = NULL;
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=entry pid=%d minor=%u\n", current->pid, NV_DEVICE_MINOR_NUMBER(inode));
+ 
+     nv_printf(NV_DBG_INFO, "NVRM: nvidia_open...\n");
+ 
+@@ -1890,22 +1897,27 @@ nvidia_open(
+     /* after setting up the private data */
+     if (nv_is_control_device(inode))
+     {
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=ctl-device-branch pid=%d\n", current->pid);
+         rc = nvidia_ctl_open(inode, file);
+         if (rc != 0)
+             goto failed;
+         return rc;
+     }
+ 
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=pre-pm-lock pid=%d\n", current->pid);
+     rc = nv_down_read_interruptible(&nv_system_pm_lock);
+     if (rc < 0)
+         goto failed;
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=post-pm-lock pid=%d\n", current->pid);
+ 
+     /* nvptr will get set to actual nvl upon successful open */
+     nvlfp->nvptr = NULL;
+ 
+     init_completion(&nvlfp->open_complete);
+ 
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=pre-devlist-lock pid=%d\n", current->pid);
+     LOCK_NV_LINUX_DEVICES();
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=post-devlist-lock pid=%d\n", current->pid);
+ 
+     nvl = find_minor_locked(NV_DEVICE_MINOR_NUMBER(inode));
+     if (nvl == NULL)
+@@ -1918,15 +1930,20 @@ nvidia_open(
+ 
+     nv = NV_STATE_PTR(nvl);
+     nv_init_mapping_revocation(nvl, file, nvlfp, inode);
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=post-mapping-revocation pid=%d\n", current->pid);
+ 
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=pre-trylock-foreground pid=%d\n", current->pid);
+     if (nv_try_lock_foreground_open(file, nvl) == 0)
+     {
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=foreground-branch pid=%d\n", current->pid);
+         /* Proceed in foreground */
+         /* nvl->ldata_lock is already taken at this point */
+ 
+         UNLOCK_NV_LINUX_DEVICES();
+ 
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=foreground-pre-init pid=%d\n", current->pid);
+         rc = nv_open_device_for_nvlfp(nv, nvlfp->sp, nvlfp);
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=foreground-post-init pid=%d rc=%d\n", current->pid, rc);
+ 
+         /* Only add open file tracking where nvl->usage_count is incremented */
+         if (rc == 0)
+@@ -1938,6 +1955,7 @@ nvidia_open(
+     }
+     else
+     {
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=background-branch pid=%d\n", current->pid);
+         /* Defer to background kthread */
+         int item_scheduled = 0;
+ 
+@@ -1949,7 +1967,9 @@ nvidia_open(
+          * until the work item gets onto nvl->open_q in order to ensure the
+          * lifetime of nvl.
+          */
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=background-pre-qlock pid=%d\n", current->pid);
+         down(&nvl->open_q_lock);
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=background-post-qlock pid=%d\n", current->pid);
+ 
+         if (!nvl->is_accepting_opens)
+         {
+@@ -1963,8 +1983,10 @@ nvidia_open(
+                                nvidia_open_deferred,
+                                nvlfp);
+ 
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=background-pre-schedq pid=%d\n", current->pid);
+         item_scheduled = nv_kthread_q_schedule_q_item(
+                 &nvl->open_q, &nvlfp->open_q_item);
++        nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=background-post-schedq pid=%d sched=%d\n", current->pid, item_scheduled);
+ 
+         if (!item_scheduled)
+         {
+@@ -1988,6 +2010,7 @@ failed:
+         }
+     }
+ 
++    nv_printf(NV_DBG_ERRORS, "NVRM: tb_egpu [OPEN]: site=exit pid=%d rc=%d\n", current->pid, rc);
+     return rc;
+ }
+ 
