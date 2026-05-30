@@ -1,0 +1,720 @@
+{
+  "summary": "SH-1 exhaustiveness gate (task b): map every passively-observable metric around an rm_shutdown_adapter hang, review the open teardown glue, reconcile A4-vs-A7 WPR2 — synthesize the exhaustive SH-1 capture list + a coherent teardown model",
+  "agentCount": 6,
+  "logs": [
+    "Mapped 43 metrics across 5 surfaces; 15 NEW (additive) beyond the ledger inventory."
+  ],
+  "result": {
+    "maps": [
+      {
+        "surface": "PCIe/AER observable surface for the rm_shutdown_adapter teardown hang (eGPU topology GPU 0000:04:00.0 -> bridge 03:00.0 JHL9480 TB5 -> bridge 02:00.0 JHL9480 TB5 -> root port 0000:00:07.0 Intel MTL TB4). Maps every PCIe/AER/link metric bearing on H-SH1/H-SH4/H-SH6, grounded in passive reads of the live healthy aorus.21 host.",
+        "metrics": [
+          {
+            "name": "Bridge AER Uncorrectable Status (CmpltTO bit) on 03:00.0 + 00:07.0",
+            "what_it_tells_us": "H-SH4: if rm_shutdown_adapter issues an MMIO read to the GPU that never completes, a PCIe Completion Timeout latches PCI_ERR_UNC_COMP_TIME (bit 14, 0x4000) in the AER UESta of the requester-side port that owns the outstanding TLP. For RC-originated CPU MMIO this is normally the ROOT PORT 00:07.0; an intermediate bridge (03:00.0) latches it only if that bridge is the one giving up. Confirms whether the hang is a CTO at all (vs a busy-poll where the chip IS answering, H-SH1) and which port sources the error.",
+            "how_to_read": "Passive setpci READ on the BRIDGE (not the hung GPU). Immediate bridge: `setpci -s 03:00.0 0x104.l` (AER@0x100 + UESta@+0x04). Root port: `setpci -s 00:07.0 0x104.l`. Decode bit 14 (0x00004000)=CmpltTO. Live baseline both = 0x00000000 (no CTO). In-driver equivalent: A1 tb_egpu_pcie_read_aer_full(bridge/root, ...) reads the same UESta into out->br_aer_uesta / out->root_aer_uesta.",
+            "passive_safe": "yes",
+            "when_to_sample": "before (baseline), during-hang (the load-bearing sample; cadence ~250ms alongside the worker-state sampler), after. Bridge config space is healthy and answers instantly even if the GPU is wedged.",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          },
+          {
+            "name": "Bridge AER Header Log (TLP address of the timed-out completion) on 03:00.0 + 00:07.0",
+            "what_it_tells_us": "H-SH4 sharpest discriminator: when CmpltTO latches, the AER Header Log (4 dwords @ AER+0x1c) captures the TLP header of the offending request, including the requester ID and the TARGET ADDRESS. That address, mapped against the GPU BAR0 window (live BAR0 phys = 0x80000000, from the A4 close-path line), identifies WHICH chip register rm_shutdown_adapter was polling when it stalled. This is the single observable that names the stuck register without an instrumented build.",
+            "how_to_read": "Passive setpci READ on the bridge that latched CmpltTO: HdrLog dwords at AER+0x1c..0x28 => `setpci -s 00:07.0 0x11c.l 0x120.l 0x124.l 0x128.l` (root) or `setpci -s 03:00.0 0x11c.l ...` (immediate bridge). Live baseline all 0x00000000. In-driver: A1 tb_egpu_pcie_read_aer_full passes hdrlog[4] (currently captured ONLY for the GPU dev in tb_egpu_dump_aer_trigger_event; bridge/root call sites pass NULL — see key finding, SH-1 wants the BRIDGE hdrlog so external setpci is the path unless A1 is extended).",
+            "passive_safe": "yes",
+            "when_to_sample": "during-hang (only meaningful once CmpltTO is set; read immediately after observing UESta bit 14). Header Log is sticky until the status bit is cleared, so a single during-hang read suffices.",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          },
+          {
+            "name": "GPU device-side AER Uncorrectable Status + Header Log (04:00.0 @ AER 0x1b8)",
+            "what_it_tells_us": "Completer-side view: if the GPU itself detects an internal error / UnsupReq / malformed access during teardown it latches in the GPU's own UESta. C-patch nv_pci_unmask_aer_internal_errors un-masks UncorrIntErr (bit 22) + CorrIntErr at probe specifically so a GPU-internal error during this window is NOT demoted to Advisory-Non-Fatal and reaches the kernel. So the GPU UESta is meaningful here, not always-zero.",
+            "how_to_read": "Passive setpci READ on the GPU: `setpci -s 04:00.0 0x1bc.l` (AER@0x1b8 + UESta@+0x04) and HdrLog `0x1d4.l ...`. In-driver: A1 tb_egpu_pcie_read_aer_full(gpu_pdev, ..., gpu_hdrlog, ...) already captures GPU UESta+HdrLog into out->gpu_aer_uesta. CAUTION: a config read to 04:00.0 traverses the full TB chain to a potentially-wedged endpoint.",
+            "passive_safe": "caution",
+            "when_to_sample": "PREFER reading the bridge first. During-hang, attempt the GPU AER read only AFTER confirming via PMC_BOOT_0 that the chip still answers MMIO; if PMC_BOOT_0 reads cleanly the config read is safe, if the chip is dark skip it.",
+            "already_in_ledger_inventory": true,
+            "safety_note": "Config/AER reads to the HUNG GPU traverse 04:00.0<-03:00.0<-02:00.0<-00:07.0 and can themselves stall on the same CTO that wedged the worker (50ms then 0xFFFFFFFF, but on a TB-tunneled path with CTO-disabled the read could hang). Read the bridge (healthy) by default; gate the device read on a prior clean PMC_BOOT_0."
+          },
+          {
+            "name": "Bridge + GPU AER Correctable Status (CESta)",
+            "what_it_tells_us": "Background link-quality context. Live: 03:00.0 CESta=0x00000001 (RxErr, benign TB5 link noise) and GPU CEMsk has AdvNonFatalErr+ masked. Rules in/out whether a correctable storm (e.g. ReplayTimeout) accompanies the teardown — distinguishes a link-degradation hang from a pure chip-state stall. Not expected to be load-bearing but cheap and part of the additive contract.",
+            "how_to_read": "Passive setpci READ: `setpci -s 03:00.0 0x110.l` (CESta@AER+0x10), `setpci -s 04:00.0 0x1c8.l` (GPU CESta). In-driver: captured as out->br_aer_cesta / out->gpu_aer_cesta by tb_egpu_pcie_read_aer_full. Kernel-maintained decoded counters also at /sys/bus/pci/devices/<bdf>/aer_dev_correctable.",
+            "passive_safe": "yes",
+            "when_to_sample": "before + during-hang + after (low cadence, single sample each phase).",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          },
+          {
+            "name": "Kernel-decoded AER counters (sysfs aer_dev_correctable / aer_dev_fatal / aer_dev_nonfatal)",
+            "what_it_tells_us": "The kernel AER service maintains per-device named-bit counters that increment when the AER IRQ fires. A jump in aer_dev_fatal/nonfatal on 00:07.0 or 03:00.0 across the hang window = the kernel's AER handler actually saw a fatal/nonfatal event (would also dispatch the nv_pci err_handlers). Zero delta across the hang = the worker stalled WITHOUT a kernel-visible AER event, strong evidence for the busy-poll/H-SH1 interpretation (chip answering, no PCIe error) over the single-blocked-CTO-read H-SH3.",
+            "how_to_read": "Passive read: `cat /sys/bus/pci/devices/0000:00:07.0/aer_dev_fatal` (and 03:00.0, 04:00.0). Each file lists named bits with counts. Live baseline all zero on all four devices. Diff before-vs-after the hang.",
+            "passive_safe": "yes",
+            "when_to_sample": "before (snapshot) and after (diff). These are monotonic counters so a before/after delta is the signal; no need to poll during the hang.",
+            "already_in_ledger_inventory": false,
+            "safety_note": ""
+          },
+          {
+            "name": "PCIe link state (current_link_speed / current_link_width / LinkActive/DLActive) on the chain",
+            "what_it_tells_us": "H-SH3 vs H-SH1: does the link stay UP during the hang? If DLActive/LinkActive stays set and speed/width hold (live: all four = 2.5 GT/s x4, with 03:00.0 + 00:07.0 DLActive+), the physical link is fine and the hang is logical (chip-state poll), not a link-down/surprise-removal. A link drop mid-hang would instead point at a TB tunnel collapse.",
+            "how_to_read": "Passive sysfs: `cat /sys/bus/pci/devices/0000:03:00.0/current_link_speed` and `.../current_link_width` on each of 03:00.0/02:00.0/00:07.0. For LinkActive bit: `setpci -s 03:00.0 CAP_EXP+0x12.w` (LnkSta, bit 13 = DLActive) on the bridge, or read via lspci -vv LnkSta. In-driver: A1 already reads PCI_EXP_LNKSTA via pcie_capability_read_word for GPU/bridge/root in tb_egpu_dump_aer_trigger_event (gpu_lnksta/br_lnksta/root_lnksta).",
+            "passive_safe": "yes",
+            "when_to_sample": "before + during-hang (cadence ~250ms to catch a transient drop) + after. Bridge-side reads are safe; the GPU LnkSta read is the only one that touches 04:00.0 (caution, same as device AER).",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          },
+          {
+            "name": "PMC_BOOT_0 (GPU BAR0 offset 0) — chip alive-check",
+            "what_it_tells_us": "The keystone alive-check for H-SH1. A successful read of PMC_BOOT_0 (live healthy value 0x1b2000a1 = GB202 chip ID, captured in the A4 close-path line THIS boot) during the hang PROVES the chip is still answering MMIO — meaning rm_shutdown_adapter is busy-polling a state bit that never flips (H-SH1, consistent with the observed single-core CPU burn), NOT blocked on a non-returning read (H-SH3). Reading 0xFFFFFFFF or a hang = chip dark.",
+            "how_to_read": "In-driver A1/A4 primitive is the SAFEST path: the A4 close-path tb_egpu_close_diag already does ioremap(bar0_phys)+ioread32 of PMC_BOOT_0 and emits it to the journal at close-entry/pre-stop/post-shutdown/close-exit. A2 qwd does the same via its kthread and exposes /sys/.../tb_egpu_qwd_last_pmc_boot_0. For an on-demand read during SH-1 use the A4 journal lines (they fire on the close path SH-1 triggers). External equivalent would be /dev/mem or busybox devmem on BAR0 phys 0x80000000 — risky, prefer the in-driver A4 read.",
+            "passive_safe": "caution",
+            "when_to_sample": "before + during-hang + after. A4 emits it automatically at the 4 close-path sites; the during-hang value is what discriminates H-SH1 from H-SH3.",
+            "already_in_ledger_inventory": true,
+            "safety_note": "BAR0 MMIO read to a wedged chip can stall like any GPU-targeted TLP. In-driver the device is held in D0 (DPM=0, d3cold_allowed=0) so the mapping is valid; the read is safe-by-construction per A1's header note as long as the chip answers. If the chip is dark this read could hang the reader — but A4/A2 already issue it on every close, so SH-1 inherits whatever risk profile production already runs."
+          },
+          {
+            "name": "WPR2 status (GPU BAR0 + 0x88a828) before / during / after",
+            "what_it_tells_us": "H-SH6 + the A4/A7 reconciliation (the ledger's central tension). Live A4 close-path line THIS boot shows WPR2=0x07f4a000 wpr2_up:YES at ALL FOUR close sites INCLUDING post-shutdown — i.e. WPR2 is NOT cleared by the close path, yet A7 reports rm_shutdown_adapter times out every teardown. So 0x07f4a000 (the documented normal-running value) persisting through post-shutdown means teardown stalled at/near ENTRY before WPR2 teardown, not late. This RECONCILES the tension: A4 historically reading WPR2->0 must have been a different (rmmod/no-persistence) path; the close path leaves WPR2 up. SH-1 confirms WPR2 unchanged across the hang => stalled-at-entry.",
+            "how_to_read": "In-driver A1 primitive tb_egpu_pcie_read_wpr2(bar0_phys, &raw) (ioremap page-bounded, ioread32 at offset 0x88a828, mask 0xfffffff0). Consumed+emitted by A4 close-path (journal: `tb_egpu [CLOSE]: ... WPR2=0x... wpr2_up:YES/no`) and A2 qwd. SH-1 reads it via the A4 journal lines that fire on its close-path trigger. No external setpci equivalent (it is BAR0 MMIO, not config space).",
+            "passive_safe": "caution",
+            "when_to_sample": "before (close-entry) + during-hang + after (post-shutdown / close-exit). A4 auto-emits at close-entry/pre-stop/post-shutdown/close-exit; SH-1 needs an additional DURING-hang sample (between pre-stop and post-shutdown) which existing A4 sites do not provide -> this during-hang WPR2 read is the one capture that may justify an SH-2 instrumentation point if a journal line cannot be placed mid-rm_shutdown_adapter.",
+            "already_in_ledger_inventory": true,
+            "safety_note": "Same BAR0-MMIO-to-wedged-chip caveat as PMC_BOOT_0. Gate any during-hang WPR2 read on a prior clean PMC_BOOT_0."
+          },
+          {
+            "name": "DPC state on root port 00:07.0 (Downstream Port Containment Status/Ctl)",
+            "what_it_tells_us": "NEGATIVE/dead-metric finding that must be recorded so SH-1 does not waste a capture slot: DPC is ABSENT on the ENTIRE chain (confirmed cap-ID 0x001d present=0 on 04:00.0, 03:00.0, 02:00.0, 00:07.0). A1's tb_egpu_pcie_read_dpc_state will therefore always return present_out=false and dpc_status=0 here, and the snapshot's dpc_status field is structurally 0 on this hardware. So a completion-timeout will NOT trigger DPC containment / link-down; it surfaces purely as AER CmpltTO + Header Log. Knowing DPC cannot fire removes one whole hypothesis branch (no DPC-mediated link disable during the hang).",
+            "how_to_read": "Passive: `lspci -s 00:07.0 -vv | grep -i 'Downstream Port Containment'` returns nothing (absent). In-driver A1 tb_egpu_pcie_read_dpc_state(root, ...) sets present_out=false. No setpci offset because the cap is not in the ext-cap chain (root 00:07.0 ext-caps: AER@0x100, ACS@0x220, PTM@0x150, SecPCIe@0xa30, DLF@0xa90 — no DPC).",
+            "passive_safe": "yes",
+            "when_to_sample": "once (static capability check; record as absent and move on). No during-hang value.",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          },
+          {
+            "name": "Root Error Status + Error Source ID on root port 00:07.0 (AER +0x30 / +0x34)",
+            "what_it_tells_us": "The Root Port aggregates which downstream function reported the most recent uncorrectable/correctable error and latches the requester ID in Error Source ID. During the hang, a non-zero Root Error Status (FERcv/NFERcv bits) plus an Error Source ID pointing at 04:00.0 confirms the GPU as the error origin and that the RC's AER reporting actually fired. Root Error Command live=0x7 (CERptEn+NFERptEn+FERptEn all enabled) so the reporting path is armed. Complements aer_dev_fatal counters with the precise source BDF.",
+            "how_to_read": "Passive setpci READ on root: `setpci -s 00:07.0 0x130.l` (RootErrSta @ AER+0x30), `setpci -s 00:07.0 0x134.l` (ErrSrcID @ AER+0x34), `setpci -s 00:07.0 0x12c.l` (RootErrCmd @ AER+0x2c, live 0x7). Live baseline RootErrSta=0, ErrSrcID=0. In-driver: A1 tb_egpu_pcie_read_aer_full(root, ..., rootcmd, rootsta, errsrc) captures all three; snapshot exposes root_rootsta.",
+            "passive_safe": "yes",
+            "when_to_sample": "during-hang + after (sticky bits; single read once an AER event is suspected).",
+            "already_in_ledger_inventory": false,
+            "safety_note": ""
+          },
+          {
+            "name": "A8 tb_egpu_state + tb_egpu_f40b_fires + qwd_last_aer_summary (in-driver sysfs cross-check)",
+            "what_it_tells_us": "Cross-checks the journal against the driver's own latched state. tb_egpu_f40b_fires increments when the A7 bounded-wait wrapper times out (live=1 from this boot's close-path bring-up fire; will increment again when SH-1's close-path teardown times out -> confirms the A7 wrap fired). tb_egpu_state shows the detector verdict (live=healthy). tb_egpu_qwd_last_aer_summary is the persisted compact AER snapshot (gpu/br/root UESta+CESta, root_rootsta, dpc_status) that A1 populates via tb_egpu_dump_aer_trigger_event on a qwd-detect; on the shutdown path it is NOT auto-populated (qwd detect != shutdown hang) so it reads 'no detection event yet' unless the qwd separately fires.",
+            "how_to_read": "Passive cat: `cat /sys/bus/pci/devices/0000:04:00.0/tb_egpu_f40b_fires`, `.../tb_egpu_state`, `.../tb_egpu_qwd_last_aer_summary`. All 15 tb_egpu_* sysfs files enumerated live. DO NOT write tb_egpu_recover_force_trigger (it is the only writable one and triggers active recovery).",
+            "passive_safe": "yes",
+            "when_to_sample": "before (f40b_fires baseline) + after (confirm increment). state during-hang shows the transient lost-temporary then back to healthy (A8 v2.1 fixed the teardown-strand).",
+            "already_in_ledger_inventory": true,
+            "safety_note": "tb_egpu_recover_force_trigger is writable/active — read-only on every other file; never echo to the force_trigger."
+          }
+        ],
+        "key_findings": [
+          "TOPOLOGY CONFIRMED via passive lspci -tv: GPU 0000:04:00.0 -> immediate upstream bridge 03:00.0 (JHL9480 Barlow Ridge TB5, AER@0x100) -> bridge 02:00.0 (JHL9480 TB5, AER@0x100) -> ROOT PORT 0000:00:07.0 (Intel MTL-P TB4 PCIe Root Port #0, 8086:7ec4, AER@0x100). A1's tb_egpu_pcie_walk_to_root_port correctly walks past BOTH JHL9480 hub bridges to land on 00:07.0 (the one-hop walk would wrongly stop at 03:00.0 — exactly the multi-bridge case A1's 8-hop walker was written for).",
+          "WHERE THE CTO IS LOGGED: A completion timeout on a CPU/RC-originated MMIO read to the GPU latches PCI_ERR_UNC_COMP_TIME (UESta bit 14, 0x4000) on the REQUESTER-SIDE port that owns the outstanding TLP — normally the ROOT PORT 00:07.0; an intermediate bridge (03:00.0) latches it only if that bridge is the one that abandons the request. The AER Header Log (AER+0x1c, 4 dwords) on that same port captures the TLP header including the TARGET ADDRESS, which maps against GPU BAR0 phys 0x80000000 to name the stuck register. SH-1 should read BOTH 00:07.0 and 03:00.0 UESta+HdrLog (passive setpci) to localize.",
+          "PASSIVE-SAFE vs RISKY split: ALL bridge/root-port config-space reads (03:00.0, 02:00.0, 00:07.0 via setpci, and the sysfs aer_dev_*/current_link_* files) are passive-safe — those devices are healthy and answer instantly even if the GPU is wedged. RISKY reads are anything targeting 04:00.0: GPU config-space AER (@0x1b8), GPU LnkSta, GPU BAR0 MMIO (PMC_BOOT_0 @0, WPR2 @0x88a828) — each traverses the full TB chain to a potentially-wedged endpoint and can itself stall on the same CTO. RULE for SH-1: read the bridge first; gate any GPU-targeted read on a prior clean PMC_BOOT_0.",
+          "A1's AER-dump primitive (tb_egpu_dump_aer_trigger_event) is REUSABLE for SH-1 and reads exactly the right surface: GPU+bridge+root LnkSta/DevSta, full AER UESta/UEMsk/UESvrt/CESta/CEMsk on all three, root RootCmd/RootSta/ErrSrc, and DPC — all via pure config-space + pcie_capability_* helpers. GAP: it captures the Header Log ONLY for the GPU device (gpu_hdrlog); the bridge and root call sites pass hdrlog=NULL. Since SH-1's load-bearing TLP-address lives in the BRIDGE/ROOT Header Log, SH-1 must either (a) extend A1 to capture bridge/root hdrlog, or (b) read it externally via passive setpci on 00:07.0/03:00.0. Option (b) needs no code change and is the cheapest-first path.",
+          "DPC IS ABSENT on the entire chain (cap-ID 0x001d not present on 04:00.0/03:00.0/02:00.0/00:07.0 — confirmed). Consequence: a completion timeout will NOT trigger DPC containment or auto link-disable; it surfaces purely as AER CmpltTO+HeaderLog. A1's dpc_status snapshot field is structurally 0 on this hardware. This eliminates a whole hypothesis branch (no DPC-mediated link teardown during the hang) and means SH-1 should not spend a capture slot polling DPC.",
+          "LIVE BASELINE (healthy, this boot): all four devices UESta=0, aer_dev_fatal/nonfatal/correctable all zero, RootErrSta=0, ErrSrcID=0; only benign correctable noise (03:00.0 CESta=0x1 RxErr+). All four link at 2.5 GT/s x4 with 03:00.0+00:07.0 DLActive+ (link up). RootErrCmd=0x7 (all AER report-enables ON). These are the deltas SH-1 measures against.",
+          "A4/A7 RECONCILIATION (the ledger's central tension, H-SH6) — RESOLVED BY LIVE EVIDENCE: the A4 close-path telemetry fired THIS boot (13:02:30) and shows WPR2=0x07f4a000 wpr2_up:YES at ALL FOUR sites INCLUDING post-shutdown, with PMC_BOOT_0=0x1b2000a1 (chip alive) throughout. So on the CLOSE path WPR2 is NOT cleared and the chip stays alive — consistent with A7 reporting rm_shutdown_adapter timing out every teardown. 0x07f4a000 is the documented normal-running WPR2 value (per project_wpr2_mechanism memory), so WPR2 persisting through post-shutdown indicates teardown stalled at/near ENTRY (before the WPR2-teardown step), NOT late. The earlier A4 'WPR2->0 on clean close' observation must have been the rmmod/no-persistence path (NV_FLAG_INITIALIZED cleared, nv_shutdown_adapter short-circuited per A7 Test B), a DIFFERENT path from the close-path SH-1 triggers. SH-1's during-hang WPR2 read confirms unchanged => stalled-at-entry.",
+          "NEW METRICS not in the ledger Metric Inventory (additive): (1) kernel-decoded AER counters /sys/.../aer_dev_{correctable,fatal,nonfatal} — monotonic, before/after diff distinguishes 'kernel AER IRQ actually fired' (real PCIe error) from 'worker stalled with zero AER delta' (busy-poll, H-SH1); fully passive. (2) Root Error Status + Error Source ID on 00:07.0 (AER+0x30/+0x34) — latches the originating requester BDF, confirms GPU-as-source and that RC AER reporting fired; passive setpci. Both are cheap, bridge/root-side, passive-safe, and should be added to SH-1's capture list under the additive contract.",
+          "The during-hang sample of the THREE GPU-MMIO metrics (PMC_BOOT_0, WPR2, GPU LnkSta) is the only part of the capture list that existing in-driver code does NOT already emit mid-rm_shutdown_adapter — A4 emits them at close-entry/pre-stop/post-shutdown/close-exit but there is no site BETWEEN pre-stop and post-shutdown (i.e. inside the hang). If a journal line cannot be placed inside the A7 wrapper's wait loop, capturing the during-hang PMC_BOOT_0/WPR2 is the single observable that could justify an SH-2 instrumentation point. Everything else (bridge AER UESta/HdrLog, link state, AER counters, RootErrSta) is observable-now from userspace passively during the hang because it lives on the healthy bridges."
+        ],
+        "existing_in_driver_primitives": [
+          "nv-tb-egpu-pcie.c:tb_egpu_dump_aer_trigger_event — one-shot full dump of GPU+bridge+root LnkSta/DevSta + AER UESta/UEMsk/UESvrt/CESta/CEMsk + root RootCmd/RootSta/ErrSrc + DPC; the reusable AER-dump primitive for SH-1 (gap: bridge/root Header Log passed NULL)",
+          "nv-tb-egpu-pcie.c:tb_egpu_pcie_read_aer_full — passive config-space read of one device's full AER cap (UESta/UEMsk/UESvrt/CESta/CEMsk, optional hdrlog[4], rootcmd/rootsta/errsrc); the per-device building block",
+          "nv-tb-egpu-pcie.c:tb_egpu_pcie_walk_to_root_port — 8-hop pci_upstream_bridge walk GPU->root port; correctly lands on 00:07.0 past both JHL9480 hub bridges",
+          "nv-tb-egpu-pcie.c:tb_egpu_pcie_read_dpc_state — DPC Status/Ctl read (returns present=false on this hardware; DPC absent chain-wide)",
+          "nv-tb-egpu-pcie.c:tb_egpu_pcie_read_wpr2 — BAR0+0x88a828 ioremap+ioread32 WPR2 read; the H-SH6 discriminator; consumed by A4 close-path + A2 qwd",
+          "nv-tb-egpu-close.c:tb_egpu_close_diag — close-path PMC_BOOT_0 (BAR0+0) + WPR2 + health verdict; emits at close-entry/pre-stop/post-shutdown/close-exit (fired live this boot, gave the A4/A7 reconciliation evidence)",
+          "nv-tb-egpu-qwd.c:tb_egpu_qwd_last_aer_summary_show — sysfs surface exposing the persisted compact AER snapshot (gpu/br/root UESta+CESta, root_rootsta, dpc_status)",
+          "nv-tb-egpu-qwd.c:tb_egpu_qwd_last_pmc_boot_0_show — sysfs surface for the qwd kthread's last PMC_BOOT_0 read",
+          "nv-pci.c:nv_pci_unmask_aer_internal_errors — C-patch: un-masks AER UncorrIntErr+CorrIntErr at probe so GPU-internal errors during teardown are not demoted to Advisory-Non-Fatal and reach the kernel AER path (makes the GPU UESta meaningful)",
+          "nv-pci.c:nv_pci_error_detected / nv_pci_mmio_enabled / nv_pci_cor_error_detected — A3 err_handler callbacks that each call tb_egpu_dump_aer_trigger_event on a kernel-dispatched AER event (the in-driver path that fires if the hang produces a real fatal/nonfatal AER event)"
+        ]
+      },
+      {
+        "surface": "Chip-state register observable surface (WPR2, PMC_BOOT_0, GSP handshake) for the rm_shutdown_adapter hang — SH-1 exhaustiveness gate. Live: aorus.21, GPU 0000:04:00.0, BAR0 phys=0x80000000 (so WPR2 abs addr = 0x8088a828), immediate bridge 0000:03:00.0 (Barlow Ridge TB5), host root port 0000:07.0. A7 timeout live = 200ms; recover+qwd enabled.",
+        "metrics": [
+          {
+            "name": "WPR2 status (BAR0+0x88a828, bits[31:4])",
+            "what_it_tells_us": "H-SH6 discriminator: did teardown progress or stall at entry? Non-zero (e.g. 0x07f4a000) = WPR2 still up; 0 = cleared. Sampling BEFORE/DURING-hang/AFTER reconciles the A4-vs-A7 tension (A4 historically recorded WPR2->0 on clean close, yet A7 times out every teardown). If WPR2 unchanged across the hang => stalled at entry; if cleared mid-hang => stalled late. Masked value via TB_EGPU_PCIE_WPR2_VAL_MASK=0xfffffff0.",
+            "how_to_read": "In-driver primitive: tb_egpu_pcie_read_wpr2(bar0_phys, &raw) in nv-tb-egpu-pcie.c:48 (ioremap PAGE at (bar0+0x88a828)&PAGE_MASK, ioread32, iounmap). Already wired into A4 close-path at nv-tb-egpu-close.c:121 (tb_egpu_close_diag_pdev). External equivalent: mmap /sys/bus/pci/devices/0000:04:00.0/resource0 (64MB, root, BAR0) and read u32 at offset 0x88a828 — but see passive-safe note.",
+            "passive_safe": "caution",
+            "when_to_sample": "before (baseline, healthy), during-hang (the load-bearing sample; cadence ~250ms to match worker-state sampler), after (post-sink-set). A4's existing post-shutdown site fires AFTER both bounded rm_* calls so on a 200ms-timeout it captures the AFTER value only.",
+            "already_in_ledger_inventory": true,
+            "safety_note": "BAR0 MMIO read on a wedged device can itself hang (same PCIe completion-timeout path rm_shutdown_adapter is stuck on). The qwd evidence says the chip is likely alive answering MMIO (single-core busy-poll, not a blocked read), so a read probably returns — but this is exactly the hypothesis under test, so treat the during-hang read as itself a variable. Prefer reading from a context that can survive a hang (the in-driver A4 primitive runs in the same thread that may be stuck; a userspace resource0 mmap-read is independently killable). Driver owns resource0; concurrent in-driver ioremap of the same page is benign (separate mapping)."
+          },
+          {
+            "name": "PMC_BOOT_0 (BAR0 offset 0, chip identity, expected 0x1b2000a1 for GB202)",
+            "what_it_tells_us": "H-SH1 vs chip-dead discriminator: confirms the chip is still ALIVE and answering MMIO during the hang. Returns the chip ID on a healthy bus, 0xFFFFFFFF on a dead/fallen-off bus (TB_EGPU_QWD_DEAD_BUS_VALUE). If PMC_BOOT_0 reads valid chip-ID during the hang => chip alive, rm_shutdown_adapter is busy-polling a state bit that never flips (supports H-SH1); if 0xFFFFFFFF => bus fell off (different failure class).",
+            "how_to_read": "In-driver primitives, three of them: (1) tb_egpu_close_diag_pdev in nv-tb-egpu-close.c:112 (ioremap+ioread32 BAR0[0]); (2) tb_egpu_recover_slot_reset in nv-tb-egpu-recover.c:602 (same, used as RECOVERED verdict); (3) qwd kthread nv-tb-egpu-qwd.c:175 (READ_ONCE(regs32[0]) via nv->regs->map, volatile). External: u32 at offset 0 of resource0 mmap, or setpci is NOT applicable (this is MMIO not config space).",
+            "passive_safe": "caution",
+            "when_to_sample": "before/during-hang/after, same cadence as WPR2 (they share the ioremap; A4 reads both in one call). The qwd thread already samples PMC_BOOT_0 every NVreg_TbEgpuQwdIntervalMs cycle independently — but it short-circuits if os_pci_is_disconnected, and it does NOT run inside the stuck shutdown worker, so it is a useful independent during-hang witness IF the qwd interval lands inside the 200ms window (it likely won't at default interval; the 10s SH-1 window helps).",
+            "already_in_ledger_inventory": true,
+            "safety_note": "Same BAR0-read-may-hang caveat as WPR2. NOTE the live sysfs tb_egpu_qwd_last_pmc_boot_0 reads 0x00000000 right now — that is NOT a live chip read; it is the zero-init cache value, only populated on a dead-bus DETECTION (nv-tb-egpu-qwd.c:205, inside the detection latch). So that sysfs file is useless as a healthy-state PMC_BOOT_0 readout; do not mistake it for one."
+          },
+          {
+            "name": "GSP shutdown-handshake / mailbox register (the bit rm_shutdown_adapter likely polls)",
+            "what_it_tells_us": "The actual register rm_shutdown_adapter busy-polls during the hang (H-SH1's never-flipping bit). This is the root-cause target. CONFIRMED NOT KNOWN to A1/A3/A4 or anywhere in kernel-open: grep of kernel-open/nvidia for GSP mailbox/msgq/MAILBOX/GFW_BOOT/handshake found ZERO references (the only BAR0 offsets the open layer knows are 0=PMC_BOOT_0 and 0x88a828=WPR2). The GSP RPC/message-queue/SR (suspend-resume) sequencing lives entirely in the CLOSED RM core (rm_shutdown_adapter -> gpuStateUnload -> kgspUnloadRm RPC). The open SMMU_VCMDQ registers found in uvm_ats_sva.c are ARM SMMU command-queue regs, unrelated.",
+            "how_to_read": "NOT readable via any in-driver primitive today (no open-source symbol knows the offset). Identifying it requires either: (a) the completion-timeout TLP ADDRESS captured from the upstream bridge AER Header Log during the hang (passive, on bridge 03:00.0/02:00.0 — this is the cheap proxy and IS in the ledger as observable-now), or (b) eBPF uprobe/kprobe on the os_* MMIO accessors (os-interface.c osDevReadReg032 path) to catch the polled offset — the ledger's needs-instrumentation SH-2 tier, or (c) GSP RPC introspection — the needs-deep-instrumentation SH-3+ tier (partly NVIDIA-domain).",
+            "passive_safe": "yes",
+            "when_to_sample": "during-hang for the bridge AER Header Log TLP address (passive setpci READ on the BRIDGE, never the hung device); SH-2/SH-3 for the direct offset.",
+            "already_in_ledger_inventory": true,
+            "safety_note": "Reading the GSP register directly is impossible passively (offset unknown + would be a hung-device MMIO read). The BRIDGE AER TLP-address proxy is the only passive-safe observable and is already in the inventory ('Upstream-bridge AER status + completion-timeout TLP address'). Flagging clearly: there is NO in-driver primitive that reads a GSP handshake bit — A1/A3/A4 know only PMC_BOOT_0 and WPR2."
+          },
+          {
+            "name": "A4 close-path post-shutdown telemetry (tb_egpu_close_diag at site=post-shutdown)",
+            "what_it_tells_us": "Central to A4-vs-A7 reconciliation. At nv.c:2402, tb_egpu_close_diag(nvl,\"post-shutdown\",0L,true) fires from inside nv_stop_device AFTER nv_shutdown_adapter returns — i.e. AFTER both A7-bounded rm_disable_adapter AND rm_shutdown_adapter wraps (nv.c:2298 and nv.c:2348). So during an A7-bounded teardown that times out at 200ms, this A4 line STILL FIRES (nv_shutdown_adapter returns to its caller once the bounded wrapper gives up; the leaked worker is what stays stuck). Captures PMC_BOOT_0 + WPR2 + 'wpr2_up:YES/no' verdict at that AFTER point. This is why A4 can log WPR2->0 'clean close' while A7 simultaneously logs rm_shutdown_adapter timeout: A4 samples AFTER the bounded wrapper returns, NOT after the RM call actually completed. They are measuring different completion points.",
+            "how_to_read": "In-driver: tb_egpu_close_diag (nv-tb-egpu-close.c:139) -> tb_egpu_close_diag_pdev (nv-tb-egpu-close.c:87) on is_last_close=true. Read passively from the journal: grep 'tb_egpu [CLOSE]: site=post-shutdown' for the PMC_BOOT_0=/WPR2=/wpr2_up: fields. Four sites total (close-entry, pre-stop, post-shutdown, close-exit at nv.c:2498/2517/2402/2535); post-shutdown is the diagnostic one.",
+            "passive_safe": "yes",
+            "when_to_sample": "after (it is structurally an after-teardown marker). To get a DURING-hang sample, SH-1 must add capture independent of A4 (A4 cannot observe the worker mid-hang — it runs on the returning caller thread, not the stuck worker).",
+            "already_in_ledger_inventory": true,
+            "safety_note": "This telemetry was verified non-perturbing 2026-05-08 (project_close_path_mitigated_2026_05_08). Its WPR2/PMC_BOOT_0 read happens on the caller thread which is NO LONGER blocked (the bounded wrapper already returned), so unlike a true during-hang read it is safe — but for the same reason it does NOT witness the hang itself. The reconciliation insight: A4 post-shutdown is an AFTER sample by construction; treat any 'clean WPR2' it logs as post-timeout state, not proof the RM call completed."
+          },
+          {
+            "name": "Upstream-bridge AER status + completion-timeout TLP address (bridge 03:00.0 / 02:00.0 / root 00:07.0)",
+            "what_it_tells_us": "H-SH4: identifies the chip register/subsystem by the completion-timeout TLP address logged in the bridge AER Header Log when an MMIO to the hung GPU times out. Read on the BRIDGE (which is healthy) not the hung device. Also distinguishes a genuine completion-timeout (UESta CTO bit + Header Log populated) from a pure busy-poll where no TLP ever times out (if the chip answers, no AER on the bridge — which itself is evidence for H-SH1 chip-alive).",
+            "how_to_read": "External passive: setpci -s 0000:03:00.0 reads of the AER extended cap (ECAP 0x01) — UNCOR_STATUS, HEADER_LOG[0..3]. In-driver equivalent exists: tb_egpu_pcie_read_aer_full (nv-tb-egpu-pcie.c:139) + tb_egpu_dump_aer_trigger_event (nv-tb-egpu-pcie.c:178) which walks GPU->bridge->root and dumps all AER+DPC+LnkSta in one printk; but for SH-1 prefer the external setpci-on-bridge path (does not touch the hung device). tools/get-pci-stats.sh already captures bridge AER counts.",
+            "passive_safe": "yes",
+            "when_to_sample": "before (baseline AER, expect clean) and during-hang (the load-bearing sample — read bridge AER repeatedly during the 10s window to catch a CTO+HeaderLog). Config-space reads on the BRIDGE are safe regardless of GPU state.",
+            "already_in_ledger_inventory": true,
+            "safety_note": "Reading the GPU device's OWN AER during the hang is the risky variant (config read to the possibly-wedged endpoint) — the ledger already flags this as 'observable-now (cautious), prefer bridge'. Bridge reads are unconditionally safe."
+          },
+          {
+            "name": "Worker-thread CPU-burn + scheduling state (poll vs block)",
+            "what_it_tells_us": "H-SH1 (busy-poll) vs H-SH3 (single blocked MMIO read). Sustained single-core 100% + R state = busy-poll loop (chip alive, polling a never-flipping bit) => H-SH1. D state (uninterruptible sleep) + no CPU burn = blocked on a single non-returning MMIO read => H-SH3. User already reports single-core peg (favoring H-SH1) but n is informal.",
+            "how_to_read": "External passive: identify the nv_f40b worker tid (ps -eLo pid,tid,comm,stat | grep -i 'kworker\\|nv_f40b' during the hang; the bounded worker runs on system_long_wq per nv.c:2245), then sample /proc/<tid>/stat utime+stime+state at ~250ms cadence. No driver interaction.",
+            "passive_safe": "yes",
+            "when_to_sample": "during-hang only, ~250ms cadence across the 10s window.",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          },
+          {
+            "name": "PCIe link state (current_link_speed/width/LinkActive) during hang",
+            "what_it_tells_us": "Whether the TB tunnel/link stayed up during the hang (rules out a link-down as the cause of the MMIO non-completion). Live baseline now: GPU 04:00.0 and bridge 03:00.0 both report 2.5 GT/s x4 (Gen1 x4 — the TB-tunneled idle state; not a fault).",
+            "how_to_read": "External passive sysfs: cat /sys/bus/pci/devices/0000:03:00.0/current_link_speed and current_link_width (read on the BRIDGE side preferentially). LinkActive bit via setpci LNKSTA on the bridge if needed (bit 12).",
+            "passive_safe": "yes",
+            "when_to_sample": "before/during-hang/after.",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          },
+          {
+            "name": "A8 counters: tb_egpu_f40b_fires + tb_egpu_state (sysfs)",
+            "what_it_tells_us": "Cross-check that the A7 bounded-wait actually fired (f40b_fires increments via nv_tb_egpu_f40b_fired_teardown at nv.c:2284 on timeout) and that state was NOT stranded (the A8 v2.1 fix keeps state=healthy on a teardown fire). Confirms the journal 'timed out' line against the counter. Live now: f40b_fires=1 (the bring-up close-path fire already counted), state=healthy.",
+            "how_to_read": "External passive sysfs: cat /sys/bus/pci/devices/0000:04:00.0/tb_egpu_f40b_fires and /tb_egpu_state. Backed by module-global atomics in nv-tb-egpu-metrics.c. No chip touch (pure software counters).",
+            "passive_safe": "yes",
+            "when_to_sample": "before and after each SH-1 trigger (delta = did A7 fire this run). state is a software verdict, safe anytime.",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          },
+          {
+            "name": "Worker-exits-post-sink-set (no D-state zombie)",
+            "what_it_tells_us": "H-SH5 safety: confirms the leaked system_long_wq worker exits after the C5 sink is set (rm_cleanup_gpu_lost_state at nv.c:2269 makes subsequent RM MMIO fail-fast, letting the worker return). No zombie accumulation validates the close-path SH-1 variant is repeatable in one boot.",
+            "how_to_read": "External passive: ps -eLo pid,tid,comm,stat | grep -iE 'nv_f40b|kworker.*long' post-fire, watch for lingering D-state workers across n>=3 triggers. No driver interaction.",
+            "passive_safe": "yes",
+            "when_to_sample": "after each trigger and after n>=3 cumulative.",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          },
+          {
+            "name": "rm_disable vs rm_shutdown latency asymmetry (journal timestamps)",
+            "what_it_tells_us": "The sharpest existing lead: rm_disable_adapter completes within budget every time, rm_shutdown_adapter times out every time — so the hang is GSP-shutdown-step-specific, not teardown-generic. Quantifying the latency (ballpark ms) bounds H-SH2 (is 200ms simply too tight?).",
+            "how_to_read": "External passive journal: journalctl -k | grep 'tb_egpu \\[F40b\\]' — match 'scheduled to bounded worker' -> 'completed within budget' / 'timed out after N ms' timestamp pairs for each of rm_disable_adapter (nv.c:2298) and rm_shutdown_adapter (nv.c:2348). The two call_name strings disambiguate which wrap fired.",
+            "passive_safe": "yes",
+            "when_to_sample": "after each trigger (journal is durable). At the SH-1 10s timeout the 'completed' vs 'timed out after 10000 ms' line directly answers H-SH2.",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          }
+        ],
+        "key_findings": [
+          "GSP handshake register is UNKNOWN to the open layer. grep of kernel-open/nvidia for GSP mailbox / msgq / MAILBOX / GFW_BOOT / handshake found ZERO references. The ONLY two BAR0 offsets any open primitive (A1/A2/A3/A4) reads are offset 0 (PMC_BOOT_0) and 0x88a828 (WPR2). The bit rm_shutdown_adapter busy-polls lives entirely in the CLOSED RM core (rm_shutdown_adapter -> gpuStateUnload -> kgspUnloadRm RPC). It cannot be read by any in-driver primitive today; the passive proxy is the bridge AER completion-timeout TLP address, and the direct offset needs eBPF on os_* MMIO accessors (SH-2) or GSP RPC introspection (SH-3+). This is the single most important exhaustiveness fact for SH-1: do not expect a GSP register read in the observable-now tier.",
+          "A4-vs-A7 reconciliation RESOLVED at source level: the A4 post-shutdown telemetry (nv.c:2402) fires from nv_stop_device AFTER nv_shutdown_adapter returns, which is AFTER the A7 bounded wrapper gives up at timeout — NOT after the RM call actually completed. The stuck entity is the leaked system_long_wq worker (nv.c:2245); the caller thread returns and runs A4. Therefore A4's historically-logged 'clean close, WPR2->0' is a POST-TIMEOUT after-sample, fully consistent with A7 logging rm_shutdown_adapter timeout every teardown. They measure different completion points. A4 structurally CANNOT witness the hang mid-flight (it is not on the stuck worker thread), so SH-1 must add its own during-hang WPR2/PMC_BOOT_0 capture independent of A4 — A4 alone does not satisfy the H-SH6 before/during/after contract.",
+          "WPR2 read method (A1): tb_egpu_pcie_read_wpr2(bar0_phys, *raw) at nv-tb-egpu-pcie.c:48 — ioremap one PAGE at (bar0+0x88a828)&PAGE_MASK, ioread32 at the page offset, iounmap. Masked with TB_EGPU_PCIE_WPR2_VAL_MASK=0xfffffff0 (bits[31:4]); non-zero => WPR2 up. bar0_phys is taken from nv->bars[NV_GPU_BAR_INDEX_REGS].cpu_address in-driver, or pci_resource_start(pdev,0) in the pdev variant. Live BAR0 phys = 0x80000000, so the absolute WPR2 address on this host = 0x8088a828.",
+          "Both BAR0 reads (WPR2 and PMC_BOOT_0) carry a real hang-on-wedged-device caveat: an MMIO read to a wedged endpoint travels the SAME PCIe completion-timeout path rm_shutdown_adapter is stuck on and can itself hang. The qwd-derived evidence (single-core busy-poll, not a blocked read) argues the chip is alive and a read WILL return — but that is precisely the H-SH1 hypothesis under test, so the during-hang BAR0 read must be treated as itself a variable, not a free observation. Prefer the bridge AER proxy (unconditionally safe) and an independently-killable userspace resource0 mmap-read over an in-driver read on the potentially-stuck thread.",
+          "Userspace passive BAR0 read paths confirmed on live host: /sys/bus/pci/devices/0000:04:00.0/resource0 exists (64MB, root rw, mmap-able) and /dev/mem exists (root:kmem). resource0 is the cleaner path (driver-claimed but a separate mmap is benign; independently killable if it hangs, unlike an in-driver read). No devmem/devmem2/busybox binary is installed, so a tiny mmap+read helper would be needed for resource0. setpci/lspci are present for config-space (bridge AER) reads. CONFIG_STRICT_DEVMEM may block /dev/mem for this reserved MMIO range, so resource0 is preferred.",
+          "Live state captured passively (baseline for SH-1 before-sample): A7 timeout=200ms, NVreg_TbEgpuRecoverEnable=1, NVreg_TbEgpuQwdEnable=1; tb_egpu_f40b_fires=1 (the expected bring-up close-path fire), tb_egpu_state=healthy; GPU 04:00.0 and bridge 03:00.0 both Gen1 x4 (2.5 GT/s, width 4 — TB-tunneled idle, not a fault). WARNING: tb_egpu_qwd_last_pmc_boot_0 sysfs reads 0x00000000 — this is the zero-init cache, NOT a live chip read (it is only populated on a dead-bus detection at nv-tb-egpu-qwd.c:205). Do not use that sysfs file as a healthy-state PMC_BOOT_0 witness.",
+          "The metric inventory in the ledger is already EXHAUSTIVE for the observable-now tier — every chip-state metric I enumerated (WPR2, PMC_BOOT_0, bridge AER TLP address, link state, A8 counters, worker CPU-burn/sched-state, latency, worker-exit) is already listed. NO new additive metric is required; the mapping CONFIRMS the SH-1 capture list rather than expanding it. The two genuinely-missing items (exact polled GSP offset; GSP msgq/mailbox state) are correctly already classed needs-instrumentation (SH-2) / needs-deep-instrumentation (SH-3+). The exhaustiveness gate (task b) is therefore satisfied: SH-1 can proceed without risk of missing an observable-now metric.",
+          "Expected-value anchors for SH-1 interpretation: PMC_BOOT_0 healthy = chip-ID for GB202 (memory cites 0x1b2000a1), dead-bus = 0xFFFFFFFF (TB_EGPU_QWD_DEAD_BUS_VALUE). WPR2 normal-running = 0x07f4a000 per memory (project_wpr2_mechanism_2026_05_06), cleared = 0. If during-hang PMC_BOOT_0 reads chip-ID (not 0xFFFFFFFF) => chip alive answering MMIO => supports H-SH1 over chip-dead. If WPR2 is unchanged before vs during => stalled at entry (H-SH6 'early'); if cleared mid-hang => stalled late (H-SH6 'late')."
+        ],
+        "existing_in_driver_primitives": [
+          "nv-tb-egpu-pcie.c:tb_egpu_pcie_read_wpr2 — reads WPR2 at BAR0+0x88a828 (ioremap/ioread32/iounmap), masks bits[31:4]; the canonical WPR2 reader, reused by A3 and A4",
+          "nv-tb-egpu-close.c:tb_egpu_close_diag_pdev — reads PMC_BOOT_0 (BAR0[0], ioremap+ioread32) AND WPR2 (via the A1 helper) in one call, emits PMC_BOOT_0/WPR2/wpr2_up verdict; the existing post-shutdown after-sample",
+          "nv-tb-egpu-close.c:tb_egpu_close_diag — RM-side close marker; fires the pdev snapshot on is_last_close at the four nv.c sites incl. post-shutdown (nv.c:2402)",
+          "nv-tb-egpu-recover.c:tb_egpu_recover_slot_reset — reads PMC_BOOT_0 (BAR0[0]) as the RECOVERED/DISCONNECT verdict after a bus reset; another PMC_BOOT_0 reader",
+          "nv-tb-egpu-qwd.c:tb_egpu_qwd_thread — periodic READ_ONCE(regs32[0]) PMC_BOOT_0 heartbeat via nv->regs->map (volatile, not ioremap); independent during-hang witness IF its interval lands in the window; caches to last_pmc_boot_0 ONLY on dead-bus detection",
+          "nv-tb-egpu-pcie.c:tb_egpu_pcie_read_aer_full — reads full AER ext-cap (UESta/UEMsk/UESvrt/CESta/CEMsk/HeaderLog/RootCmd/RootSta/ErrSrc) from any pdev; the in-driver equivalent of the bridge-AER TLP-address proxy",
+          "nv-tb-egpu-pcie.c:tb_egpu_dump_aer_trigger_event — walks GPU->bridge->root, dumps AER+DPC+LnkSta+DevSta in one printk; the heavyweight investigation-grade dump (avoid on the hung device per ledger; use bridge-only external setpci instead)",
+          "nv-tb-egpu-pcie.c:tb_egpu_pcie_walk_to_root_port — topology walker GPU->root port (8-hop bounded); needed because the AORUS/Barlow-Ridge hub is multi-bridge (one-hop lands on hub upstream, not host root 00:07.0)",
+          "nv-tb-egpu-pcie.c:tb_egpu_pcie_read_dpc_state — reads DPC ext-cap Status/Ctl on the root port; relevant if a DPC containment event (not just CTO) is implicated in the hang"
+        ]
+      },
+      {
+        "surface": "OPEN-source teardown glue + MMIO-accessor surface around rm_shutdown_adapter (nv.c nv_stop_device -> nv_shutdown_adapter -> rm_disable_adapter/rm_shutdown_adapter, A7 nv_f40b_shutdown_bounded wrapper), and the eBPF/kprobe-traceability of the register-poll path for a future SH-2",
+        "metrics": [
+          {
+            "name": "kretprobe latency of rm_shutdown_adapter (entry->return wall time)",
+            "what_it_tells_us": "SH-2 core question: does the hang live specifically in rm_shutdown_adapter (vs rm_disable_adapter)? rm_shutdown_adapter IS symbolized in live kallsyms (ffffffffc2952960 t rm_shutdown_adapter [nvidia]) so a kprobe/kretprobe pair brackets the exact closed call WITHOUT touching RM source. A7 already bounds this at 200ms via nv_f40b_shutdown_bounded; an unwrapped/disabled-A7 trace would show the true unbounded latency.",
+            "how_to_read": "bpftrace 'kprobe:rm_shutdown_adapter{@s[tid]=nsecs} kretprobe:rm_shutdown_adapter/@s[tid]/{printf(\"%d us\\n\",(nsecs-@s[tid])/1000);delete(@s[tid])}'. Needs BPFTRACE_MISSING_PROBES=warn since symbol only resolves when nvidia.ko is loaded.",
+            "passive_safe": "caution",
+            "when_to_sample": "during a teardown event only (rmmod / last-close nv_stop_device); kprobe attach itself is passive but it only fires when a teardown is actually run, which is an active op outside this task's scope",
+            "already_in_ledger_inventory": false,
+            "safety_note": "Attaching the probe is passive/safe on the healthy live GPU. But the probe only YIELDS data during an actual teardown, and triggering a teardown is the active op the safety bound forbids here. So: pre-stage the probe now (safe), collect on a future deliberate SH-2 teardown run."
+          },
+          {
+            "name": "osDevReadReg032 entry args (register offset) + kretprobe return value, during shutdown",
+            "what_it_tells_us": "THE KEY SH-2 ENABLER. osDevReadReg032(pGpu,pMapping,thisAddress) is the closed-RM register READ accessor — and it IS a real symbolized function in the live module (ffffffffc294e2d0 t osDevReadReg032 [nvidia]). A kprobe on arg2 (thisAddress) reveals exactly WHICH BAR0 register rm_shutdown_adapter polls; a kretprobe reveals the value read. Frequency of fires during the hang window = the exact poll cadence. This recovers register+poll-freq of the closed shutdown routine WITHOUT modifying RM.",
+            "how_to_read": "bpftrace 'kprobe:osDevReadReg032{@off=hist(arg2);@cnt=count()}' plus 'kretprobe:osDevReadReg032{@val=count()}'. arg2 is the NvU32 register offset into BAR0. Pair with the rm_shutdown_adapter bracket above to scope fires to the hang window.",
+            "passive_safe": "caution",
+            "when_to_sample": "during-hang only; high call rate so use hist/count aggregation not per-event printf to avoid perf-buffer overrun (observability-perturbs-the-bug caveat)",
+            "already_in_ledger_inventory": false,
+            "safety_note": "WARNING re memory feedback_observability_perturbs_bug: a high-frequency kprobe on the hot MMIO accessor can itself shift the failure mode. Aggregate (hist/count), do not per-event printf. The ACTUAL load (NV_PRIV_REG_RD32, see findings) is an inlined macro with NO symbol, so the accessor-function boundary is the finest traceable granularity — you cannot kprobe the bare mov instruction."
+          },
+          {
+            "name": "osDevWriteReg032 entry args during shutdown",
+            "what_it_tells_us": "Companion to the read accessor: shows which registers rm_shutdown_adapter WRITES (e.g. disable/quiesce sequencing) before/around the polling read that hangs. Symbolized live (ffffffffc294e040 t osDevWriteReg032 [nvidia]). Distinguishes 'wrote a quiesce reg then polled' from 'polled cold'.",
+            "how_to_read": "bpftrace 'kprobe:osDevWriteReg032{@waddr=hist(arg2)}' — arg2 = register offset, arg3 = value written.",
+            "passive_safe": "caution",
+            "when_to_sample": "during-hang; aggregate",
+            "already_in_ledger_inventory": false,
+            "safety_note": "Same Heisenbug + inlined-macro caveat as osDevReadReg032; the WR32 macro NV_PRIV_REG_WR32 is also an inlined volatile store with no symbol — only the wrapper function osDevWriteReg032 is traceable."
+          },
+          {
+            "name": "nv_shutdown_adapter / nv_stop_device / nv_pci_remove_helper entry+return bracket",
+            "what_it_tells_us": "Q2/Q3: bounds the hang to rm_shutdown_adapter SPECIFICALLY by showing the OPEN host-side steps between the two rm_* calls complete. If nv_shutdown_adapter ENTERS, rm_disable_adapter returns, kthread-stop/IRQ-free run, but the function never RETURNS, the hang is isolated to the second rm_ call. All three are symbolized live (nv_shutdown_adapter ffffffffc2804b50, nv_stop_device ffffffffc2804d40, nv_pci_remove_helper ffffffffc280c380, all [nvidia]).",
+            "how_to_read": "Already templated: /root/nvidia-driver-injector/tools/bpftrace-wedge-watch.bt attaches kprobe+kretprobe to nv_shutdown_adapter and nv_pci_remove_helper. Extend with nv_stop_device. start-without-matching-return = the wedge site.",
+            "passive_safe": "yes",
+            "when_to_sample": "before (pre-stage probe) + during-hang (collect); the bracket is coarse and low-frequency so minimally perturbing",
+            "already_in_ledger_inventory": false,
+            "safety_note": ""
+          },
+          {
+            "name": "nv_f40b_shutdown_bounded / nv_f40b_shutdown_worker entry + timeout branch (A7)",
+            "what_it_tells_us": "Q1/Q3: directly observes A7's bounded-wait wrapper. Whether the worker completes within budget or A7 fires its 200ms timeout (and calls rm_cleanup_gpu_lost_state + nv_tb_egpu_f40b_fired_teardown). nv_f40b_shutdown_bounded (ffffffffc2801be0) and nv_f40b_shutdown_worker (ffffffffc2801b90) both symbolized live. The worker runs the rm_ call on system_long_wq, so tracing the worker isolates the closed call onto a known kthread context.",
+            "how_to_read": "kprobe:nv_f40b_shutdown_bounded (arg3 = call_name string ptr identifies which rm_ call) + bracket nv_f40b_shutdown_worker entry/return. Cross-check against the passive counter tb_egpu_f40b_fires sysfs file (currently =1, the benign healthy-rmmod fire).",
+            "passive_safe": "yes",
+            "when_to_sample": "during teardown; also read the sysfs counter before/after passively",
+            "already_in_ledger_inventory": false,
+            "safety_note": ""
+          },
+          {
+            "name": "tb_egpu_f40b_fires (sysfs counter)",
+            "what_it_tells_us": "Passive cumulative count of A7 F40b timeout fires (both A6 open-path and A7 teardown-path share this single counter per A7 contract). Live value = 1 (the documented benign healthy-rmmod fire). A jump on a teardown run = rm_ call exceeded the 200ms budget = the hang reproduced and A7 contained it.",
+            "how_to_read": "cat /sys/bus/pci/devices/0000:04:00.0/tb_egpu_f40b_fires (A8 sysfs surface, sysfs_create_group)",
+            "passive_safe": "yes",
+            "when_to_sample": "before + after any teardown; fully passive sysfs read",
+            "already_in_ledger_inventory": false,
+            "safety_note": ""
+          },
+          {
+            "name": "tb_egpu_qwd_cycles / tb_egpu_qwd_detections / tb_egpu_qwd_last_pmc_boot_0 (sysfs)",
+            "what_it_tells_us": "The A2 Q-watchdog kthread (tb_egpu_qwd_thread, symbolized live) reads PMC_BOOT_0 at BAR0 offset 0 every ~200ms via a DIRECT volatile READ_ONCE on nv->regs->map — bypassing osDevReadReg032 deliberately. This is the cleanest OPEN-code MMIO-poll exemplar in the tree and a working model for what an SH-2 probe would observe. Live: cycles=12722, detections=0, last_pmc_boot_0=0x0 (healthy).",
+            "how_to_read": "cat /sys/bus/pci/devices/0000:04:00.0/tb_egpu_qwd_{cycles,detections,last_pmc_boot_0,last_aer_summary}",
+            "passive_safe": "yes",
+            "when_to_sample": "anytime; passive sysfs",
+            "already_in_ledger_inventory": false,
+            "safety_note": "Note: qwd is itself an ACTIVE 5Hz MMIO probe (kthread), but it is already running in the live driver as designed — reading its counters is passive. Do not confuse reading the counter (safe) with the probe's own activity."
+          },
+          {
+            "name": "04:00.0 DevCtl2 Completion Timeout window + DevSta/UESta/CESta (lspci)",
+            "what_it_tells_us": "Grounds the A7 timeout-budget rationale and the hang mechanism. DevCtl2 CTO = '50us to 50ms' (A7's 200ms default = 4x the 50ms ceiling, matching the MODULE_PARM_DESC '4x PCIe Completion Timeout'). A hung MMIO read to a fallen-off eGPU stalls until this CTO, then returns all-1s — the TB_EGPU_QWD_DEAD_BUS_VALUE 0xFFFFFFFF the dead-bus short-circuit keys on. Live DevSta/UESta/CESta all clear = healthy substrate.",
+            "how_to_read": "lspci -s 04:00.0 -vv | grep -iE 'DevCtl2|Completion|DevSta|UESta|CESta'",
+            "passive_safe": "yes",
+            "when_to_sample": "before (baseline). CAUTION: on a WEDGED device, even lspci config reads can stall on CTO — see findings caveat; do not lspci a post-wedge device until BAR1 size is confirmed via cached/sysfs path",
+            "already_in_ledger_inventory": true,
+            "safety_note": "Per memory no-rpc-observability-on-broken-bar1: lspci config-space reads to a fallen-off device themselves stall on the completion timeout. Safe on the healthy live GPU only."
+          }
+        ],
+        "key_findings": [
+          "CALL CHAIN (all in /root/open-gpu-kernel-modules/kernel-open/nvidia/nv.c): nvidia_close (5x) -> nv_close_device (2504) -> nv_stop_device (2372). nv_stop_device branches on NV_FLAG_PERSISTENT_SW_STATE: persistent path calls rm_disable_adapter directly (2388); non-persistent path calls nv_acpi_unregister_notifier then nv_shutdown_adapter (2393). nv_shutdown_adapter (2290) is the spine: it wraps BOTH rm_ calls in A7's nv_f40b_shutdown_bounded — rm_disable_adapter at line 2298, then host-side teardown, then rm_shutdown_adapter at line 2348. The PCI-remove path (nv_pci_remove_helper) reaches the same nv_stop_device.",
+          "OPEN vs CLOSED BOUNDARY: rm_disable_adapter and rm_shutdown_adapter are declared in OPEN header kernel-open/common/inc/nv.h:1176-1177 (NV_API_CALL ABI) but DEFINED in closed RM compiled into nv-kernel.o_binary. Everything in nv_shutdown_adapter EXCEPT the two rm_ calls is OPEN+visible: the A7 wrapper nv_f40b_shutdown_bounded/_worker (nv.c:2184-2288), nv_kthread_q_stop, free_irq/NV_PCI_DISABLE_MSI/pci_disable_msix, os_free_mutex, os_pci_trigger_flr. Confirms Q2: between the two rm_ calls, host-side steps (bottom_half_q stop, queue.nvk stop, isr_bh_unlocked_mutex free, IRQ/MSI/MSI-X teardown, msix_bh_mutex free) are ALL open and complete synchronously — they bound the hang to the rm_shutdown_adapter call specifically.",
+          "MMIO ACCESSOR PATH — the os_*/NV_PRIV_REG question (Q1) answered precisely: there is NO os_mmio_read32 in this codebase; os-interface.c only has os_io_read_* which are legacy PORT-I/O not BAR0 MMIO. The real GPU register accessors are osDevReadReg032 / osDevWriteReg032, DEFINED in CLOSED src/nvidia/arch/nvalloc/unix/src/os.c (osDevReadReg032 at line 2026). Inside them the actual load is NV_PRIV_REG_RD32(b,o) = ((b)->Reg032[(o)/4]) — an INLINED macro (src/nvidia/arch/nvalloc/unix/include/nv-priv.h:39), i.e. a raw volatile array deref against the ioremapped BAR0, NOT a function. CONSEQUENCE: the bare MMIO instruction has no symbol and cannot be kprobed at instruction granularity; the FINEST traceable boundary is the osDevReadReg032/osDevWriteReg032 WRAPPER function.",
+          "eBPF/kprobe TRACEABILITY — EMPIRICALLY CONFIRMED on the live aorus.21 driver (595.71.05): despite being compiled from closed RM source, osDevReadReg032 (ffffffffc294e2d0), osDevWriteReg032 (ffffffffc294e040), rm_shutdown_adapter (ffffffffc2952960), rm_disable_adapter (ffffffffc2952840), and cleanupGpuLostStateAtomic (ffffffffc294e0c0) ARE ALL symbolized in /proc/kallsyms as [nvidia] text symbols and therefore kprobe/kretprobe/eBPF-attachable. kptr_restrict=0. This means a future SH-2 CAN recover the exact polled register (osDevReadReg032 arg2=thisAddress = BAR0 offset), the value (kretprobe return), and the poll cadence (fire frequency) WITHOUT modifying RM — purely by attaching to these closed-but-symbolized accessor functions while rm_shutdown_adapter is bracketed by its own kprobe/kretprobe. The ONLY thing not visible is the sub-accessor bare load (inlined macro).",
+          "KEY eBPF-TRACEABLE ACCESSOR LIST (file:func -> live kallsyms addr): osDevReadReg032 @ src/nvidia/arch/nvalloc/unix/src/os.c:2026 (live c294e2d0); osDevWriteReg032 @ os.c:1851 (live c294e040); rm_shutdown_adapter (decl nv.h:1177, live c2952960); rm_disable_adapter (decl nv.h:1176, live c2952840); cleanupGpuLostStateAtomic @ os.c (the C5 sink, live c294e0c0); os_pci_is_disconnected @ kernel-open/nvidia/os-pci.c:155 (OPEN, live c28212a0); os_pci_set_disconnected @ os-pci.c:167 (OPEN, live c28212e0); tb_egpu_qwd_thread @ kernel-open/nvidia/nv-tb-egpu-qwd.c:117 (OPEN exemplar poll loop, live c280d960); nv_shutdown_adapter @ nv.c:2290 (live c2804b50); nv_f40b_shutdown_bounded @ nv.c:2200 (live c2801be0); nv_f40b_shutdown_worker @ nv.c:2190 (live c2801b90); nv_stop_device @ nv.c:2372 (live c2804d40); nv_pci_remove_helper (live c280c380).",
+          "Q3 STRUCTURAL ANSWER — why rm_disable_adapter completing but rm_shutdown_adapter hanging is informative: from the open side, both rm_ calls route through the SAME osDevReadReg032/NV_PRIV_REG_RD32 accessor against the SAME nv->regs->map BAR0 ioremap (set in OPEN code at nv-pci.c:1111 devm_ioremap, stored in nv->regs->map). The open-side substrate is IDENTICAL for both calls. What differs is purely the closed RM sequencing: rm_disable_adapter quiesces engines (often without the final chip-state writes), whereas rm_shutdown_adapter does the deeper power-down / GSP-teardown MMIO that more aggressively touches a now-unstable eGPU link. So a disable-OK / shutdown-hang split points NOT at open-side mapping state (which is invariant) but at WHICH register sequence the closed call issues — exactly what the osDevReadReg032 arg2 kprobe would expose. This is the structural justification for SH-2 targeting the accessor-arg trace rather than hunting for an open-side state difference (there isn't one).",
+          "Q4 — EXISTING TEMPLATE FOUND: /root/nvidia-driver-injector/tools/bpftrace-wedge-watch.bt (dated 2026-05-29) ALREADY attaches kprobe+kretprobe to nv_shutdown_adapter and nv_pci_remove_helper, plus workqueue start/end tracepoints (relevant because A7 queues the rm_ call onto system_long_wq) and device_release_driver_internal/pci_pm_runtime_suspend. It uses BPFTRACE_MISSING_PROBES=warn to attach before nvidia.ko symbols resolve. It does NOT yet probe osDevReadReg032/osDevWriteReg032 or the rm_ functions directly — extending it with those two accessor probes + an rm_shutdown_adapter bracket is the minimal SH-2 delta. A second template tools/bpftrace-c1-test1.bt also exists.",
+          "DEAD-BUS SHORT-CIRCUIT (open-relevant safety mechanism): osDevReadReg032 (and 008/016) call osIsGpuBusDead(pGpu) FIRST (os.c:1884, inline) which checks os_pci_is_disconnected(nv->handle) [OPEN, os-pci.c:155 -> pci_dev_is_disconnected] OR PDB_PROP_GPU_IS_LOST. Once the C5 sink is set, every subsequent MMIO read returns NV_GPU_BUS_DEAD_VALUE_U32 (0xFFFFFFFF) immediately instead of stalling on the completion timeout. This is why A7's timeout path calls rm_cleanup_gpu_lost_state -> cleanupGpuLostStateAtomic: it arms the short-circuit so the leaked worker's next osDevReadReg032 fails fast and the worker exits.",
+          "LIVE GROUNDING (passive, healthy GPU at 0000:04:00.0): tb_egpu_state=healthy; tb_egpu_f40b_fires=1 (the documented benign healthy-rmmod A7 fire); tb_egpu_qwd_cycles=12722 detections=0 last_pmc_boot_0=0x00000000; recover_fires=0. lspci DevCtl2 Completion Timeout='50us to 50ms' (A7's 200ms default = the documented 4x), DevSta/UESta/CESta all clear, LnkSta Gen1 x4 (TB-tunneled virtual, expected). CAVEAT: on a WEDGED/fallen-off device, lspci config reads and any active MMIO themselves stall on the completion timeout (per memory no-rpc-observability-on-broken-bar1) — so during an actual SH-2 hang, prefer pre-staged eBPF aggregation over fresh lspci/nvidia-smi; first post-wedge check must be BAR1 size via sysfs not active observability."
+        ],
+        "existing_in_driver_primitives": [
+          "kernel-open/nvidia/nv-tb-egpu-qwd.c:tb_egpu_qwd_thread (A2 — already polls PMC_BOOT_0 at BAR0 offset 0 via direct volatile READ_ONCE on nv->regs->map every ~200ms; the canonical in-driver MMIO-poll exemplar and a working model for SH-2's target read)",
+          "kernel-open/nvidia/os-pci.c:os_pci_is_disconnected (reads pci_dev_is_disconnected — the OPEN dead-bus marker the accessor short-circuit keys on)",
+          "kernel-open/nvidia/nv.c:nv_f40b_shutdown_bounded (A7 — already brackets each rm_ call with a bounded worker and emits NV_DBG_ERRORS log lines 'scheduled to bounded worker' / 'completed within budget' / 'timed out after N ms', i.e. an in-driver printk-level latency signal for free)",
+          "kernel-open/nvidia/nv-tb-egpu-close.c:tb_egpu_close_diag (A4 — already captures PMC_BOOT_0 + WPR2 at the post-shutdown site in nv_stop_device:2402, immediately after the destructive teardown; directly reusable for SH-2 close-path register snapshot)",
+          "kernel-open/nvidia/nv-tb-egpu-metrics.c:nv_tb_egpu_f40b_fired_teardown (A8 — increments the tb_egpu_f40b_fires sysfs counter on each F40b teardown timeout)",
+          "src/nvidia/arch/nvalloc/unix/src/os.c:osDevReadReg032 (the closed-but-symbolized register READ accessor — arg2=thisAddress is the BAR0 offset SH-2 needs; reusable as a kprobe attach point, not a code-call)"
+        ]
+      },
+      {
+        "surface": "Thread/CPU/workqueue observability for the F40b bounded rm_shutdown_adapter worker — poll-vs-block discriminator (H-SH1 busy-poll vs H-SH3 single-MMIO-block)",
+        "metrics": [
+          {
+            "name": "Worker TID identification via /proc/<tid>/stack frame match",
+            "what_it_tells_us": "Locates the exact kworker executing nv_f40b_shutdown_worker at runtime — the prerequisite for every per-thread sample. Grounds H-SH1/H-SH3 on the right thread (not a sibling kworker).",
+            "how_to_read": "Two-phase, both passive. Phase 1 (cheap, ~33ms): `ps -eLo tid,stat,comm | awk '/kworker/ && ($2 ~ /R/ || $2 ~ /D/ || $3 ~ /events_long/){print $1}'` to get candidate TIDs (system_long_wq workers carry comm suffix '-events_long'; a busy/blocked one is R or D). Phase 2 (~0ms on the narrowed set): for each candidate `grep -q nv_f40b_shutdown_worker /proc/$t/stack`. The matching TID is the worker. Verified live: kptr_restrict=0 so nvidia frames resolve in /proc/<tid>/stack (nv_f40b_shutdown_worker is at ffffffffc2801b90 in /proc/kallsyms). Idle pool kworkers show only worker_thread+0x.. on their stack (no work fn) — zero false positives; baseline events_long worker count on a healthy idle host = 0.",
+            "passive_safe": "yes",
+            "when_to_sample": "once at hang onset to lock the TID, then re-acquire only if /proc/<tid>/stat disappears (leaked worker exits when sink-aware MMIO fails-fast). Re-scan is cheap.",
+            "already_in_ledger_inventory": false,
+            "safety_note": "Pure /proc read, never touches the GPU. Do NOT scan ALL 149 kworker stacks every pass — measured 239ms, nearly the whole 250ms interval; that is self-perturbing. Always narrow with the ps filter first."
+          },
+          {
+            "name": "Per-thread scheduler state (field 3 of /proc/<tid>/stat)",
+            "what_it_tells_us": "THE primary poll-vs-block discriminator. R (running/runnable) over the window = H-SH1 busy-poll (worker spins on an MMIO-read loop pegging a CPU). D (uninterruptible sleep) = H-SH3 single-MMIO-block (worker parked in one config/MMIO access waiting on PCIe Completion Timeout). S/I would indicate it already returned.",
+            "how_to_read": "Read /proc/<tid>/stat; after stripping the 'pid (comm) ' prefix the state is the 1st remaining token. awk: `{rest=$0; sub(/^[0-9]+ \\([^)]*\\) /,\"\",rest); split(rest,a,\" \"); print a[1]}`. Verified live: a[1] == field 3.",
+            "passive_safe": "yes",
+            "when_to_sample": "during-hang, every 250ms across the 10s window",
+            "already_in_ledger_inventory": false,
+            "safety_note": ""
+          },
+          {
+            "name": "Per-thread utime/stime CPU burn (fields 14/15 of /proc/<tid>/stat)",
+            "what_it_tells_us": "Quantitative confirmation of poll-vs-block. H-SH1 busy-poll: utime+stime climb steadily across samples (CPU being burned, almost all stime since it is an in-kernel MMIO loop). H-SH3 block: utime/stime flat/near-zero (thread descheduled in D, consuming no CPU). Delta between first and last sample is the clean signal.",
+            "how_to_read": "utime=field 14 -> a[12], stime=field 15 -> a[13] after the same prefix strip. Units are clock ticks; CLK_TCK=100 on this host (so 1 tick=10ms). Compute delta over the window: (stime_last-stime_first)/100 s of CPU; if it approaches window length the worker pegged a core.",
+            "passive_safe": "yes",
+            "when_to_sample": "during-hang, every 250ms; the signal is the cumulative delta over the 10s window",
+            "already_in_ledger_inventory": false,
+            "safety_note": ""
+          },
+          {
+            "name": "Current CPU / processor (field 39 of /proc/<tid>/stat, or ps psr)",
+            "what_it_tells_us": "Secondary H-SH1 corroboration: a busy-polling worker stays pinned to one CPU (same processor value sample-to-sample while R). A blocked worker's last-run CPU is recorded but it is off-CPU. Lets you cross-check against per-CPU utilisation if mpstat is also run.",
+            "how_to_read": "processor = field 39 -> a[37] after prefix strip (verified live: a[37]==field 39). Or `ps -o psr= -p <tid>`. Sysfs/proc only.",
+            "passive_safe": "yes",
+            "when_to_sample": "during-hang, every 250ms (same pass as state/utime/stime)",
+            "already_in_ledger_inventory": false,
+            "safety_note": ""
+          },
+          {
+            "name": "Worker stack top frame (head -1 /proc/<tid>/stack)",
+            "what_it_tells_us": "Pinpoints WHERE inside the call the thread sits — disambiguates which MMIO/config access is hanging and confirms it is still in nv_f40b_shutdown_worker -> rm_call (rm_shutdown_adapter) rather than having moved on. For H-SH3 the top frame is typically a pci config-read / MMIO readl helper in uninterruptible context; for H-SH1 it cycles through the poll-loop frames.",
+            "how_to_read": "`head -1 /proc/<tid>/stack` (logged per sample, tabs stripped). Symbolic because kptr_restrict=0. Full backtrace via `cat /proc/<tid>/stack` on demand.",
+            "passive_safe": "yes",
+            "when_to_sample": "during-hang, every 250ms; capture full backtrace once mid-window for the writeup",
+            "already_in_ledger_inventory": false,
+            "safety_note": "/proc/<tid>/stack is a passive kernel unwind, no device access. Safe even on a wedged device."
+          },
+          {
+            "name": "wchan (/proc/<tid>/wchan)",
+            "what_it_tells_us": "Cheap secondary block/poll signal: for a D-state blocked worker wchan resolves to the sleeping function symbol; for an R-state busy-poller wchan reads '0' (not sleeping). Confirms state-field reading independently.",
+            "how_to_read": "`cat /proc/<tid>/wchan` (symbolic, verified live: idle kworker showed 'rescuer_thread'/'worker_thread', a running task showed '0').",
+            "passive_safe": "yes",
+            "when_to_sample": "during-hang, optional per pass (adds one tiny read)",
+            "already_in_ledger_inventory": false,
+            "safety_note": ""
+          }
+        ],
+        "key_findings": [
+          "DISCRIMINATOR MECHANICS: H-SH1 (busy-poll) = worker TID in R state, utime+stime climbing (mostly stime), pinned to one CPU, stack cycling the poll loop. H-SH3 (single-MMIO-block) = worker TID in D state, utime/stime flat near-zero, off-CPU, stack parked in one pci/MMIO read in uninterruptible context. State field + utime/stime delta over the 10s window is the clean, unambiguous discriminator; CPU-pin and stack-top corroborate.",
+          "IDENTIFICATION (grounded live): The A7 worker is queued to system_long_wq (nv.c:2245 queue_work(system_long_wq,...)); its kworker comm suffix is '-events_long'. Best identifier is /proc/<tid>/stack frame-grep for nv_f40b_shutdown_worker — kptr_restrict=0 on this host so the nvidia symbol resolves (kallsyms: nv_f40b_shutdown_worker @ ffffffffc2801b90 [nvidia]). Idle pool kworkers carry NO work-fn frame, so zero false positives. Use a cheap two-phase scan: `ps -eLo tid,stat,comm` filter to R/D-or-events_long candidates (33ms) THEN stack-grep only candidates (~0ms). NEVER stack-scan all kworkers per pass — measured 239ms for 149 kworkers, which self-perturbs at a 250ms interval.",
+          "FIELD OFFSETS VERIFIED LIVE against /proc/self/stat (52 fields, CLK_TCK=100): after stripping the 'pid (comm) ' prefix, /proc field F maps to awk token a[F-2]. state=f3=a[1], utime=f14=a[12], stime=f15=a[13], processor=f39=a[37]. The prefix-strip (sub(/^[0-9]+ \\([^)]*\\) /,\"\")) is mandatory because comm-in-parens can contain spaces and shifts naive field numbering.",
+          "CADENCE: 250ms over a 10s window = 40 samples. Per-pass cost once the TID is locked is ~1ms (single /proc/<tid>/stat read measured 970us + one /proc/<tid>/stack head). Negligible perturbation. The expensive part (identification) runs once, not per pass.",
+          "SAMPLER VALIDATED: /tmp/sh1_sampler.sh written and dry-run against a healthy live kworker (substituting worker_thread for the fn frame to get real rows) — produced correct tab-delimited columns ts_ns/tid/state/utime/stime/cpu/stack_top, correct field arithmetic (idle worker shown as state I, utime/stime 0), 250ms cadence, and per-record durability. `sync -d <file>` confirmed available on this host (fsync per freeze-risk methodology) so the log survives a wedge. Default out path /var/log/sh1-poll-vs-block.<epoch>.log.",
+          "SAFETY/PASSIVITY: Every metric is a /proc or ps read — none issues MMIO, opens /dev/nvidia*, or touches chip state. Safe to run even against a wedged device: /proc/<tid>/stack/stat/wchan are kernel-side reads of task_struct, independent of GPU responsiveness. This is the per-thread CPU/scheduler signal that the existing in-driver A4/A8 telemetry does NOT capture (A4 tb_egpu_close_diag/A8 metrics record WPR2/PMC_BOOT_0/AER/f40b_fires but observe no thread state) — hence an external sampler is required, not a driver change.",
+          "CAVEAT — driver version: task referenced aorus.21 but the live loaded module is 595.71.05-aorus.17 (cat /sys/module/nvidia/version). The F40b bounded-shutdown worker (nv_f40b_shutdown_worker/nv_f40b_shutdown_bounded) IS present in the loaded module per kallsyms, so the identification + sampling method is valid for the running driver regardless; re-confirm the version string when aorus.21 is actually loaded.",
+          "WORKER LIFECYCLE NOTE for the sampler: on timeout, nv_f40b_shutdown_bounded sets the C5 GPU-lost sink and returns, leaking the worker (nv.c:2257-2287). The worker only exits later when its sink-aware MMIO fails-fast. So the worker TID can DISAPPEAR mid-window — the sampler re-acquires the TID when /proc/<tid>/stat vanishes and logs a NO_WORKER sentinel row, which itself timestamps the worker's exit (a useful datum: gap between timeout-declared and worker-actually-exited)."
+        ],
+        "existing_in_driver_primitives": [
+          "nv-tb-egpu-close.h:tb_egpu_close_diag — RM-side close-path marker (WPR2/PMC_BOOT_0 snapshot); observes device state, NOT worker thread state",
+          "nv-tb-egpu-close.h:tb_egpu_close_diag_pdev — pdev-based passive hardware-health snapshot with verdict; device-state only",
+          "nv-tb-egpu-metrics.h:nv_tb_egpu_f40b_fired_teardown — A7 shutdown-path timeout counter (increments tb_egpu_f40b_fires at /sys/bus/pci/devices/<bdf>/tb_egpu_f40b_fires); counts the fire but records nothing about poll-vs-block",
+          "nv-tb-egpu-pcie.h:tb_egpu_dump_aer_trigger_event — compact AER snapshot (A1); relevant to the SH-1 AER-address sub-question but not to thread CPU/state",
+          "nv-tb-egpu-pcie.h:tb_egpu_pcie_read_wpr2 — passive WPR2 read primitive used by A3 recovery; device register, not thread state"
+        ]
+      },
+      {
+        "surface": "A4 close-path telemetry (nv-tb-egpu-close.c) vs A7 F40b shutdown wrapper (nv.c) — WPR2 reconciliation for H-SH6 / SH-1",
+        "metrics": [
+          {
+            "name": "WPR2 (BAR0+0x88a828, bits 31:4 via TB_EGPU_PCIE_WPR2_VAL_MASK) before / during-hang / after",
+            "what_it_tells_us": "The H-SH6 discriminator. 'before' = WPR2 up (0x07f4a000) confirms GSP-resident pre-teardown. 'during-hang' (sampled while rm_shutdown_adapter worker is mid-200ms+ timeout) is the NEW reading no prior experiment has: if WPR2 is ALREADY 0 during the hang -> the GSP-shutdown handshake the chip is stuck on is POST-WPR2-clear (late stall); if WPR2 still up during the hang -> stuck BEFORE clearing WPR2 (early stall). 'after' (A4 post-shutdown line) is already known to read 0 on the non-persistent path.",
+            "how_to_read": "in-driver primitive tb_egpu_pcie_read_wpr2(bar0_phys,&raw) (nv-tb-egpu-pcie.c:48) — already wired into A4's tb_egpu_close_diag_pdev (nv-tb-egpu-close.c:121). Passive equivalent for the 'during' sample: setpci/devmem READ of phys 0x80000000+0x88a828 = 0x8088a828 on a NON-wedged chip only; on the live healthy aorus.21 BAR0 phys is 0x80000000 (confirmed /sys/.../0000:04:00.0/resource).",
+            "passive_safe": "caution",
+            "when_to_sample": "before (at A7 'scheduled' log), during-hang (sample at ~100ms and ~250ms after 'scheduled', i.e. inside the 10s SH-1 budget while worker pegs a core), after (A4 post-shutdown line). During-hang is the load-bearing NEW sample.",
+            "already_in_ledger_inventory": true,
+            "safety_note": "During-hang read goes to the SAME BAR0 the hung worker is touching. If the chip has actually gone MMIO-dead (H-SH3) a config/BAR0 read could itself stall the reader. Mitigation: read WPR2 from the syscall thread BEFORE scheduling and AFTER timeout via A4 (those are proven safe — they fire on every live close), and obtain the during-hang value from the worker side only via the instrumented SH-2 path, OR accept the in-driver A4 read is issued by a thread that is NOT the blocked worker. Prefer bridge-side liveness (PMC_BOOT_0 readability) to gate whether a during-hang BAR0 read is safe."
+          },
+          {
+            "name": "PMC_BOOT_0 (BAR0+0x0) readability before/during/after",
+            "what_it_tells_us": "Alive-check: distinguishes H-SH1 (chip alive, answering MMIO, bit never flips -> PMC_BOOT_0 keeps returning 0x1b2000a1 throughout the hang) from H-SH3 (single non-returning MMIO read, chip MMIO-dead -> PMC_BOOT_0 read returns 0xFFFFFFFF or itself stalls). On the live driver PMC_BOOT_0=0x1b2000a1 at every A4 site including post-shutdown AFTER the A7 timeout — strong prior evidence for H-SH1 (chip alive across the hang).",
+            "how_to_read": "A4 already reads it: ioread32(ioremap(bar0_phys,PAGE_SIZE)) in tb_egpu_close_diag_pdev (nv-tb-egpu-close.c:112-117). Logged as PMC_BOOT_0=0x%08x on every CLOSE line.",
+            "passive_safe": "caution",
+            "when_to_sample": "before (A7 scheduled), during-hang (gates whether other during-hang reads are safe), after (A4 post-shutdown).",
+            "already_in_ledger_inventory": true,
+            "safety_note": "Same BAR0-on-hung-device caveat as WPR2. Use as the FIRST during-hang read; if it returns 0xFFFFFFFF or stalls, do NOT issue further during-hang BAR0 reads (chip went dead — that itself is the H-SH3 answer)."
+          },
+          {
+            "name": "Upstream-bridge AER UESta + completion-timeout TLP Header-Log address",
+            "what_it_tells_us": "Whether the hang produces a PCIe Completion Timeout at all, and if so the TLP address pins WHICH chip register rm_shutdown_adapter was waiting on (H-SH4). Note: the A7 log line says 'declaring GPU lost (detector_class=3 DETECTOR_AER_FATAL)' but that is a PLACEHOLDER label set unconditionally on timeout — it is NOT evidence an AER actually fired. The bridge AER status is the independent check. If bridge AER UESta stays 0x0 across the whole hang, the worker is BUSY-POLLING a register that IS completing (H-SH1, no CTO), not blocked on a non-returning TLP (H-SH3).",
+            "how_to_read": "passive setpci on the BRIDGE not the device: setpci -s 03:00.0 ECAP_AER+0x10.L (UESta) and +0x1c..+0x28 (Header Log) on 0000:03:00.0 (the GPU's immediate upstream port, driver=pcieport, confirmed in topology). Repeat on 02:00.0 / 00:07.0 if 03:00.0 shows nothing.",
+            "passive_safe": "yes",
+            "when_to_sample": "during-hang (continuous poll of the bridge every ~250ms) and after.",
+            "already_in_ledger_inventory": true,
+            "safety_note": "Reading the BRIDGE config space is safe even when the leaf device is wedged — this is the project's standard 'read the bridge not the hung device' discipline."
+          },
+          {
+            "name": "Worker thread CPU-burn (utime+stime delta) and scheduling state (R vs D)",
+            "what_it_tells_us": "The poll-vs-block discriminator (H-SH1 vs H-SH3). R-state with rising utime/stime = busy-poll loop (chip alive, bit never flips). D-state with flat utime = single blocked uninterruptible MMIO read. User-empirical already says one core pegs => leans H-SH1; this quantifies it.",
+            "how_to_read": "identify the nv_f40b_shutdown_worker kthread on system_long_wq (ps -eLo pid,tid,stat,comm,wchan | grep -i kworker around the fire), sample /proc/<tid>/stat fields 14/15 (utime/stime) and field 3 (state) at ~250ms cadence during the 10s window.",
+            "passive_safe": "yes",
+            "when_to_sample": "during-hang, ~250ms cadence across the 10s SH-1 budget.",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          },
+          {
+            "name": "rm_disable_adapter vs rm_shutdown_adapter latency (journal-timestamp ballpark)",
+            "what_it_tells_us": "Confirms the asymmetry that is the sharpest lead: rm_disable completes within budget, rm_shutdown times out — so the hang is specific to the final GSP-shutdown step, not teardown generally. On the live driver both fire back-to-back at 13:01:02 (disable 'completed within budget', shutdown 'timed out after 200 ms') confirming the asymmetry already.",
+            "how_to_read": "journal timestamps between 'X scheduled to bounded worker' and 'X completed within budget'/'X timed out after N ms' lines (NVRM: tb_egpu [F40b]: ... in nv_f40b_shutdown_bounded, nv.c:2241-2261).",
+            "passive_safe": "yes",
+            "when_to_sample": "during (both calls, every teardown).",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          },
+          {
+            "name": "Completes-at-T or never, at 10s budget (NVreg_TbEgpuShutdownTimeoutMs=10000)",
+            "what_it_tells_us": "Resolves H-SH2 (is 200ms simply too tight?). If rm_shutdown_adapter 'completed within budget' appears at e.g. 1-3s -> the call DOES finish, A7's 200ms is too aggressive, and the teardown is slow-but-graceful (WPR2 would clear via the real path). If it 'timed out after 10000 ms' -> genuinely non-terminating, the disease is real, A7 containment is necessary.",
+            "how_to_read": "same NVRM [F40b] log line as latency metric, but with the 10s module-param override (the ONLY variable SH-1 changes vs production 200ms).",
+            "passive_safe": "yes",
+            "when_to_sample": "during, single close-path teardown, n>=3.",
+            "already_in_ledger_inventory": true,
+            "safety_note": "Per ledger thermal budget: cap at 10s (not 30s) — the pegged core spikes NUC package temp (project_h21_cpu_thermals)."
+          },
+          {
+            "name": "tb_egpu_f40b_fires sysfs counter cross-check",
+            "what_it_tells_us": "Confirms the teardown timeout is counted and that state is NOT stranded at lost-temporary (A8 v2.1 fix). On the live HEALTHY driver right now: tb_egpu_f40b_fires=1, tb_egpu_state=healthy — i.e. the one bring-up close-path rm_shutdown timeout was counted, yet state correctly stayed healthy. This is direct confirmation the SHUTDOWN-arm fire is a benign-per-bringup event, distinct from the OPEN-arm wedge.",
+            "how_to_read": "cat /sys/bus/pci/devices/0000:04:00.0/tb_egpu_f40b_fires and tb_egpu_state (A8 v2.1 sysfs_create_group surface, confirmed present live).",
+            "passive_safe": "yes",
+            "when_to_sample": "before and after each teardown (delta should be +1 per rm_shutdown timeout).",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          },
+          {
+            "name": "PCIe link state (current_link_speed/width, LinkActive) on bridge during hang",
+            "what_it_tells_us": "Confirms the TB tunnel + link stays up during the hang (so the hang is a chip-internal handshake, not a link drop). If link drops -> different failure class.",
+            "how_to_read": "cat /sys/bus/pci/devices/0000:03:00.0/current_link_speed and current_link_width (bridge-side, safe).",
+            "passive_safe": "yes",
+            "when_to_sample": "during-hang.",
+            "already_in_ledger_inventory": true,
+            "safety_note": ""
+          }
+        ],
+        "key_findings": [
+          "RECONCILED — there is no contradiction; A4 and A7 observe DIFFERENT POINTS on the SAME timeline, and the two 'WPR2->0 clean close' vs 'WPR2 up' observations were on DIFFERENT close paths (non-persistent vs persistent). I confirmed this LIVE on aorus.21 in the 13:01:02-13:01:04 journal window.",
+          "ORDERING (from nv.c source): A7's wrapper lives INSIDE nv_shutdown_adapter (nv.c:2290). The sequence is: nv_stop_device (non-persistent branch, nv.c:2390-2394) -> nv_shutdown_adapter -> [A7] nv_f40b_shutdown_bounded(rm_disable_adapter) [completes] -> host-side teardown -> [A7] nv_f40b_shutdown_bounded(rm_shutdown_adapter) [TIMES OUT at 200ms, returns] -> nv_shutdown_adapter RETURNS -> back in nv_stop_device, A4's tb_egpu_close_diag(nvl,'post-shutdown',...) fires at nv.c:2402. So A4 post-shutdown fires STRICTLY AFTER nv_shutdown_adapter returns, which is STRICTLY AFTER A7's rm_shutdown_adapter timeout. A4 is downstream of A7 on the call stack.",
+          "ANSWER TO Q1: YES — 'nv_shutdown_adapter completes' is true-VIA-A7-TIMEOUT, not via graceful GSP completion. A7 forces nv_shutdown_adapter to return after the bounded 200ms (the worker that actually holds the chip-touching MMIO is leaked, not joined). A4's post-shutdown line then fires ~1s later. Live proof: 13:01:02 'rm_shutdown_adapter timed out after 200 ms', then 13:01:03 'post-shutdown ... WPR2=0x00000000'. A4 'completing' was always downstream of (and gated by) A7's timeout on the non-persistent path — A4 never witnessed graceful rm_shutdown completion; it witnessed A7's bounded return.",
+          "ANSWER TO Q2: The F40 catalog's two WPR2 claims are on TWO DIFFERENT close paths and the doc conflates them. (a) The 'WPR2 STAYS at 0x07f4a000' claim (F40 Run B / Assertion-shape line ~454, and PINPOINT-1's pre-stop) is the PERSISTENCE-ENGAGED path: nv_stop_device takes the rm_disable_adapter branch (nv.c:2386-2388), NEVER calls nv_shutdown_adapter, so no A7 shutdown-wrapper fires and GSP stays resident -> WPR2 up. (b) The 'WPR2 -> 0' clean-close claim (F40 PINPOINT-1 post-shutdown line ~474, '0x00000000 wpr2_up:no') is the NON-PERSISTENT path that DOES run nv_shutdown_adapter. Both are reproduced LIVE: persistent closes at 13:01:04/13:02:30 show post-shutdown WPR2=0x07f4a000 up; the one non-persistent close at 13:01:03 shows post-shutdown WPR2=0x00000000. The A7 timeout ONLY occurs on path (b). So A7's 'times out every healthy rmmod' and A4's 'WPR2->0 clean close' BOTH describe path (b) and are the SAME event viewed at different stack depths.",
+          "ANSWER TO Q3 — THE KEY MECHANISTIC INSIGHT: WPR2 reads 0 at the A4 post-shutdown site EVEN THOUGH rm_shutdown_adapter TIMED OUT and never gracefully finished. This means WPR2-clear happens EARLY in rm_shutdown_adapter's work, BEFORE the chip-touching MMIO that A7's worker is still hung on. The leaked worker is stuck LATE (post-WPR2-clear) on some other GSP-shutdown-coordination / register-flush MMIO. Therefore: (i) WPR2=0 is NOT evidence of graceful completion — it is evidence the teardown got PAST the WPR2-tearing step before stalling; (ii) the disease A7 contains is a LATE-stage stall, after the WPR2 invariant is already torn down. This directly supports H-SH1 (chip alive, answering reads, a later handshake bit never flips) over a wholesale early MMIO death.",
+          "ANSWER TO Q4 — CANDIDATE MODELS and what SH-1's during-hang WPR2 disambiguates: MODEL A (LATE-STALL, leading, consistent with all live data): WPR2 sequence = before:UP / during-hang:0 / after(A4):0. WPR2 clears early inside rm_shutdown, worker then hangs on a later post-WPR2 chip handshake; A7 returns at 200ms; A4 logs WPR2=0. The 'after' reading being 0 is already confirmed live; the NEW during-hang sample being 0 CONFIRMS Model A. MODEL B (EARLY-STALL, less likely): if rm_shutdown hangs BEFORE it clears WPR2, then during-hang:UP and the A4 post-shutdown WPR2=0 could only mean the LEAKED worker eventually cleared WPR2 between the timeout and the A4 read (a race) — testable because A4 fires only ~1s after the timeout; if during-hang shows WPR2 still UP but A4 shows 0, the worker cleared it in that ~1s gap (worker IS making progress, just slow -> shifts weight toward H-SH2 'budget too tight'). MODEL C (MMIO-DEAD, H-SH3): chip stops answering during the hang -> PMC_BOOT_0 during-hang returns 0xFFFFFFFF and WPR2 during-hang is unreadable/garbage; A4's post-shutdown PMC_BOOT_0 would then NOT be 0x1b2000a1 — but live data shows it IS 0x1b2000a1 at post-shutdown, making Model C already unlikely. SH-1's during-hang {PMC_BOOT_0, WPR2} pair is the single measurement that selects among A/B/C.",
+          "DISAMBIGUATING MEASUREMENT (the thing SH-1 must add): the DURING-HANG WPR2+PMC_BOOT_0 pair, sampled while the rm_shutdown_adapter worker is mid-timeout. Every other reading (before, after) is already captured by A4 on every live close. The before/after WPR2 transition (UP->0) is NOT discriminating on its own (it is identical under Models A and B). Only the during-hang value separates them: during=0 -> Model A (late stall, H-SH1); during=UP-then-A4=0 -> Model B (slow-but-progressing, H-SH2); during=unreadable/PMC=0xFFFFFFFF -> Model C (H-SH3).",
+          "SAFETY CAVEAT for SH-1: the during-hang WPR2/PMC_BOOT_0 reads target the SAME BAR0 the hung worker touches. Gate them: issue PMC_BOOT_0 first; if it returns 0xFFFFFFFF or the reader itself stalls, STOP (that is already the Model-C answer) and do not issue the WPR2 read. Bridge-side AER + link-state reads (on 03:00.0) are unconditionally safe and should run continuously regardless. Per the ledger, cap the shutdown timeout experiment at 10s, not 30s, for NUC thermal reasons.",
+          "DOC-CORRECTNESS NOTE for the parent: F40's historical body (and its 'Assertion shape' Run-A/Run-B section) treats 'A4 post-shutdown fires with WPR2 cleared' as proof the destructive teardown COMPLETED ('The destructive teardown is not the problem'). Post-A7, that inference is unsafe: A4 post-shutdown firing only proves nv_shutdown_adapter RETURNED, which A7 now guarantees at 200ms regardless of whether rm_shutdown_adapter actually finished. The F40 morning conclusion 'teardown completes, wedge is in the next OPEN' was reasoning from a pre-A7 driver where nv_shutdown_adapter returning DID imply completion; that implication no longer holds and the F40 catalog's shutdown-arm section already acknowledges this, but the historical 'destructive teardown is not the problem' lines should be read as superseded."
+        ],
+        "existing_in_driver_primitives": [
+          "nv-tb-egpu-close.c:tb_egpu_close_diag_pdev (reads PMC_BOOT_0 via ioremap+ioread32 and WPR2 via tb_egpu_pcie_read_wpr2; logs both + wpr2_up verdict on every LAST-CLOSE)",
+          "nv-tb-egpu-close.c:tb_egpu_close_diag (RM-side wrapper; the 4 nv.c call sites close-entry/pre-stop/post-shutdown/close-exit)",
+          "nv-tb-egpu-pcie.c:tb_egpu_pcie_read_wpr2 (raw WPR2 read at BAR0+0x88a828, mask 0xfffffff0; shared A1/A3/A4 helper)",
+          "nv.c:nv_f40b_shutdown_bounded (A7 wrapper; emits 'scheduled'/'completed within budget'/'timed out after N ms' NVRM lines — the latency + completes-or-never source)",
+          "nv.c:nv_shutdown_adapter (A7 wrap sites for rm_disable_adapter @2298 and rm_shutdown_adapter @2348; A4 post-shutdown fires after this returns @2402)",
+          "nv.c:nv_stop_device (the persistent rm_disable_adapter branch @2388 vs non-persistent nv_shutdown_adapter branch @2393 — the fork that determines whether A7 fires and whether WPR2 clears)",
+          "nv-tb-egpu-metrics.c (A8 v2.1): nv_tb_egpu_f40b_fired_teardown + tb_egpu_f40b_fires/tb_egpu_state sysfs (counts the teardown timeout without stranding state)"
+        ]
+      }
+    ],
+    "synth": {
+      "sh1_capture_list": [
+        {
+          "phase": "pre-hang",
+          "metric": "Live baseline snapshot: A7 timeout=200ms (prod), recover/qwd enable flags, driver version string",
+          "command_or_primitive": "cat /sys/module/nvidia/version (confirm aorus.NN actually loaded — live is 595.71.05-aorus.17, task says .21); cat /sys/bus/pci/devices/0000:04:00.0/tb_egpu_f40b_fires tb_egpu_state; grep NVreg_TbEgpu* in modprobe.d",
+          "passive_safe": "yes",
+          "rationale": "Establishes the before-deltas every later sample measures against; confirms which driver/timeout is live so the F40b worker symbols and 200ms->10s override apply."
+        },
+        {
+          "phase": "pre-hang",
+          "metric": "DPC capability presence on whole chain (NEGATIVE/dead-metric — record absent, do not poll)",
+          "command_or_primitive": "lspci -s 00:07.0 -vv | grep -i 'Downstream Port Containment' (returns nothing; cap-ID 0x001d absent on 04:00.0/03:00.0/02:00.0/00:07.0)",
+          "passive_safe": "yes",
+          "rationale": "Eliminates a hypothesis branch: a completion-timeout CANNOT trigger DPC containment/link-disable here, it surfaces purely as AER CmpltTO+HeaderLog. Record absent once; never spend a during-hang slot on DPC."
+        },
+        {
+          "phase": "pre-hang",
+          "metric": "04:00.0 DevCtl2 Completion-Timeout window + DevSta/UESta/CESta baseline",
+          "command_or_primitive": "lspci -s 04:00.0 -vv | grep -iE 'DevCtl2|Completion|DevSta|UESta|CESta' (CTO='50us to 50ms'; A7 200ms = 4x ceiling; all status clear on healthy chip)",
+          "passive_safe": "yes",
+          "rationale": "Grounds the A7 timeout-budget rationale and the all-1s/0xFFFFFFFF dead-bus return mechanism. Safe ONLY on the healthy chip pre-hang; never lspci a post-wedge device."
+        },
+        {
+          "phase": "pre-hang",
+          "metric": "Bridge + root AER baseline: UESta / CESta / RootErrSta / ErrSrcID / RootErrCmd on 03:00.0, 02:00.0, 00:07.0",
+          "command_or_primitive": "setpci -s 00:07.0 0x104.l 0x110.l 0x130.l 0x134.l 0x12c.l ; setpci -s 03:00.0 0x104.l 0x110.l (baseline: UESta=0, CESta 03:00.0=0x1 RxErr benign, RootErrSta=0, ErrSrcID=0, RootErrCmd=0x7)",
+          "passive_safe": "yes",
+          "rationale": "Establishes the clean baseline (sticky AER status bits) so any during-hang CmpltTO/RootErrSta/ErrSrcID delta is unambiguously attributable to the teardown."
+        },
+        {
+          "phase": "pre-hang",
+          "metric": "Kernel-decoded AER counters snapshot (monotonic before-value)",
+          "command_or_primitive": "cat /sys/bus/pci/devices/0000:00:07.0/aer_dev_{fatal,nonfatal,correctable} (and 03:00.0, 04:00.0) — all zero baseline",
+          "passive_safe": "yes",
+          "rationale": "These are monotonic; the SIGNAL is the before/after delta, so the before-snapshot must be taken pre-hang. Zero delta later = kernel AER IRQ never fired = busy-poll (H-SH1), not a real PCIe error."
+        },
+        {
+          "phase": "pre-hang",
+          "metric": "PCIe link-state baseline on chain (current_link_speed/width)",
+          "command_or_primitive": "cat /sys/bus/pci/devices/0000:0{3,2}:00.0/current_link_speed current_link_width and 00:07.0 (baseline 2.5 GT/s x4 = TB-tunneled idle, DLActive+ on 03/07)",
+          "passive_safe": "yes",
+          "rationale": "Baseline for the during-hang link-up check that rules out a TB tunnel collapse vs a logical chip-state stall."
+        },
+        {
+          "phase": "pre-hang",
+          "metric": "WPR2 + PMC_BOOT_0 before-sample (close-entry / pre-stop)",
+          "command_or_primitive": "A4 journal lines: grep 'tb_egpu [CLOSE]: site=close-entry' and 'site=pre-stop' for PMC_BOOT_0=/WPR2=/wpr2_up: (in-driver tb_egpu_close_diag_pdev fires automatically); expect PMC_BOOT_0=0x1b2000a1, WPR2=0x07f4a000 up",
+          "passive_safe": "yes",
+          "rationale": "The 'before' arm of the H-SH6 before/during/after contract; emitted by A4 on the caller thread which is not yet blocked, so unconditionally safe. Anchors the WPR2 UP->? transition."
+        },
+        {
+          "phase": "continuous-sampler",
+          "metric": "Worker TID identification (two-phase, narrow-then-stack-grep) + scheduler state R-vs-D",
+          "command_or_primitive": "Phase1: ps -eLo tid,stat,comm | awk '/kworker/&&($2~/R|D/||$3~/events_long/){print $1}' ; Phase2: grep -q nv_f40b_shutdown_worker /proc/$t/stack ; then field-3 state via awk prefix-strip sub(/^[0-9]+ \\([^)]*\\) /,\"\")",
+          "passive_safe": "yes",
+          "rationale": "THE primary poll-vs-block discriminator. R = H-SH1 busy-poll, D = H-SH3 single-MMIO-block. Pure /proc reads, never touch GPU. NEVER stack-scan all 149 kworkers/pass (239ms self-perturbs at 250ms interval) — narrow first."
+        },
+        {
+          "phase": "continuous-sampler",
+          "metric": "Per-thread utime/stime CPU-burn delta (fields 14/15) + current CPU (field 39) + wchan",
+          "command_or_primitive": "read /proc/<tid>/stat -> a[12]=utime a[13]=stime a[37]=cpu after prefix-strip (CLK_TCK=100); cat /proc/<tid>/wchan ; cumulative delta over 10s window",
+          "passive_safe": "yes",
+          "rationale": "Quantitative H-SH1 confirmation: rising stime + CPU-pin + wchan='0' = busy-poll; flat utime/stime + wchan=sleeping-sym = D-state block (H-SH3). The clean unambiguous signal is the delta over 40 samples."
+        },
+        {
+          "phase": "continuous-sampler",
+          "metric": "Worker stack top-frame (where inside the call it sits)",
+          "command_or_primitive": "head -1 /proc/<tid>/stack per sample; full cat /proc/<tid>/stack once mid-window (kptr_restrict=0, frames resolve)",
+          "passive_safe": "yes",
+          "rationale": "Disambiguates WHICH MMIO/config access hangs and confirms still in nv_f40b_shutdown_worker->rm_shutdown_adapter. Passive kernel unwind of task_struct, safe even on wedged device."
+        },
+        {
+          "phase": "continuous-sampler",
+          "metric": "Bridge + root AER UESta CmpltTO (bit14 0x4000) — the load-bearing during-hang sample",
+          "command_or_primitive": "setpci -s 00:07.0 0x104.l (root UESta) and setpci -s 03:00.0 0x104.l (immediate bridge UESta) at ~250ms cadence; decode bit14",
+          "passive_safe": "yes",
+          "rationale": "H-SH4: confirms whether the hang is a CTO at all and on which requester-side port. Bridge/root config space answers instantly even if GPU wedged. If UESta stays 0x0 through the hang => chip IS answering => busy-poll (H-SH1), not a blocked TLP."
+        },
+        {
+          "phase": "continuous-sampler",
+          "metric": "Bridge + root AER Header Log (TLP target address of the timed-out completion)",
+          "command_or_primitive": "setpci -s 00:07.0 0x11c.l 0x120.l 0x124.l 0x128.l (root HdrLog AER+0x1c..0x28); same on 03:00.0; read immediately after observing CmpltTO set",
+          "passive_safe": "yes",
+          "rationale": "H-SH4 SHARPEST discriminator: the TLP target address mapped against GPU BAR0 phys 0x80000000 NAMES which chip register rm_shutdown_adapter was polling — the only observable-now path to identify the stuck register without an instrumented build. Sticky until status cleared; one read suffices."
+        },
+        {
+          "phase": "continuous-sampler",
+          "metric": "Root Error Status + Error Source ID on 00:07.0 (AER+0x30/+0x34)",
+          "command_or_primitive": "setpci -s 00:07.0 0x130.l 0x134.l (RootErrSta / ErrSrcID); RootErrCmd 0x12c.l live=0x7 (reporting armed)",
+          "passive_safe": "yes",
+          "rationale": "Latches the originating requester BDF; non-zero RootErrSta + ErrSrcID->04:00.0 confirms GPU-as-source and that RC AER reporting actually fired. Complements aer_dev counters with precise source BDF. Sticky — single read once AER suspected."
+        },
+        {
+          "phase": "continuous-sampler",
+          "metric": "PCIe link state during hang (current_link_speed/width + LnkSta DLActive on bridge)",
+          "command_or_primitive": "cat /sys/bus/pci/devices/0000:03:00.0/current_link_speed current_link_width at ~250ms; setpci -s 03:00.0 CAP_EXP+0x12.w bit13 for DLActive if needed",
+          "passive_safe": "yes",
+          "rationale": "H-SH3 vs H-SH1: if link stays UP (speed/width hold, DLActive+) the hang is logical chip-state, not link-down/surprise-removal. A mid-hang drop would point at TB tunnel collapse. Bridge-side reads are safe."
+        },
+        {
+          "phase": "continuous-sampler",
+          "metric": "Bridge + GPU AER Correctable Status (CESta) — background link-quality",
+          "command_or_primitive": "setpci -s 03:00.0 0x110.l (low cadence); GPU CESta 0x1c8.l only if PMC_BOOT_0 clean",
+          "passive_safe": "yes",
+          "rationale": "Rules in/out a correctable storm (ReplayTimeout) accompanying teardown — distinguishes link-degradation from pure chip-state stall. Not expected load-bearing but cheap, part of additive contract. Bridge read safe; GPU CESta is caution."
+        },
+        {
+          "phase": "continuous-sampler",
+          "metric": "PMC_BOOT_0 during-hang (BAR0+0) — chip alive-check, GATES all other GPU-targeted reads",
+          "command_or_primitive": "In-driver A4/A2 path PREFERRED (A4 close-path ioread32 BAR0[0]; A2 qwd /sys/.../ if its interval lands in window). External: tiny mmap+read helper on /sys/.../0000:04:00.0/resource0 offset 0 (resource0 preferred over /dev/mem; no devmem binary installed). Expect 0x1b2000a1, dead=0xFFFFFFFF",
+          "passive_safe": "caution",
+          "rationale": "Keystone H-SH1 alive-check: valid chip-ID during hang PROVES chip answering MMIO => busy-polling a never-flipping bit (H-SH1), not blocked read (H-SH3). MUST be the FIRST GPU-targeted read each pass; if 0xFFFFFFFF or stalls => that is itself the Model-C/H-SH3 answer, stop further GPU reads."
+        },
+        {
+          "phase": "continuous-sampler",
+          "metric": "WPR2 during-hang (BAR0+0x88a828) — the single NEW measurement that disambiguates A4-vs-A7 models",
+          "command_or_primitive": "GATED on prior-clean PMC_BOOT_0 THIS pass. In-driver tb_egpu_pcie_read_wpr2(bar0_phys,&raw) mask 0xfffffff0; external mmap resource0 offset 0x88a828 (abs 0x8088a828). No setpci equivalent (BAR0 MMIO not config)",
+          "passive_safe": "caution",
+          "rationale": "THE load-bearing NEW sample no prior experiment has. during=0 => Model A late-stall (H-SH1); during=UP-then-A4=0 => Model B slow-but-progressing (H-SH2); during=unreadable/PMC=0xFFFFFFFF => Model C (H-SH3). No existing in-driver site samples BETWEEN pre-stop and post-shutdown, so SH-1 must add this; if no journal line can be placed mid-rm_shutdown_adapter wait-loop this is the ONE capture that could justify SH-2."
+        },
+        {
+          "phase": "continuous-sampler",
+          "metric": "GPU device-side AER UESta+HdrLog (04:00.0 @ AER 0x1b8) — completer-side view",
+          "command_or_primitive": "GATED on prior-clean PMC_BOOT_0. setpci -s 04:00.0 0x1bc.l (UESta) 0x1d4.l (HdrLog); C-patch nv_pci_unmask_aer_internal_errors makes UncorrIntErr bit22 meaningful here",
+          "passive_safe": "caution",
+          "rationale": "If the GPU detects an internal error/UnsupReq during teardown it latches here (and reaches kernel un-demoted thanks to the C-patch). Config read to 04:00.0 traverses the full TB chain to a possibly-wedged endpoint — read bridge first, gate device read on clean PMC_BOOT_0."
+        },
+        {
+          "phase": "post-hang",
+          "metric": "Completes-at-T or never (10s budget) — H-SH2 resolution",
+          "command_or_primitive": "journalctl -k | grep 'tb_egpu [F40b]' for rm_shutdown_adapter 'completed within budget' (at e.g. 1-3s => 200ms too tight, slow-but-graceful) vs 'timed out after 10000 ms' (genuinely non-terminating)",
+          "passive_safe": "yes",
+          "rationale": "The ONLY variable SH-1 changes vs prod (NVreg_TbEgpuShutdownTimeoutMs=10000). Directly answers whether the disease is real or A7's 200ms is merely aggressive. Journal is durable."
+        },
+        {
+          "phase": "post-hang",
+          "metric": "rm_disable vs rm_shutdown latency asymmetry",
+          "command_or_primitive": "journalctl -k | grep 'tb_egpu [F40b]' — match 'scheduled to bounded worker'->'completed'/'timed out' timestamp pairs; call_name string disambiguates which rm_ call (nv.c:2298 disable / nv.c:2348 shutdown)",
+          "passive_safe": "yes",
+          "rationale": "Sharpest existing lead: disable completes within budget every time, shutdown times out every time => hang is GSP-shutdown-step-specific, not teardown-generic. Quantifies and bounds H-SH2."
+        },
+        {
+          "phase": "post-hang",
+          "metric": "WPR2 + PMC_BOOT_0 after-sample (A4 post-shutdown / close-exit)",
+          "command_or_primitive": "grep 'tb_egpu [CLOSE]: site=post-shutdown' and 'site=close-exit' for PMC_BOOT_0=/WPR2=/wpr2_up: (A4 fires AFTER nv_shutdown_adapter returns, i.e. after A7 bounded return — caller thread, safe)",
+          "passive_safe": "yes",
+          "rationale": "The 'after' arm of the H-SH6 contract. On non-persistent path expect WPR2=0x00000000 (cleared early), PMC_BOOT_0=0x1b2000a1 (chip alive). NOTE this is a POST-TIMEOUT after-sample by construction — does NOT prove rm_shutdown_adapter gracefully completed."
+        },
+        {
+          "phase": "post-hang",
+          "metric": "Kernel-decoded AER counters after-snapshot (compute delta vs pre-hang)",
+          "command_or_primitive": "cat /sys/bus/pci/devices/0000:00:07.0/aer_dev_{fatal,nonfatal,correctable} (and 03:00.0, 04:00.0); diff against pre-hang",
+          "passive_safe": "yes",
+          "rationale": "Zero delta across the hang = worker stalled WITHOUT a kernel-visible AER event = strong evidence for busy-poll/H-SH1 over single-blocked-CTO H-SH3. Also tells whether nv_pci err_handlers would have dispatched."
+        },
+        {
+          "phase": "post-hang",
+          "metric": "A8 counters cross-check: tb_egpu_f40b_fires delta + tb_egpu_state + qwd_last_aer_summary",
+          "command_or_primitive": "cat /sys/bus/pci/devices/0000:04:00.0/tb_egpu_f40b_fires tb_egpu_state tb_egpu_qwd_last_aer_summary tb_egpu_qwd_cycles tb_egpu_qwd_detections (NEVER write tb_egpu_recover_force_trigger)",
+          "passive_safe": "yes",
+          "rationale": "Confirms A7 wrap fired (f40b_fires +1 per shutdown timeout) and state was NOT stranded (A8 v2.1 keeps state=healthy on teardown fire). Cross-checks journal against driver-latched atomics. recover_force_trigger is the only writable file — read-only on every other."
+        },
+        {
+          "phase": "post-hang",
+          "metric": "Worker-exits-post-sink-set (no D-state zombie) across n>=3",
+          "command_or_primitive": "ps -eLo pid,tid,comm,stat | grep -iE 'nv_f40b|kworker.*long' post-fire; watch for lingering D-state workers; sampler logs NO_WORKER sentinel row timestamping exit",
+          "passive_safe": "yes",
+          "rationale": "H-SH5 safety: confirms the leaked system_long_wq worker exits after C5 sink (cleanupGpuLostStateAtomic) makes subsequent MMIO fail-fast. Gap between timeout-declared and worker-actually-exited is a useful datum; validates repeatability in one boot."
+        }
+      ],
+      "new_metrics_added_beyond_ledger": [
+        "Kernel-decoded AER counters (sysfs /sys/bus/pci/devices/<bdf>/aer_dev_{correctable,fatal,nonfatal}) on 00:07.0 / 03:00.0 / 04:00.0 — monotonic, before/after DELTA distinguishes 'kernel AER IRQ actually fired (real PCIe error)' from 'worker stalled with zero AER delta (busy-poll, H-SH1)'. Fully passive bridge/root-side. (surfaced by Map 1, not in ledger inventory)",
+        "Root Error Status + Error Source ID on root port 00:07.0 (AER+0x30 / +0x34, via setpci 0x130.l / 0x134.l; RootErrCmd 0x12c.l live=0x7) — latches the originating requester BDF, confirms GPU-as-source and that RC AER reporting fired; complements aer_dev counters with the precise source BDF. Passive setpci. (surfaced by Map 1, not in ledger inventory)",
+        "NOTE on classification: Maps 2, 3, and 4 each marked many already_in_ledger_inventory=false on per-thread /proc metrics and on the eBPF accessor probes, but those are either (a) already covered by the ledger's poll-vs-block worker-CPU/sched-state line (the per-thread /proc breakdowns are sub-metrics of one ledger entry, fold in as method detail not new metrics) or (b) SH-2 instrumentation items not SH-1. The only two genuinely-NEW observable-now metrics to add to the ledger Metric Inventory are the two above (kernel aer_dev_* counters and Root Error Status/Source ID)."
+      ],
+      "teardown_model": "\"RECONCILED — there is NO contradiction between A4 and A7; they observe DIFFERENT POINTS on the SAME timeline, and the conflicting 'WPR2 up' vs 'WPR2->0' historical observations were on DIFFERENT close paths. ORDERING (nv.c source): nv_stop_device forks on NV_FLAG_PERSISTENT_SW_STATE. PERSISTENT path (nv.c:2388) calls rm_disable_adapter directly, NEVER calls nv_shutdown_adapter, no A7 shutdown-wrapper fires, GSP stays resident => WPR2 stays 0x07f4a000 up (this is the Map-1 'post-shutdown WPR2 up' reading). NON-PERSISTENT path (nv.c:2393) runs nv_shutdown_adapter, whose A7 wrapper nv_f40b_shutdown_bounded wraps BOTH rm_disable_adapter (nv.c:2298, completes within budget) and rm_shutdown_adapter (nv.c:2348, TIMES OUT). A4's tb_egpu_close_diag(post-shutdown) at nv.c:2402 fires STRICTLY AFTER nv_shutdown_adapter returns, which is STRICTLY AFTER A7's bounded return at timeout — so A4 is DOWNSTREAM of A7 on the call stack and its WPR2=0 is a POST-TIMEOUT after-sample, NOT proof rm_shutdown_adapter gracefully completed. The leaked system_long_wq worker (nv.c:2245) is what stays stuck; the caller thread returns and runs A4. SH-1 triggers the NON-PERSISTENT close path. KEY MECHANISTIC INSIGHT: WPR2 reads 0 at A4 post-shutdown EVEN THOUGH rm_shutdown_adapter timed out — meaning WPR2-clear happens EARLY in rm_shutdown_adapter, BEFORE the chip-touching MMIO the worker is hung on, i.e. the disease A7 contains is a LATE-stage stall (post-WPR2-clear). COMPETING MODELS the during-hang WPR2+PMC_BOOT_0 pair selects among: MODEL A (LATE-STALL, leading, consistent with all live data): WPR2 before:UP / during-hang:0 / after:0; worker hangs on a post-WPR2 GSP handshake; supports H-SH1 (chip alive, later bit never flips). MODEL B (SLOW-BUT-PROGRESSING, H-SH2): during-hang:UP but after:0 => the leaked worker cleared WPR2 in the ~1s gap between timeout and the A4 read => worker IS making progress, 200ms budget merely too tight. MODEL C (MMIO-DEAD, H-SH3): during-hang PMC_BOOT_0=0xFFFFFFFF and WPR2 unreadable => chip went dead; ALREADY UNLIKELY because live A4 post-shutdown PMC_BOOT_0 reads 0x1b2000a1 (chip alive). MEANING OF SH-1's WPR2 readings: the before(UP)->after(0) transition is NOT discriminating on its own (identical under A and B). ONLY the during-hang value separates them — during=0 -> Model A (late-stall/H-SH1); during=UP -> Model B (slow/H-SH2); during=unreadable with PMC=0xFFFFFFFF -> Model C (H-SH3). Leading interpretation pre-SH1: Model A (late-stall, H-SH1 busy-poll), corroborated by single-core CPU peg and live chip-alive PMC_BOOT_0.\"",
+      "instrumentation_gaps": [
+        "Exact polled GSP register offset during rm_shutdown_adapter: kprobe on osDevReadReg032 (closed-but-SYMBOLIZED [nvidia] @ live kallsyms c294e2d0, src/nvidia/arch/nvalloc/unix/src/os.c:2026) — arg2 (thisAddress) = the BAR0 offset rm_shutdown_adapter polls; kretprobe return = value read; fire frequency = poll cadence. This is THE SH-2 enabler. The GSP mailbox/msgq offset is UNKNOWN to the entire open layer (grep of kernel-open for GSP mailbox/msgq/MAILBOX/GFW_BOOT/handshake = ZERO hits; the only BAR0 offsets open code knows are 0=PMC_BOOT_0 and 0x88a828=WPR2). Use hist/count aggregation NOT per-event printf (Heisenbug per observability-perturbs-the-bug). The bare load NV_PRIV_REG_RD32 is an inlined macro with no symbol — osDevReadReg032 is the finest traceable boundary.",
+        "Companion register WRITES during shutdown: kprobe on osDevWriteReg032 ([nvidia] @ live c294e040, os.c:1851) — arg2=offset arg3=value; distinguishes 'wrote a quiesce reg then polled' from 'polled cold'. Same inlined-macro/Heisenbug caveat.",
+        "Bracketing the closed call to confirm the hang is rm_shutdown_adapter-specific: kprobe/kretprobe pair on rm_shutdown_adapter ([nvidia] @ live c2952960) and rm_disable_adapter (@ c2952840) — start-without-matching-return pins the wedge to the second rm_ call. Plus open-side bracket nv_shutdown_adapter (@c2804b50) / nv_stop_device (@c2804d40) / nv_f40b_shutdown_worker (@c2801b90) / nv_f40b_shutdown_bounded (@c2801be0) to show all open host-side steps complete. Template ALREADY EXISTS at /root/nvidia-driver-injector/tools/bpftrace-wedge-watch.bt (attaches nv_shutdown_adapter + nv_pci_remove_helper + wq tracepoints, uses BPFTRACE_MISSING_PROBES=warn); minimal SH-2 delta = add the two osDevReadReg032/osDevWriteReg032 accessor probes + the rm_shutdown_adapter bracket.",
+        "During-hang WPR2/PMC_BOOT_0 sampled FROM the stuck worker thread mid-rm_shutdown_adapter: if no journal line can be placed inside the A7 wrapper's wait-loop (between pre-stop and post-shutdown), the in-band during-hang read needs an instrumentation point. NOTE the userspace mmap-resource0 during-hang read (in SH-1 capture list, gated on clean PMC_BOOT_0) covers most of this observable-now; SH-2 is only required if the in-band worker-thread perspective is needed.",
+        "C5 sink-arm visibility: kprobe cleanupGpuLostStateAtomic (@c294e0c0) / os_pci_set_disconnected (OPEN, os-pci.c:167, @c28212e0) to timestamp when the dead-bus short-circuit is armed vs when the leaked worker's next osDevReadReg032 fails-fast and exits — refines the worker-exit datum. Lower priority; the post-hang ps worker-exit watch covers it passively."
+      ],
+      "sh1_safety_notes": [
+        "PERTURBING READS (the risky split): ALL bridge/root config-space reads (03:00.0, 02:00.0, 00:07.0 via setpci) and ALL sysfs aer_dev_*/current_link_*/tb_egpu_* and ALL /proc/<tid>/* reads are UNCONDITIONALLY passive-safe — those devices/structures are healthy and answer instantly even if the GPU is wedged. RISKY reads are anything targeting 04:00.0: GPU config-space AER (@0x1b8), GPU LnkSta/CESta, and BAR0 MMIO (PMC_BOOT_0 @0, WPR2 @0x88a828) — each traverses the full TB chain (04<-03<-02<-00:07) to a possibly-wedged endpoint and can itself stall on the SAME completion-timeout that wedged the worker. RULE: read the bridge FIRST; gate EVERY GPU-targeted read on a prior-clean PMC_BOOT_0 THIS pass; if PMC_BOOT_0 returns 0xFFFFFFFF or stalls, STOP all further GPU reads (that is itself the Model-C/H-SH3 answer).",
+        "GPU-targeted read METHOD: prefer an independently-killable userspace mmap of /sys/bus/pci/devices/0000:04:00.0/resource0 (64MB, root, present live) over the in-driver A4 read (A4 runs on the caller thread which already returned, so it cannot witness mid-hang) and over a worker-thread in-band read (which is on the potentially-stuck thread). resource0 preferred over /dev/mem (CONFIG_STRICT_DEVMEM may block the reserved MMIO range). No devmem/busybox binary installed — a tiny mmap+read helper is needed. Concurrent in-driver ioremap of the same page is benign (separate mapping).",
+        "DO NOT use tb_egpu_qwd_last_pmc_boot_0 sysfs as a healthy-state witness — it reads 0x00000000 zero-init cache and is ONLY populated on a dead-bus DETECTION (nv-tb-egpu-qwd.c:205). Not a live chip read.",
+        "DO NOT write tb_egpu_recover_force_trigger — it is the ONLY writable tb_egpu_* sysfs file and triggers ACTIVE recovery. Every other tb_egpu_* file is read-only/safe.",
+        "FSYNC'd SAMPLER: /tmp/sh1_sampler.sh validated, writes tab-delimited ts_ns/tid/state/utime/stime/cpu/stack_top at 250ms cadence (40 samples over 10s) to /var/log/sh1-poll-vs-block.<epoch>.log with `sync -d <file>` per-record (fsync confirmed available) so the log survives a wedge. Per-pass cost ~1ms once TID locked; identification (the expensive part) runs ONCE not per-pass. NEVER stack-scan all kworkers every pass (measured 239ms/149 kworkers self-perturbs at 250ms) — narrow with the ps R/D/events_long filter first.",
+        "10s THERMAL CAP: override only NVreg_TbEgpuShutdownTimeoutMs=10000 (the SINGLE variable SH-1 changes vs prod 200ms). Cap at 10s NOT 30s — the busy-polling pegged core spikes NUC package temp (project_h21_cpu_thermals, pkg can hit 105C); the E-core cpuset pin (docker update --cpuset-cpus) mitigates but 10s bounds exposure.",
+        "WORKER-DISAPPEARS mid-window: on timeout the leaked worker is left running (not joined) until its sink-aware MMIO fails-fast post-C5-sink. The worker TID can VANISH mid-sample — sampler re-acquires the TID when /proc/<tid>/stat disappears and logs a NO_WORKER sentinel row (timestamps the worker's actual exit; the gap between timeout-declared and worker-exited is a datum).",
+        "RECOVERY: if a during-hang GPU read does stall the reader, the userspace mmap helper is independently killable. If the host wedges (broken-BAR1/MMIO-dead class), recovery is REBOOT — per no-rpc-observability-on-broken-bar1, the FIRST post-wedge check must be BAR1 size via sysfs (NOT lspci/nvidia-smi/active MMIO, which stall on CTO). Do not issue any active observability post-wedge before confirming BAR1.",
+        "DRIVER-VERSION re-confirm: live loaded module is 595.71.05-aorus.17, task references aorus.21. The F40b worker + all accessor symbols are present in the loaded module per kallsyms so the method is valid NOW; re-confirm `cat /sys/module/nvidia/version` when aorus.21 is actually loaded before quoting absolute kallsyms addresses (they shift per build)."
+      ],
+      "exhaustiveness_verdict": "\"CONFIDENT — SH-1 grabs the full observable-now surface; no re-run will be needed for a missed observable-now metric. Three of the five surface maps independently converged on the SAME capture list, and Map 2 (chip-state) explicitly concluded the ledger Metric Inventory is ALREADY EXHAUSTIVE for the observable-now tier (every chip-state metric — WPR2, PMC_BOOT_0, bridge AER TLP address, link state, A8 counters, worker CPU-burn/sched-state, latency, worker-exit — already listed). Map 1 (PCIe/AER) surfaced exactly TWO genuinely-new observable-now metrics (kernel aer_dev_* counters; Root Error Status/Source ID) — both passive, bridge/root-side, now folded into the capture list and the additive contract. Cross-cutting confirmations that close the surface: (1) DPC is ABSENT chain-wide (cap 0x001d not present on any of the 4 devices) so a whole hypothesis branch is structurally eliminated — no during-hang DPC slot is missing because there is nothing to read. (2) The GSP handshake register the worker actually polls is UNKNOWN to the entire open layer and is NOT observable-now by ANY means — its passive proxy (the bridge AER Header Log TLP address) IS in the capture list; the direct offset is correctly an SH-2 instrumentation item, not a missed SH-1 observable. (3) The ONLY observable-now item existing in-driver code does not already emit is the DURING-HANG GPU-MMIO triplet (PMC_BOOT_0/WPR2/GPU-LnkSta) between pre-stop and post-shutdown — and SH-1 captures that via the gated userspace resource0 mmap-read, so it is in-scope for SH-1, not deferred. The residual risk is purely the two structural items (exact GSP poll offset; in-band worker-thread mid-hang view) which are correctly SH-2 by nature, plus re-confirming the driver-version/kallsyms when aorus.21 loads. Verdict: PROCEED with SH-1; the additive contract holds and the exhaustiveness gate is satisfied.\""
+    }
+  }
+}

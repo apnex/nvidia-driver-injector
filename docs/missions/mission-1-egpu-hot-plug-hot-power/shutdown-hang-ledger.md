@@ -22,7 +22,19 @@
 2. `rm_disable_adapter` — the teardown step *immediately before* — **completes within budget** every time. So the hang is specific to the final GSP-shutdown step, not teardown generally. **This asymmetry is the sharpest existing lead.**
 3. No D-state zombie accumulation after ~5 rmmods (checked 2026-05-30): the leaked worker *does* exit post-sink-set. (But the worker runs on the **shared** `system_long_wq` calling closed RM code — its lifecycle vs module-unload has never been *proven* safe, only not-yet-crashed. Tracked as a risk, see H-SH5.)
 4. The worker **pegs one CPU core** during the hang (user-empirical, drives NUC thermal). A single blocked MMIO read would not — PCIe Completion Timeout (~50 ms) returns 0xFFFFFFFF and moves on. Sustained single-core load ⇒ **busy-poll loop**, not a blocked read. Leading interpretation: `rm_shutdown_adapter` polls a chip-state/handshake register waiting for a transition that never arrives during TB-eGPU teardown — meaning **the chip is likely alive and answering MMIO**, just never reaching the expected shutdown state. (Hypothesis, not yet confirmed — SH-1 tests it.)
-5. **Unreconciled tension:** the F40 catalog's A4 close-path telemetry historically recorded `nv_shutdown_adapter` *completing* with WPR2 → 0 on a clean close, yet A7 shows `rm_shutdown_adapter` timing out every time. We do not have a single coherent model. SH-1's WPR2 before/during/after capture is designed to reconcile this.
+5. ~~**Unreconciled tension:** A4 telemetry records `nv_shutdown_adapter` completing with WPR2 → 0; A7 shows `rm_shutdown_adapter` timing out every time.~~ **RECONCILED by (b) 2026-05-30 — no contradiction.** A4's `tb_egpu_close_diag(post-shutdown)` (nv.c:2402) fires *strictly after* `nv_shutdown_adapter` returns, which on the non-persistent path is *after* A7's bounded-timeout return — so A4's WPR2=0 is a **post-timeout after-sample, NOT proof of graceful completion**. The leaked `system_long_wq` worker is what stays stuck; the caller thread returns and runs A4 downstream. Mechanistic payoff: **WPR2 clears early in `rm_shutdown_adapter`, before the stuck MMIO ⇒ the hang is a late-stage stall (post-WPR2-clear)**. The persistent path (nv.c:2388) skips `nv_shutdown_adapter` entirely (GSP stays resident, WPR2 stays up) — that was the other historical reading. SH-1 triggers the non-persistent close path.
+
+## Teardown model (reconciled — the during-hang WPR2 read selects among three)
+
+The `before(UP)→after(0)` WPR2 transition is identical under Models A and B; **only the during-hang value discriminates** (this is why SH-1's gated during-hang BAR0 read is the centerpiece):
+
+| Model | during WPR2 | during PMC_BOOT_0 | worker CPU | kernel AER Δ | Mechanism |
+|---|---|---|---|---|---|
+| **A — late-stall (H-SH1, leading)** | `0` | `0x1b2000a1` (alive) | pegged (R) | 0 | post-WPR2 GSP handshake bit never flips; busy-poll, chip alive |
+| **B — slow-but-progressing (H-SH2)** | `UP` | `0x1b2000a1` | pegged | 0 | worker clears WPR2 in timeout→A4 gap; 200 ms budget too tight |
+| **C — MMIO-dead (H-SH3)** | unreadable | `0xFFFFFFFF` | D-state | ≠0 (CmpltTO) | chip dark — **already unlikely** (live A4 PMC=0x1b2000a1) |
+
+Leading interpretation pre-SH-1: **Model A** (corroborated by the single-core CPU peg + live chip-alive PMC_BOOT_0). The bridge **AER Header Log TLP address** (latched on CmpltTO) is the passive proxy for *which* register; the **direct polled offset is unknown to the entire open layer** (only known BAR0 offsets: `0`=PMC_BOOT_0, `0x88a828`=WPR2) → SH-2 eBPF item, not an SH-1 miss.
 
 ## Hypotheses
 
@@ -51,6 +63,8 @@ Every candidate metric for the shutdown-hang investigation, tagged by how it's o
 | PMC_BOOT_0 (chip identity, alive-check) before/during/after | observable-now | SH-1 | passive BAR0 read; confirms chip still answering MMIO |
 | PCIe link state (speed/width/LinkActive) during hang | observable-now | SH-1 | sysfs `current_link_*` on bridge |
 | `tb_egpu_f40b_fires` / `tb_egpu_state` (A8 v2.1) | observable-now | SH-1 | sysfs counter cross-check vs journal |
+| **Kernel-decoded AER counters** `aer_dev_{fatal,nonfatal,correctable}` on 00:07.0/03:00.0/04:00.0 | observable-now | SH-1 | *(NEW from (b))* before/after **delta** ⇒ "kernel AER IRQ actually fired (real PCIe error)" vs "zero delta = busy-poll, H-SH1". Passive bridge/root-side. |
+| **Root Error Status + Error Source ID** on root 00:07.0 (AER+0x30/+0x34) | observable-now | SH-1 | *(NEW from (b))* latches originating requester BDF; confirms GPU-as-source + RC AER reporting fired. Passive `setpci`. |
 | Worker exits post-sink-set (no zombie) | observable-now | SH-1 | post-fire `ps -eLo` for D-state nv_f40b workers |
 | **Exact per-iteration poll count / loop frequency** | needs-instrumentation | SH-2 (conditional) | requires a counter in A7's wrapper or eBPF on the RM MMIO accessor |
 | **Sub-ms latency to completion** | needs-instrumentation | SH-2 (conditional) | ktime in the wrapper at rm_call entry/exit |
@@ -83,9 +97,9 @@ Every candidate metric for the shutdown-hang investigation, tagged by how it's o
 | Exp | One-liner | Status |
 |---|---|---|
 | SH-0 | Foundational: rm_shutdown_adapter hangs every teardown (A7 Test A/B) | DONE |
-| **(b)** | Observable-surface mapping + A4/A7 WPR2 reconciliation (exhaustiveness gate for SH-1) | **NEXT** |
-| SH-1 | Latency + poll-vs-block + AER address @ 10 s, close-path, existing code | BLOCKED on (b) |
-| SH-2 | Instrumented latency + poll-counter + register identity | CONDITIONAL on SH-1 |
+| (b) | Observable-surface mapping + A4/A7 WPR2 reconciliation (exhaustiveness gate) | **DONE 2026-05-30** — gate PASSED, model reconciled, 2 new metrics folded in |
+| **SH-1** | Latency + poll-vs-block + WPR2-discriminator + AER TLP addr @ 10 s, close-path | **READY** — `experiments/SH-1-rm-shutdown-latency-poll-vs-block.md` |
+| SH-2 | eBPF on `osDevReadReg032` → exact polled register + poll cadence | CONDITIONAL on SH-1 (Model A/C) |
 
 ## Cross-refs
 
