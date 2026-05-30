@@ -102,8 +102,10 @@ Every candidate metric for the shutdown-hang investigation, tagged by how it's o
 | (b) | Observable-surface mapping + A4/A7 WPR2 reconciliation (exhaustiveness gate) | DONE 2026-05-30 |
 | **SH-1** | close-path latency + poll-vs-block @ 10 s | **RESOLVED 2026-05-30** — completes ~600 ms (n=3); busy-poll; 200 ms too tight; no hang |
 | **FIX** | Bump `NVreg_TbEgpuShutdownTimeoutMs` default 200 → ~1500–2000 ms → teardown completes normally (no premature GPU-lost) | **READY to implement** (aorus.22) |
-| SH-2 | eBPF on `osDevReadReg032` → exact polled register + poll cadence (why ~600 ms?) | NEXT (optional — characterization, not blocking the fix) |
-| SH-3 | rmmod-path: does the ~600 ms worker race module-unload (H-SH5 UAF)? Is the 20:52 wedge this? | OPEN (the remaining real-risk question) |
+| **SH-3 gate** | Understand-pass (4-agent): worker/unload lifecycle, kernel wq semantics, 20:52 re-exam, residual-risk | **DONE 2026-05-30** — confirmed a real latent DOUBLE UAF on rmmod-path timeout; 1200ms narrows not closes it; 20:52 wedge was NOT this (A7 not in that build) |
+| **A7 UAF guard** | `flush_work(&w->work)` in the timeout branch after sink-set → unload-safe | **SHIPPED apnex.23** (fork a7 amended, compiled, applies clean) |
+| SH-3 Rung-1 | Measure rmmod-path rm_shutdown latency on normal persistence-engaged deploy-uninstalls @ 1200ms (low-risk) | NEXT — the deploy of apnex.23 (uninstall of apnex.22) is the first data point |
+| SH-2 | eBPF on `osDevReadReg032` → exact polled register + poll cadence (why ~600 ms?) | optional characterization; fold rmmod-vs-close latency comparison in |
 
 ## Cross-refs
 
