@@ -22,6 +22,15 @@ If we re-architected the patch stack starting from current understanding (mechan
 4. **Retire PINPOINT patches** outright. They've served their purpose (diagnostic phases are complete). Keep their content in the historical investigation archive only.
 5. **Test the patch set against the original NVIDIA source code surface** to see whether some patches are now unnecessary (i.e., upstream has moved closer to the behaviour we wanted) or whether some should split / merge to match upstream's natural seams.
 
+## A7 shutdown-arm — leak→join lifecycle + does-it-need-to-exist (added 2026-05-30, post-SH-1/SH-3)
+
+The SH-series root-cause work (`docs/missions/mission-1-egpu-hot-plug-hot-power/shutdown-hang-ledger.md`) materially changed what A7 *is*, and surfaced two redesign questions that were deliberately deferred from the surgical SH-3 UAF-guard fix:
+
+1. **Lifecycle: the "leak" concept is now obsolete.** A7 was built as a *leak-on-timeout* design (refcount-2 "one for caller, one for worker, last-one-frees"; the worker runs on after the wrapper returns). The SH-3 guard added `flush_work(&w->work)` on the timeout path, so the worker is now **always joined** — completion-wait on the happy path, flush on the timeout path. The refcount-2 protocol is still load-bearing *only* for the happy-path race (worker between `complete()` and `work_put()`), but the overall lifecycle could collapse into a cleaner always-join design (no "leaked worker" concept). Redesign, not a fix — v5.
+2. **Existence: does A7's shutdown-arm bounded-wait need to exist at all?** SH-1 (n=3) proved `rm_shutdown_adapter` does NOT hang — it completes in ~600 ms; the original "hang" was the 200 ms budget guillotine, and the 20:52 forensics that "originated" A7 didn't even have A7 in the build (provenance corrected, A7 intent v1.3). So A7's shutdown arm may reduce to "call it, expect ~600 ms" with no wrapper at all — UNLESS the **rmmod-path teardown tail can genuinely exceed the budget** in some chip state (the F40 scenario), which SH-3 Rung-1 (rmmod-path latency, unmeasured) + the open-arm forensics (task #282) must settle first. If the rmmod tail is always bounded, A7-shutdown is a candidate for **removal**, not just simplification — contrast with A6-open, which guards a genuine chip-dead+AER+deadlock wedge (n=13) and is clearly needed.
+
+This connects to item 1 below (consolidate the F40 family) but sharpens it: the merge-A7-into-A6 idea assumed both are needed; SH-1 suggests A7-shutdown might be *deletable*. Decide with SH-3 Rung-1 + SH-2 + the open-arm data in hand.
+
 ## Process suggestion when we get to v5
 
 Per-patch deep dive, in order:
