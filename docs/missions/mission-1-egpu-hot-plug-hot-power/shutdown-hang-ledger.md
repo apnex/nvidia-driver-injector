@@ -2,7 +2,9 @@
 
 **Purpose:** Root-cause why `rm_shutdown_adapter`'s chip-touching MMIO hangs on every TB-attached eGPU teardown — the disease that A7 *contains* but does not *cure*. A6/A7 are bounded-wait containment; A8 is observability; this ledger is the investigation into WHY the teardown MMIO does not complete gracefully, toward an actual fix (per `feedback_native_in_driver_hardening` — teardown should *work*, not just be *survived*) and an upstream-report-grade characterization.
 
-**Status:** OPEN. Created 2026-05-30. Live driver: aorus.21 (A8 v2.1).
+**Status:** SH-1 RESOLVED 2026-05-30 — **`rm_shutdown_adapter` does NOT hang; it completes in ~600 ms (n=3).** The "hangs every teardown" premise was an artifact of A7's 200 ms budget (~3× too tight). See SH-1 results. Live driver: aorus.21 (A8 v2.1).
+
+> **HEADLINE (2026-05-30):** The F40 shutdown-arm was substantially **iatrogenic**. `rm_shutdown_adapter` busy-runs ~600 ms on `system_long_wq` (R-state, CPU pegged, AER clean = chip answering) then **completes successfully**. A7's 200 ms guillotine cut it off, declaring the GPU lost prematurely on every teardown. Immediate fix: bump the budget to ~1500–2000 ms → teardown completes normally. OPEN: why ~600 ms (SH-2 eBPF), and whether the rmmod-path (module-unload-vs-running-worker, H-SH5) is a separate real wedge.
 
 **This ledger is the single source of truth for the shutdown-hang investigation's numbering, hypotheses, metric inventory, and experiment status.** Per-experiment operational detail (exact commands, predicted signatures per branch, actual results, recovery) lives in `experiments/SH-<n>-*.md` once written. Distinct from `matrix.md` (Phase-2 BAR1/bridge-window archaeology, E-series — a different investigation).
 
@@ -40,12 +42,12 @@ Leading interpretation pre-SH-1: **Model A** (corroborated by the single-core CP
 
 | ID | Hypothesis | Status | Resolved by |
 |---|---|---|---|
-| **H-SH1** | `rm_shutdown_adapter` busy-polls a GSP/handshake register for a state transition that never occurs on TB-eGPU teardown (chip alive, answering reads, but bit never flips). | OPEN (leading) | SH-1 (CPU-burn + per-read behavior + AER address) |
-| **H-SH2** | The 200 ms budget is simply too tight; the call *would* complete given more time, so A7 declares the GPU lost unnecessarily. | OPEN | SH-1 (does it complete at <10 s?) |
-| **H-SH3** | Single non-returning MMIO read (CTO disabled/extended on this path), worker blocked not polling. | OPEN (counter to H-SH1) | SH-1 (D-state vs CPU-burn) |
-| **H-SH4** | The hang is specific to a chip register/subsystem identifiable by the completion-timeout TLP address. | OPEN | SH-1 (bridge AER TLP address) |
-| **H-SH5** | A7's leaked worker on `system_long_wq` has a use-after-free-on-module-unload race that we've survived by luck (worker exits fast enough). | OPEN (safety, not root-cause) | SH-1 close-path variant keeps module loaded; a dedicated SH later for the rmmod-unload race |
-| **H-SH6** | WPR2 state at the hang point distinguishes "teardown stalled at entry" (WPR2 unchanged) from "stalled late" (WPR2 cleared mid-hang); reconciles the A4-vs-A7 tension. | OPEN | SH-1 (WPR2 before/during/after) |
+| **H-SH1** | busy-poll mechanism — worker busy-runs polling a GSP register, chip alive/answering. | **CONFIRMED (mechanism)** 2026-05-30 — worker R-state on `system_long_wq` CPU14, AER clean. But the bit DOES flip ~600 ms (not "never"). | SH-1 |
+| **H-SH2** | 200 ms budget too tight; call *would* complete given more time → A7 premature. | **CONFIRMED (outcome)** — completes ~600 ms (n=3); 200 ms ~3× too tight. | SH-1 |
+| **H-SH3** | single non-returning MMIO, worker blocked (D-state), CTO fires. | **REFUTED** — worker R not D; AER Δ=0 (no CTO); completes. | SH-1 |
+| **H-SH4** | hang identifiable by CTO TLP address. | N/A — no CTO fires (chip answers). Register identity → SH-2 eBPF. | SH-2 |
+| **H-SH5** | A7's leaked worker on `system_long_wq` has a UAF-on-module-unload race. | **OPEN — now sharper.** Close-path completes in 600 ms (no leak). But rmmod unloads the module; if a real teardown is mid-flight when rmmod completes, the ~600 ms worker races the unload. The original 20:52 rmmod "wedge" may be THIS, not a hang. | dedicated rmmod-path SH (SH-3) |
+| **H-SH6** | WPR2 timeline distinguishes stall-at-entry vs late. | RECONCILED (no contradiction); during-WPR2 unreadable from userspace (STRICT_DEVMEM) → SH-2 if needed. | (b) + SH-2 |
 
 ## Metric inventory (the additive contract)
 
@@ -96,10 +98,12 @@ Every candidate metric for the shutdown-hang investigation, tagged by how it's o
 
 | Exp | One-liner | Status |
 |---|---|---|
-| SH-0 | Foundational: rm_shutdown_adapter hangs every teardown (A7 Test A/B) | DONE |
-| (b) | Observable-surface mapping + A4/A7 WPR2 reconciliation (exhaustiveness gate) | **DONE 2026-05-30** — gate PASSED, model reconciled, 2 new metrics folded in |
-| **SH-1** | Latency + poll-vs-block + WPR2-discriminator + AER TLP addr @ 10 s, close-path | **READY** — `experiments/SH-1-rm-shutdown-latency-poll-vs-block.md` |
-| SH-2 | eBPF on `osDevReadReg032` → exact polled register + poll cadence | CONDITIONAL on SH-1 (Model A/C) |
+| SH-0 | Foundational: rm_shutdown_adapter "hangs" every teardown (A7 Test A/B) — **REINTERPRETED**: ~600 ms completion cut off by 200 ms budget | DONE (superseded reading) |
+| (b) | Observable-surface mapping + A4/A7 WPR2 reconciliation (exhaustiveness gate) | DONE 2026-05-30 |
+| **SH-1** | close-path latency + poll-vs-block @ 10 s | **RESOLVED 2026-05-30** — completes ~600 ms (n=3); busy-poll; 200 ms too tight; no hang |
+| **FIX** | Bump `NVreg_TbEgpuShutdownTimeoutMs` default 200 → ~1500–2000 ms → teardown completes normally (no premature GPU-lost) | **READY to implement** (aorus.22) |
+| SH-2 | eBPF on `osDevReadReg032` → exact polled register + poll cadence (why ~600 ms?) | NEXT (optional — characterization, not blocking the fix) |
+| SH-3 | rmmod-path: does the ~600 ms worker race module-unload (H-SH5 UAF)? Is the 20:52 wedge this? | OPEN (the remaining real-risk question) |
 
 ## Cross-refs
 
