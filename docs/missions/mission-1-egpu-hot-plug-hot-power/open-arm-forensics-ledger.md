@@ -219,6 +219,46 @@ Lane 2 (contained) is **conditionally safe**, and the conditions are now **enfor
 
 ---
 
+## Lane 2 — RESULTS (executed 2026-05-30, contained; harness `tools/oa-harness/`)
+
+D0-pinned, A6 present, gap=2s. **4/4 contained fires survived** (A6 deterministic: `open timed out after 200 ms` → `-EIO`, dt 204–210 ms ≈ budget). Runs in `/var/log/mission-1-archaeology/rung4-pmu-*`.
+
+### Rung 4 (crux) — site CONFIRMED (n=4, frame-stable across hz:997 + hz:4999)
+
+The worker is pinned in:
+```
+nv_open_device → rm_init_adapter → RmInitAdapter → kgspInitRm_IMPL
+   → kgspBootstrap_GH100 → gpuTimeoutCondWait(_kgspLockdownReleasedOrFmcError)
+```
+**The GSP never releases lockdown after the FSP boot commands.** This is a **refinement of H-OA1**: the wedge is the **pre-RPC lockdown-release cond-wait** inside `kgspBootstrap_GH100` (the "H-OA1-prime" third locus the design anticipated), **NOT** the final `kgspWaitForRmInitDone → _kgspRpcRecvPoll` (GSP_INIT_DONE) poll. Ties directly to the historical GSP_LOCKDOWN_NOTICE storms.
+- **H-OA10 (early sanity-check MMIO): FALSIFIED** — 0 hits across all 4 runs.
+- **H-OA2 (PM-resume): not the site** (for the D0/sub-5s regime) — 0–3 incidental hits.
+
+### Rung 5 — post-fire AER: NO CTO (graceful spin, not hung read)
+
+Device + bridge `UESta`/`CESta` all **0x0** after the fire; dmesg shows no Completion-Timeout / `error_detected` (only the cosmetic C2/P5 "unmasked Internal Error at probe"). ⇒ the polled lockdown MMIO **returns** ("still locked"), it does not hang/CTO within A6's window. **This is H-OA1b (graceful busy-poll), not H-OA1a (hung-read CTO).** Reconciles with the historical Test-B-v2 `UESta=0x4000`: A6 cuts the syscall at 200 ms *before* any later chip-drop/CTO; the contained D0 fire is a clean software spin.
+
+### Rung 6 — H-OA1a vs H-OA1b: answered = **H-OA1b**
+
+The cond-wait loop iterates (repeated `kgspBootstrap_GH100`/`_kgspLockdownReleasedOrFmcError` samples) and the reads return (Rung 5: no CTO). The wedge is a **busy-poll holding the GPU group lock**, not a hung read. ⇒ shifts the *host-lock* mechanism toward **H-OA6 (lock-holding deadlock)** over H-OA1a — the Lane-3 question becomes "without A6, does this multi-second lock-holding busy-poll deadlock the host?"
+
+### Rung 7 — WPR2: sequela CONFIRMED (in-driver BAR0 read deferred)
+
+WPR2-already-up is already confirmed downstream of the GSP-loss from the `verify-wedge` journal (Lane 1). A post-fire BAR0 `ioread32` on the lost chip is risk > value (the discouraged MMIO-on-suspect-chip) — **deferred**; the sequela stands on the Lane-1 evidence.
+
+### A6 placement — VALIDATED (the strategic-review linchpin)
+
+The wedge sits **inside `nv_open_device`** — exactly the worker-queued frame A6 wraps. At the D0/sub-5s site, **A6 is correctly placed and deterministically contains** (4/4). This is the key input the post-experiment strategic patch review was waiting on. (Caveat: the >58 s-gap / pre-`nv_open_device` site — H-OA2 — is A6-uncovered and is a **Lane 3** question.)
+
+### Surviving questions → Lane 3 (destructive)
+
+- **H-OA2:** what is the >58 s-gap pre-`nv_open_device` site (A6-uncovered)?
+- **H-OA6 (now leading for the host-lock):** without A6, does the `gpuTimeoutCondWait` busy-poll holding the GPU lock deadlock the host? slack A/B + CPU-isolated AER.
+- **H-OA12:** does a PCI reset between cycles eliminate the wedge?
+- **H-OA9:** cure-vs-contain residual.
+
+---
+
 ## Cross-refs
 
 - SH series (resolved): `shutdown-hang-ledger.md`, `experiments/SH-2-eBPF-register-identity.md` (the PMU-not-kprobe method; the init-stack lead — note it is *shutdown-arm* evidence).

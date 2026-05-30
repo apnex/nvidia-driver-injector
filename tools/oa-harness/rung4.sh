@@ -66,7 +66,9 @@ sleep 1   # let bpftrace attach
 # it CANNOT save a hard kernel wedge (uninterruptible). This is the wedge point.
 oa_mark "RUNG4 cycle-2 FIRE (exec open /dev/nvidia0) <<< wedge point"
 t0=$(date +%s.%N)
-timeout 10 bash -c 'exec 3</dev/nvidia0; exec 3>&-'; c2rc=$?
+# NOTE: rc must reflect the OPEN, not a trailing close (a `; exec 3>&-` would
+# mask an -EIO open with the close's success). Bash auto-closes fd 3 on exit.
+timeout 10 bash -c 'exec 3</dev/nvidia0'; c2rc=$?
 t1=$(date +%s.%N)
 oa_mark "RUNG4 cycle-2 RETURNED rc=$c2rc dt=$(awk "BEGIN{printf \"%.1f\",($t1-$t0)*1000}")ms — host SURVIVED"
 
