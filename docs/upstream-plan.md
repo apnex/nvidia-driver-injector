@@ -428,6 +428,17 @@ surface — is removed from `A5`.
   surface.
 - **Telemetry:** none — build metadata.
 
+### A6–A9 — F40b open/shutdown-arm family (added after the original A1–A5)
+
+Four addons added 2026-05-29..05-31, all project-local (`A`); detail in `docs/patch-intents/A6..A9-*.md`:
+
+- **A6** — bounded-wait wrapper on the open path (`nv_open_device_for_nvlfp`); on timeout, declare the GPU lost via the C5 sink and return `-EIO`. Closes the F40 open-arm host-wedge.
+- **A7** — symmetric bounded-wait wrapper on the shutdown path (`rm_shutdown_adapter`), with the SH-3 `flush_work` UAF guard.
+- **A8** — read-only `tb_egpu_*` sysfs surface (state + F40b/recovery counters + `tb_egpu_is_external`); observability only.
+- **A9** — probe-time eGPU classification: set `nv->is_external_gpu` in `nv_pci_probe` via E1's `os_pci_is_thunderbolt_attached`, so A6/A7's gates read a correct flag on the **first** open of a bind (closes the first-open coverage hole). The set-*timing* is the project-local workaround; the *detector* is E1 (base, upstream-bound) — so E1 stays clean and A9 is `A`.
+
+**Upstream candidacy:** n/a for the addons themselves. The upstream-relevant threads are E1 (the detector) and the standing observation (A9) that the RM sets `is_external_gpu` too late for any open-driver consumer — a candidate to raise on NVIDIA bug #979 once the open-arm characterization lands.
+
 ### Belongs in a different upstream
 
 Not NVIDIA-driver code at all — no prefix, noted not owned:

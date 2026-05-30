@@ -24,3 +24,4 @@
   A6-f40b-bounded-wait-open  addon  -              fork:a6-f40b-bounded-wait-open
   A7-f40b-bounded-wait-shutdown addon -              fork:a7-f40b-bounded-wait-shutdown
   A8-f40b-sysfs-observability addon -              fork:a8-f40b-sysfs-observability
+  A9-egpu-probe-classify     addon  -              fork:a9-egpu-probe-classify
