@@ -225,5 +225,5 @@ Lane 2 (contained) is **conditionally safe**, and the conditions are now **enfor
 - Handover: `session-handover-2026-05-30.md` (two-arm table, original #282 intent).
 - F40 catalog: `fake-5090/failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md` (Test B v2 / FULLPRE / sentinel / n=4 recipe).
 - A6 intent: `docs/patch-intents/A6-f40b-bounded-wait-open.md`.
-- Upstream: NVIDIA bug #979 (`project_issue_979_upstream_state_2026_05_22`).
+- Upstream: NVIDIA bug #979 (`project_issue_979_upstream_state_2026_05_22`); **open-arm forensic draft (banked, not posted):** `upstream-979-open-arm-characterization-DRAFT.md`.
 - Design provenance: 7-agent chip-free workflow (map → synthesize → adversarial critique), 2026-05-30.
