@@ -1,4 +1,4 @@
-# regen-base-patches.sh state -- generated 2026-05-30T10:50:42Z
+# regen-base-patches.sh state -- generated 2026-05-30T11:09:27Z
 # base tag: 595.71.05 (51edebee79919b54f498c19a0be31982cd97646e)
 C1-kbuild-version-mk  c1-kbuild-version-mk  51cfd01e9cfe62d3559fcd127a29e68d727803cb
 C2-aer-internal-unmask  c2-aer-internal-unmask  403d5daf8d80da79991534b3c9d2ef70ac91b63a
@@ -10,8 +10,8 @@ A1-pcie-primitives  a1-pcie-primitives  26431cbd65d447ac9d5b9b96c7ece933ae42f960
 A2-bus-loss-watchdog  a2-bus-loss-watchdog  1e1fc329dae24680bb5a2b9e4ffd7776c159280d
 A3-recovery  a3-recovery  8530669cbfe612171984604f213f4cd60eae8217
 A4-close-path-telemetry  a4-close-path-telemetry  125072b08c95c8d0bc94a8bc35a2f93f86f6bd5c
-A5-version-and-toggles  a5-version-and-toggles  f1e93c5a4428d27c8992c2ab3a157bde6b64726c
-A6-f40b-bounded-wait-open  a6-f40b-bounded-wait-open  bb388e60e5a54ba827188b52117b05ab97ea0765
-A7-f40b-bounded-wait-shutdown  a7-f40b-bounded-wait-shutdown  15d41c193eeb4aff06cce7f9cd7a0afcb733528d
-A8-f40b-sysfs-observability  a8-f40b-sysfs-observability  faf2180b1e8557f711be4b20be40f860aa508b6d
-A9-egpu-probe-classify  a9-egpu-probe-classify  062a02abff9c6e019f74e50248299fdccb37c93e
+A5-version-and-toggles  a5-version-and-toggles  c78564508e5152874c27b0a43fa714d469851dc7
+A6-f40b-bounded-wait-open  a6-f40b-bounded-wait-open  94b655fa38818132d5146ddbd14f9e0e5ce9ebee
+A7-f40b-bounded-wait-shutdown  a7-f40b-bounded-wait-shutdown  3ac5a9a982c7d8b49556ef75a91871fa56081f6d
+A8-f40b-sysfs-observability  a8-f40b-sysfs-observability  a890d7b3fae7135a49a5a9270c607820c1e2313e
+A9-egpu-probe-classify  a9-egpu-probe-classify  369346004b6d49b5daebe1eddf21e0b022419ed3
