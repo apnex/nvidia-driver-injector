@@ -20,6 +20,17 @@ related-patches: [A2-bus-loss-watchdog, A3-recovery, A6-f40b-bounded-wait-open, 
 > v1 set with the NULL *outer* `pci_driver.dev_groups`. v2 switches to the
 > explicit `sysfs_create_group` / `sysfs_remove_group` idiom proven on this
 > driver by addon A2 (Q-watchdog) and A3 (recovery). This doc describes v2.
+>
+> **v2.2 (2026-05-31).** Adds a 6th attribute, `tb_egpu_is_external`, exposing the
+> live per-device `nv->is_external_gpu` flag — the E1 classification that **gates**
+> the A6 open-path and A7 shutdown-path bounded-wait wrappers. Motivated by the
+> reset-ladder wedge forensics (`docs/missions/.../open-arm-forensics-ledger.md`):
+> A6 only engages when `is_external_gpu` is set, and it is set **lazily** during the
+> first open's `RmInitAdapter` (`osinit.c:1301`) — so the **first open of any bind is
+> unguarded**, and a driver unbind→rebind makes a dangerous re-init *be* that
+> unguarded first open. This attribute makes the A6/A7 armed-state observable and the
+> first-open coverage hole detectable, via a plain sysfs `read()` (no chip touch —
+> safe to poll even on a wedge-prone chip).
 
 ## Purpose
 
@@ -27,13 +38,14 @@ Expose the F40b-managed state and recovery counters as read-only sysfs attribute
 
 ## Requirements
 
-### Requirement: Driver SHALL expose five read-only sysfs attributes on every bound PCI device
+### Requirement: Driver SHALL expose six read-only sysfs attributes on every bound PCI device
 
 The driver MUST expose, at `/sys/bus/pci/devices/<bdf>/`, the following read-only attributes on every PCI device that nvidia.ko binds:
 
 | Attribute | Content | Reader format |
 |---|---|---|
 | `tb_egpu_state` | one of `healthy`, `recovering`, `lost-temporary`, `lost-permanent` | newline-terminated string |
+| `tb_egpu_is_external` | live `nv->is_external_gpu` — the E1 eGPU classification gating A6/A7 bounded-wait; `1` armed, `0` **unguarded** (e.g. first open of a bind / post-rebind), or `unknown` (drvdata unset) | `%d\n` / `unknown\n` |
 | `tb_egpu_f40b_fires` | counter of F40b timeout fires **since the current device bind** (both A6 open-path and A7 shutdown-path) | `%d\n` |
 | `tb_egpu_recovery_count` | counter of successful recoveries since bind (set by A9) | `%d\n` |
 | `tb_egpu_recovery_failures` | counter of failed recovery attempts since bind (set by A9) | `%d\n` |

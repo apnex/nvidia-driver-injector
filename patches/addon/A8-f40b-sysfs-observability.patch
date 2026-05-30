@@ -1,8 +1,10 @@
 # A8-f40b-sysfs-observability — per-PCI-device sysfs surface for F40b state + counters.
 #
-# Adds 5 read-only sysfs attributes under each nvidia-bound PCI device:
+# Adds 6 read-only sysfs attributes under each nvidia-bound PCI device:
 #
 #   tb_egpu_state              healthy | recovering | lost-temporary | lost-permanent
+#   tb_egpu_is_external        live nv->is_external_gpu (gates A6/A7 bounded-wait);
+#                              1 armed, 0 unguarded (first open of a bind), unknown
 #   tb_egpu_f40b_fires         counter of F40b timeout fires since last bind (A6 + A7)
 #   tb_egpu_recovery_count     counter of successful recoveries (set by A9)
 #   tb_egpu_recovery_failures  counter of failed recoveries (set by A9)
@@ -119,10 +121,10 @@ index c02a9975..ed7c9aa1 100644
       * and free per-pdev state before nvl is torn down.
 diff --git a/kernel-open/nvidia/nv-tb-egpu-metrics.c b/kernel-open/nvidia/nv-tb-egpu-metrics.c
 new file mode 100644
-index 00000000..62afced9
+index 00000000..f42bb18a
 --- /dev/null
 +++ b/kernel-open/nvidia/nv-tb-egpu-metrics.c
-@@ -0,0 +1,231 @@
+@@ -0,0 +1,253 @@
 +/*
 + * SPDX-FileCopyrightText: nvidia-driver-injector contributors
 + * SPDX-License-Identifier: MIT
@@ -267,6 +269,27 @@ index 00000000..62afced9
 +}
 +static DEVICE_ATTR_RO(tb_egpu_state);
 +
++/* Per-device (not module-global): the E1 eGPU classification that gates the A6
++ * open-path and A7 shutdown-path bounded-wait wrappers. Resolved live from the
++ * device's nv_state_t so the value is correct regardless of when it was set.
++ * Visibility for: confirming A6/A7 are armed on this bind, and detecting the
++ * case where a driver unbind/rebind re-probes WITHOUT re-establishing the
++ * classification (which silently disengages the bounded-wait guards). A plain
++ * read() — no chip touch — so it is safe to poll even on a wedge-prone chip. */
++static ssize_t tb_egpu_is_external_show(struct device *dev,
++                                        struct device_attribute *attr, char *buf)
++{
++    nv_linux_state_t *nvl = pci_get_drvdata(to_pci_dev(dev));
++    nv_state_t *nv;
++
++    if (nvl == NULL)
++        return sysfs_emit(buf, "unknown\n");
++
++    nv = NV_STATE_PTR(nvl);
++    return sysfs_emit(buf, "%d\n", nv->is_external_gpu ? 1 : 0);
++}
++static DEVICE_ATTR_RO(tb_egpu_is_external);
++
 +static ssize_t tb_egpu_f40b_fires_show(struct device *dev,
 +                                       struct device_attribute *attr, char *buf)
 +{
@@ -298,6 +321,7 @@ index 00000000..62afced9
 +
 +static struct attribute *tb_egpu_metrics_attrs[] = {
 +    &dev_attr_tb_egpu_state.attr,
++    &dev_attr_tb_egpu_is_external.attr,
 +    &dev_attr_tb_egpu_f40b_fires.attr,
 +    &dev_attr_tb_egpu_recovery_count.attr,
 +    &dev_attr_tb_egpu_recovery_failures.attr,
