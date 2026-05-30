@@ -78,14 +78,11 @@ THEN  after rebind, tb_egpu_f40b_fires reads 0
 AND   tb_egpu_state reads "healthy"
 ```
 
-### Requirement: Both F40b timeout paths SHALL increment the fires counter AND set state to lost-temporary
+### Requirement: Both F40b timeout paths SHALL increment the fires counter; only the open path SHALL set state to lost-temporary
 
-When A6's `nv_open_device_for_nvlfp_bounded` (open path) OR A7's `nv_f40b_shutdown_bounded` (shutdown/rmmod path) hits its timeout branch and calls `rm_cleanup_gpu_lost_state(...)`, the driver MUST also:
+When A6's `nv_open_device_for_nvlfp_bounded` (open path) OR A7's `nv_f40b_shutdown_bounded` (shutdown/rmmod/close path) hits its timeout branch and calls `rm_cleanup_gpu_lost_state(...)`, the driver MUST increment `tb_egpu_f40b_fires` atomically. The shutdown path is the **dominant** fire class — A7 Test A (n=2, 2026-05-29; n=3 on the aorus.20 deploy uninstall) proved it fires on every healthy rmmod on this hardware — so the counter MUST cover it; counting only the open path would make `tb_egpu_f40b_fires` silently miss its primary production fire path and would violate A7's documented contract that "A8 increments a single counter for both A6 and A7 fires". The hook MUST be placed once in the shared `nv_f40b_shutdown_bounded` helper (per-timeout), not at the two call sites, so each genuine MMIO timeout counts exactly once.
 
-1. Increment `tb_egpu_f40b_fires` atomically.
-2. Set `tb_egpu_state` atomically to `lost-temporary`.
-
-Both updates MUST be observable via sysfs read by the time the wrapper returns. The shutdown path is the **dominant** fire class — A7 Test A (n=2, 2026-05-29) proved it fires on every healthy rmmod on this hardware — so the counter MUST cover it; counting only the open path would make `tb_egpu_f40b_fires` silently miss its primary production fire path and would violate A7's documented contract that "A8 increments a single counter for both A6 and A7 fires". The shutdown-path hook MUST be placed once in the shared `nv_f40b_shutdown_bounded` helper (per-timeout), not at the two call sites, so each genuine MMIO timeout counts exactly once.
+The `tb_egpu_state` transition to `lost-temporary`, however, MUST happen ONLY on the **open path** (A6), via `nv_tb_egpu_f40b_fired()`. The shutdown path (A7) MUST use a counter-only variant `nv_tb_egpu_f40b_fired_teardown()` that does NOT touch state. Rationale: an open-path timeout means the GPU failed to come up and is genuinely unusable (`lost-temporary` is correct). A shutdown-path timeout is a teardown artifact — it fires during `nv_shutdown_adapter` (rmmod, or a pre-persistence close-path `nv_stop_device` on bring-up), after which a fresh bind works fine. Setting `lost-temporary` on a teardown fire would strand a demonstrably healthy GPU's `tb_egpu_state` at `lost-temporary` after **every normal bring-up** (which includes a pre-persistence close-path fire), with no path back to `healthy` until A9 lands — a false-negative health signal. This was found in the live aorus.20 deploy (`state` read `lost-temporary` while the GPU was at P8 with persistence engaged and nvidia-smi fully functional) and corrected in v2.1.
 
 #### Scenario: Open-path F40b fire updates state and counter
 
@@ -99,26 +96,29 @@ AND   tb_egpu_state subsequently reads "lost-temporary"
 AND   tb_egpu_f40b_fires subsequently reads N+1
 ```
 
-#### Scenario: Shutdown-path F40b fire updates state and counter
+#### Scenario: Shutdown-path F40b fire increments counter but leaves state healthy
 
 ```
-GIVEN nvidia.ko is loaded with A7 + A8 and tb_egpu_f40b_fires reads N
-WHEN  rmmod (or last-close) drives nv_shutdown_adapter and A7's rm_shutdown_adapter wrap times out at 200 ms
-THEN  tb_egpu_f40b_fires reads N+1 (observable until the sysfs group is removed later in the remove path)
-AND   tb_egpu_state transitions to "lost-temporary"
+GIVEN nvidia.ko is freshly bound, tb_egpu_state reads "healthy", tb_egpu_f40b_fires reads 0
+AND   the GPU is healthy (persistence engaged, nvidia-smi functional)
+WHEN  a pre-persistence close-path open/close during bring-up drives nv_shutdown_adapter
+      and A7's rm_shutdown_adapter wrap times out at 200 ms (structural on this hardware)
+THEN  tb_egpu_f40b_fires reads 1 (the teardown fire is counted)
+AND   tb_egpu_state STILL reads "healthy" (a teardown timeout is not a usability event)
 ```
 
-(Note: on the rmmod path the sysfs group is removed by `tb_egpu_metrics_stop` *before* `nv_shutdown_adapter` runs, so a live external reader sees the increment only on the close-path-without-unbind variant; the counter is nonetheless correct, and an A9 in-driver consumer observes it regardless of the sysfs node's presence.)
+(Verified live on aorus.20 before v2.1: a single counter+state hook left `tb_egpu_state=lost-temporary` / `f40b_fires=1` after bring-up on a healthy GPU. After v2.1 the same bring-up yields `state=healthy` / `f40b_fires=1`.)
 
 ### Requirement: A9 (forthcoming) hooks SHALL be provided as function symbols
 
-The driver MUST provide three function symbols for A9 to call when it lands:
+The driver MUST provide the following function symbols:
 
-- `nv_tb_egpu_f40b_fired(void)` — invoked by A6 (open path) and A7 (shutdown path), already wired in this patch, on each F40b timeout. State -> lost-temporary; fires++. SHALL be safe to call from any context those timeout paths run in (pure atomic ops, no sleeping).
+- `nv_tb_egpu_f40b_fired(void)` — invoked by A6 (open path), already wired. fires++ AND state -> lost-temporary. SHALL be safe to call from any context the open timeout path runs in (pure atomic ops, no sleeping).
+- `nv_tb_egpu_f40b_fired_teardown(void)` — invoked by A7 (shutdown path), already wired. fires++ ONLY (state untouched — see the state-transition requirement above). Same context-safety.
 - `nv_tb_egpu_recovery_succeeded(void)` — reserved for A9. recovery_count++; last_recovery_ns := ktime_get_ns(); state -> healthy.
 - `nv_tb_egpu_recovery_failed(int permanent)` — reserved for A9. recovery_failures++; state -> lost-permanent (if `permanent` non-zero) or lost-temporary (if `permanent` is zero).
 
-A8 SHALL define all three functions even though A9 is the eventual consumer of two of them. This decouples A8 from A9's timeline and ensures A8's surface is complete without A9.
+A8 SHALL define all four functions even though A9 is the eventual consumer of the last two. This decouples A8 from A9's timeline and ensures A8's surface is complete without A9.
 
 #### Scenario: A9 hooks are linkable today
 
@@ -159,7 +159,7 @@ Userspace consumers that want a kernel-log signal at fire time SHOULD subscribe 
   - `kernel-open/nvidia/nv-tb-egpu-metrics.h` (new TU): lifecycle + hook declarations, with the v1-failure rationale.
   - `kernel-open/nvidia/nvidia-sources.Kbuild`: `NVIDIA_SOURCES += nvidia/nv-tb-egpu-metrics.c`.
   - `kernel-open/nvidia/nv-pci.c`: `#include "nv-tb-egpu-metrics.h"`; `(void)tb_egpu_metrics_init(nvl)` in `nv_pci_probe` after `tb_egpu_qwd_init`; `tb_egpu_metrics_stop(nvl)` in `nv_pci_remove_helper` before `tb_egpu_qwd_stop`. (The v1 `dev_groups` field + extern are NOT present.)
-  - `kernel-open/nvidia/nv.c`: `#include "nv-tb-egpu-metrics.h"`; `nv_tb_egpu_f40b_fired()` in A6's open-path timeout branch and in A7's shutdown-path timeout branch.
+  - `kernel-open/nvidia/nv.c`: `#include "nv-tb-egpu-metrics.h"`; `nv_tb_egpu_f40b_fired()` in A6's open-path timeout branch (counter + state) and `nv_tb_egpu_f40b_fired_teardown()` in A7's shutdown-path timeout branch (counter only).
 - **Fork branch**: `a8-f40b-sysfs-observability`.
 - **Validation**: full C1-C5 + E1 + A1-A8 stack compiles clean (`make modules`, kernel 7.0.9); `nv-tb-egpu-metrics.o` links into nvidia.ko; patch applies clean on a fresh `595.71.05` tag checkout. Adversarially reviewed 2026-05-30 (4-lens workflow + per-finding verification): no use-after-free, reset-vs-reader race safe, atomic types consistent, sysfs_emit buffer-safe. Runtime sysfs materialisation pending deployment on the next image (aorus.20).
 - **Upstream candidacy**: n/a — addon layer, project-local. The sysfs surface is specific to F40b's lifecycle and depends on A6/A7, none of which is upstream-bound.

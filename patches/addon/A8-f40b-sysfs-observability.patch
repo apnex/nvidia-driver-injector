@@ -19,7 +19,8 @@
 #
 # (drivers/pci/pci-driver.c) — clobbering the inner .driver.dev_groups field
 # v1 set with the NULL *outer* pci_driver.dev_groups.  Verified empirically on
-# aorus.19 (A7 Test A/B: attrs absent at /sys/bus/pci/devices/<bdf>/).
+# aorus.19 (attrs absent), then fixed + verified live on aorus.20 (all 5
+# attrs materialise at /sys/bus/pci/devices/<bdf>/).
 #
 # v2 mirrors the proven addon A2 (Q-watchdog) / A3 (recovery) idiom: explicit
 # sysfs_create_group on &nvl->pci_dev->dev.kobj at probe, sysfs_remove_group at
@@ -32,11 +33,23 @@
 #   - tb_egpu_metrics_init(nvl) wired into nv_pci_probe after tb_egpu_qwd_init.
 #   - tb_egpu_metrics_stop(nvl) wired into nv_pci_remove_helper before
 #     tb_egpu_qwd_stop.
-#   - nv.c wires nv_tb_egpu_f40b_fired() into BOTH F40b timeout branches: A6's
-#     open-path (nv_open_device_for_nvlfp_bounded) and A7's shutdown-path
-#     (nv_f40b_shutdown_bounded).  The shutdown path is the dominant fire class
-#     (A7 Test A: fires on every healthy rmmod), so counting it honours A7's
-#     contract that A8 increments a single counter for both A6 and A7 fires.
+#
+# F40b fire hooks (nv.c) — two variants, so the counter covers both paths while
+# state transitions only on a genuine usability failure:
+#   - nv_tb_egpu_f40b_fired()           A6 OPEN path: f40b_fires++ AND
+#     state -> lost-temporary.  An open that times out means the GPU failed to
+#     come up — it is genuinely unusable.
+#   - nv_tb_egpu_f40b_fired_teardown()  A7 SHUTDOWN path: f40b_fires++ ONLY.
+#     rm_shutdown_adapter times out structurally on every healthy teardown (A7
+#     Test A), including the pre-persistence close-path fire during bring-up.
+#     That is a teardown artifact, not a "GPU is now unusable" event, so it must
+#     NOT strand tb_egpu_state at lost-temporary (which would read lost-temporary
+#     on a demonstrably healthy GPU after every normal bring-up, with no path
+#     back to healthy until A9).  Counting it honours A7's "single counter for
+#     both A6 and A7 fires" contract; not transitioning state keeps the health
+#     signal truthful.  (This split is the v2.1 fix found in the live aorus.20
+#     deploy: a single counter+state hook left a healthy GPU reading
+#     lost-temporary.)
 #   - The v1 dev_groups field on nv_pci_driver and the nv_tb_egpu_dev_groups[]
 #     wrapper are gone.
 #
@@ -44,7 +57,8 @@
 # publishing the group, zeroing counters + state=healthy each bind generation.
 # The metrics struct is module-static single-instance (single-eGPU posture), so
 # without this an unbind-rebind (DaemonSet pod restart) would re-expose stale
-# counters from the prior bind.
+# counters from the prior bind.  Verified live on aorus.20 (f40b_fires read 1,
+# not an accumulation, after one bring-up fire).
 #
 # Dependencies: A6 (open-path hook site) + A7 (shutdown-path hook site).
 # Single-GPU assumption: module-global metrics; refactor to per-device storage
@@ -53,10 +67,10 @@
 # Telemetry tier: nominal (machine-readable state + counters; no kernel-log
 # emission — that is A6/A7's job, and A9's for the recovery state machine).
 #
-# Adversarially reviewed 2026-05-30 (4-lens workflow + per-finding verify):
-# no use-after-free (module-static metrics; group removed before any teardown),
-# reset-vs-reader race safe (kernfs active-reference draining), atomic types
-# consistent, sysfs_emit buffer-safe.
+# Adversarially reviewed 2026-05-30 (4-lens workflow + per-finding verify) and
+# live-validated on aorus.20: no use-after-free (module-static metrics; group
+# removed before any teardown), reset-vs-reader race safe (kernfs active-ref
+# draining), atomic types consistent, sysfs_emit buffer-safe.
 #
 # Author: nvidia-driver-injector contributors
 # Date:   2026-05-30
@@ -105,10 +119,10 @@ index c02a9975..ed7c9aa1 100644
       * and free per-pdev state before nvl is torn down.
 diff --git a/kernel-open/nvidia/nv-tb-egpu-metrics.c b/kernel-open/nvidia/nv-tb-egpu-metrics.c
 new file mode 100644
-index 00000000..3f990435
+index 00000000..62afced9
 --- /dev/null
 +++ b/kernel-open/nvidia/nv-tb-egpu-metrics.c
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,231 @@
 +/*
 + * SPDX-FileCopyrightText: nvidia-driver-injector contributors
 + * SPDX-License-Identifier: MIT
@@ -194,11 +208,33 @@ index 00000000..3f990435
 + * Write surface (hooks called from elsewhere in the driver)
 + * --------------------------------------------------------------------- */
 +
-+/* Called by A6's bounded-wait open-path wrapper on timeout (F40b fire). */
++/*
++ * Called by A6's bounded-wait OPEN-path wrapper on timeout. This is a genuine
++ * "GPU failed to come up" event: the open syscall could not bring the chip up,
++ * so the device is unusable. Count it AND transition state to lost-temporary.
++ */
 +void nv_tb_egpu_f40b_fired(void)
 +{
 +    atomic_inc(&nv_tb_egpu_metrics.f40b_fires);
 +    atomic_set(&nv_tb_egpu_metrics.state, NV_TB_EGPU_STATE_LOST_TEMPORARY);
++}
++
++/*
++ * Called by A7's bounded-wait SHUTDOWN-path wrapper on timeout. This fires
++ * during teardown (rmmod, or a close-path nv_stop_device before persistence),
++ * where rm_shutdown_adapter's MMIO times out structurally on this hardware (A7
++ * Test A: every healthy rmmod). It is a teardown artifact, NOT a "GPU is now
++ * unusable" event — a fresh bind works fine afterward. So count it (the
++ * f40b_fires counter honestly covers both fire paths, per A7's contract) but
++ * do NOT touch state: stranding state at lost-temporary after a normal bring-up
++ * (which includes a pre-persistence close-path fire) is a false-negative health
++ * signal that never self-heals (A9's recovery_succeeded is the only path back to
++ * healthy, and A9 is not wired). Leaving state alone keeps it at the value the
++ * reset-on-bind established (healthy) through a routine teardown.
++ */
++void nv_tb_egpu_f40b_fired_teardown(void)
++{
++    atomic_inc(&nv_tb_egpu_metrics.f40b_fires);
 +}
 +
 +/* Reserved for A9 — increments recovery_count and resets state to healthy. */
@@ -320,10 +356,10 @@ index 00000000..3f990435
 +}
 diff --git a/kernel-open/nvidia/nv-tb-egpu-metrics.h b/kernel-open/nvidia/nv-tb-egpu-metrics.h
 new file mode 100644
-index 00000000..326138ce
+index 00000000..7f6aa81c
 --- /dev/null
 +++ b/kernel-open/nvidia/nv-tb-egpu-metrics.h
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,82 @@
 +/*
 + * SPDX-FileCopyrightText: nvidia-driver-injector contributors
 + * SPDX-License-Identifier: MIT
@@ -361,9 +397,10 @@ index 00000000..326138ce
 + *
 + * The three hooks below are the write surface, called from elsewhere in the
 + * driver:
-+ *   nv_tb_egpu_f40b_fired()        — A6's bounded-wait open-path timeout (live)
-+ *   nv_tb_egpu_recovery_succeeded()— A9's recovery state machine (forthcoming)
-+ *   nv_tb_egpu_recovery_failed()   — A9's recovery state machine (forthcoming)
++ *   nv_tb_egpu_f40b_fired()         — A6 open-path timeout: counter + state->lost (live)
++ *   nv_tb_egpu_f40b_fired_teardown()— A7 shutdown-path timeout: counter only (live)
++ *   nv_tb_egpu_recovery_succeeded() — A9's recovery state machine (forthcoming)
++ *   nv_tb_egpu_recovery_failed()    — A9's recovery state machine (forthcoming)
 + *
 + * Telemetry tier: nominal. This TU emits no kernel-log lines; A6 (and A9) own
 + * the human-readable markers. A8's job is the machine-readable surface.
@@ -387,7 +424,12 @@ index 00000000..326138ce
 + * context (atomic ops only, no sleeping).
 + *
 + *   nv_tb_egpu_f40b_fired()         f40b_fires++; state -> lost-temporary.
-+ *                                   Called by A6's open-path timeout (live).
++ *                                   Called by A6's open-path timeout (genuine
++ *                                   "GPU failed to come up") (live).
++ *   nv_tb_egpu_f40b_fired_teardown() f40b_fires++ ONLY; state untouched.
++ *                                   Called by A7's shutdown-path timeout (a
++ *                                   teardown artifact, not a usability event)
++ *                                   (live).
 + *   nv_tb_egpu_recovery_succeeded() recovery_count++; last_recovery_ns := now;
 + *                                   state -> healthy. Reserved for A9.
 + *   nv_tb_egpu_recovery_failed()    recovery_failures++; state -> lost-permanent
@@ -395,12 +437,13 @@ index 00000000..326138ce
 + *                                   Reserved for A9.
 + */
 +void nv_tb_egpu_f40b_fired(void);
++void nv_tb_egpu_f40b_fired_teardown(void);
 +void nv_tb_egpu_recovery_succeeded(void);
 +void nv_tb_egpu_recovery_failed(int permanent);
 +
 +#endif /* _NV_TB_EGPU_METRICS_H_ */
 diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
-index efa7169f..273719fd 100644
+index efa7169f..7841eeec 100644
 --- a/kernel-open/nvidia/nv.c
 +++ b/kernel-open/nvidia/nv.c
 @@ -57,6 +57,7 @@
@@ -422,19 +465,25 @@ index efa7169f..273719fd 100644
          rc = -EIO;
      }
  
-@@ -2262,6 +2267,15 @@ static void nv_f40b_shutdown_bounded(
+@@ -2262,6 +2267,21 @@ static void nv_f40b_shutdown_bounded(
           * wrap (if this was the rm_disable_adapter wrap) will fast-fail
           * because the sink is set. */
          rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_AER_FATAL);
 +
-+        /* A8: record this F40b fire and transition state to lost-temporary.
++        /* A8 (teardown variant): COUNT this F40b fire but do NOT touch state.
 +         * The shutdown/rmmod path is the DOMINANT F40b fire class (A7 Test A:
-+         * fires on every healthy rmmod) — counting it here is what makes
-+         * tb_egpu_f40b_fires honour A7's "single counter for both A6 and A7
-+         * fires" contract.  Placed once in the shared helper (per-timeout),
-+         * not at the two call sites, so each genuine MMIO timeout counts once.
-+         * Counter + state are visible at /sys/bus/pci/devices/<bdf>/tb_egpu_* */
-+        nv_tb_egpu_f40b_fired();
++         * fires on every healthy rmmod) — counting it makes tb_egpu_f40b_fires
++         * honour A7's "single counter for both A6 and A7 fires" contract.  But
++         * a teardown timeout is NOT a "GPU is now unusable" event: it fires
++         * during nv_shutdown_adapter (rmmod, or a pre-persistence close-path
++         * nv_stop_device on bring-up), after which a fresh bind works fine.
++         * Setting state=lost-temporary here would strand a healthy GPU's
++         * tb_egpu_state at lost-temporary after every normal bring-up (the
++         * pre-persistence close-path fire) with no path back to healthy until
++         * A9 lands — a false-negative health signal.  Placed once in the shared
++         * helper (per-timeout) so each genuine MMIO timeout counts once.
++         * Counter visible at /sys/bus/pci/devices/<bdf>/tb_egpu_f40b_fires. */
++        nv_tb_egpu_f40b_fired_teardown();
      }
  
      nv_f40b_shutdown_work_put(w);    /* drop caller's ref; worker still has 1 if running */
