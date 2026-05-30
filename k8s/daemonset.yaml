@@ -118,7 +118,7 @@ spec:
       # hostNetwork off to keep the pod's network namespace small.
       containers:
         - name: driver
-          image: apnex/nvidia-driver-injector:595.71.05-aorus.21
+          image: apnex/nvidia-driver-injector:595.71.05-apnex.22
           imagePullPolicy: IfNotPresent
           # Privileged + SYS_MODULE — load kernel modules + write PCI sysfs.
           # Same security posture as NVIDIA's own driver DaemonSet.

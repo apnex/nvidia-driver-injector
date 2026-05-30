@@ -24,7 +24,7 @@
 #
 # 1. Schedule rm_call onto system_long_wq with a refcounted heap-allocated
 #    work struct.
-# 2. Teardown thread waits with timeout (default 200ms = 4x PCIe CTO).
+# 2. Teardown thread waits with timeout (default 1200ms = 2x measured ~600ms completion (SH-1)).
 # 3. On completion within timeout: pass through, log "completed within
 #    budget", continue with the next teardown step.
 # 4. On timeout: call rm_cleanup_gpu_lost_state(sp, nv,
@@ -41,7 +41,7 @@
 # "completed within budget" with no further sink-set needed.
 #
 # Gated by:
-#   NVreg_TbEgpuShutdownTimeoutMs > 0   (module param, default 200ms; 0 = off)
+#   NVreg_TbEgpuShutdownTimeoutMs > 0   (module param, default 1200ms; 0 = off)
 #   nv->is_external_gpu                 (E1-classified eGPU only)
 #
 # Non-eGPU paths and the disabled (timeout=0) path fall through to the
@@ -61,10 +61,10 @@
 # primitive shape, established the F40b naming convention used here).
 #
 diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
-index a9e5b847..efa7169f 100644
+index a9e5b847..8748b2ea 100644
 --- a/kernel-open/nvidia/nv.c
 +++ b/kernel-open/nvidia/nv.c
-@@ -2135,11 +2135,147 @@ failed:
+@@ -2135,11 +2135,151 @@ failed:
      return rc;
  }
  
@@ -90,13 +90,17 @@ index a9e5b847..efa7169f 100644
 + * Gated by NVreg_TbEgpuShutdownTimeoutMs > 0 AND nv->is_external_gpu.
 + */
 +
-+unsigned int NVreg_TbEgpuShutdownTimeoutMs = 200;
++unsigned int NVreg_TbEgpuShutdownTimeoutMs = 1200;
 +module_param(NVreg_TbEgpuShutdownTimeoutMs, uint, 0644);
 +MODULE_PARM_DESC(NVreg_TbEgpuShutdownTimeoutMs,
 +    "F40b: timeout in ms for chip-touching shutdown-path RM calls on "
-+    "E1-classified eGPUs (default 200ms = 4x PCIe Completion Timeout).  "
-+    "On timeout, declare GPU lost via C5 sink and skip the wedged RM call "
-+    "so rmmod can complete.  0 = disabled (synchronous path).");
++    "E1-classified eGPUs (default 1200ms = 2x the measured ~600ms graceful "
++    "rm_shutdown_adapter completion; experiment SH-1, 2026-05-30).  The 200ms "
++    "default this replaces was ~3x too tight and declared the GPU lost "
++    "PREMATURELY on every teardown — rm_shutdown_adapter does NOT hang, it "
++    "busy-polls a GSP shutdown handshake for ~600ms then completes.  On a "
++    "genuine timeout, declare GPU lost via C5 sink and skip the wedged RM "
++    "call so rmmod can complete.  0 = disabled (synchronous path).");
 +
 +typedef void (*nv_f40b_shutdown_rm_call_t)(nvidia_stack_t *, nv_state_t *);
 +
@@ -213,7 +217,7 @@ index a9e5b847..efa7169f 100644
  
      // It's safe to call nv_kthread_q_stop even if queue is not initialized
      nv_kthread_q_stop(&nvl->bottom_half_q);
-@@ -2188,7 +2324,8 @@ void nv_shutdown_adapter(nvidia_stack_t *sp,
+@@ -2188,7 +2328,8 @@ void nv_shutdown_adapter(nvidia_stack_t *sp,
          nvl->msix_bh_mutex = NULL;
      }
  

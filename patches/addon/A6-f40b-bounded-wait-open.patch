@@ -45,10 +45,10 @@
 #
 
 diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
-index c27955fb..d462171f 100644
+index 559a5274..a9e5b847 100644
 --- a/kernel-open/nvidia/nv.c
 +++ b/kernel-open/nvidia/nv.c
-@@ -1771,6 +1771,128 @@ static int nv_open_device_for_nvlfp(
+@@ -1789,6 +1789,128 @@ static int nv_open_device_for_nvlfp(
      return nvlfp->open_rc;
  }
  
@@ -177,7 +177,7 @@ index c27955fb..d462171f 100644
  static void nvidia_open_deferred(void *nvlfp_raw)
  {
      nv_linux_file_private_t *nvlfp = (nv_linux_file_private_t *) nvlfp_raw;
-@@ -1926,7 +2048,11 @@ nvidia_open(
+@@ -1944,7 +2066,11 @@ nvidia_open(
  
          UNLOCK_NV_LINUX_DEVICES();
  

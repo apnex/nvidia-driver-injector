@@ -443,7 +443,7 @@ index 00000000..7f6aa81c
 +
 +#endif /* _NV_TB_EGPU_METRICS_H_ */
 diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
-index efa7169f..7841eeec 100644
+index 8748b2ea..97527039 100644
 --- a/kernel-open/nvidia/nv.c
 +++ b/kernel-open/nvidia/nv.c
 @@ -57,6 +57,7 @@
@@ -465,7 +465,7 @@ index efa7169f..7841eeec 100644
          rc = -EIO;
      }
  
-@@ -2262,6 +2267,21 @@ static void nv_f40b_shutdown_bounded(
+@@ -2266,6 +2271,21 @@ static void nv_f40b_shutdown_bounded(
           * wrap (if this was the rm_disable_adapter wrap) will fast-fail
           * because the sink is set. */
          rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_AER_FATAL);
