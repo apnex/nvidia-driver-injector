@@ -31,6 +31,31 @@ The SH-series root-cause work (`docs/missions/mission-1-egpu-hot-plug-hot-power/
 
 This connects to item 1 below (consolidate the F40 family) but sharpens it: the merge-A7-into-A6 idea assumed both are needed; SH-1 suggests A7-shutdown might be *deletable*. Decide with SH-3 Rung-1 + SH-2 + the open-arm data in hand.
 
+**Update 2026-05-31 (R0): the leak→join now spans BOTH arms.** R0 added `flush_work(&w->work)` to A6's open-path timeout branch (the Phase-0-confirmed F42 UAF fix — the worker was writing a freed `nvlfp`). So the "leaked worker" concept is obsolete on the open path too; item-1's always-join redesign applies to A6 *and* A7. v5 residual: A6's open-path flush can block `open()` until the closed-RM GSP-lockdown poll returns (bounded only if the RM gpuTimeout is finite) — the recovery-validation R2/R3 rungs measure that bound; if unbounded, the honest conclusion is A6's open path isn't cleanly hardenable in userspace-adjacent code, and E27 + in-driver recovery (reusing the *existing* deferred-open lifecycle: `nvidia_open_deferred` + `open_complete` + `is_accepting_opens`, rather than a bespoke worker) is the structural answer.
+
+### The more-correct A6 open-path design — the "elegant solution" (capture for v5 / post-v5 triage)
+
+R0's `flush_work` is the *minimal, safe containment* of the F42 UAF, but it re-couples the open syscall to the worker — partly undoing A6's whole fast-`-EIO` purpose. Two more-correct designs, to **triage at the v5 review** (do-during-v5 vs defer-post-v5):
+
+- **(a) ownership-transfer** — on the leaked-timeout path, hand `nvlfp`+`sp` ownership to the worker so `nvidia_open`'s `failed:` path does NOT free them; the worker frees them when it completes. Keeps A6's fast 200 ms `-EIO` *and* closes the UAF. Cost: an abandon-flag race + `sp` lifetime care.
+- **(b) deferred-open lifecycle reuse (preferred)** — route the bounded open through the kernel's *existing* async-open machinery (`nvidia_open_deferred` + `nvlfp->open_complete` + `nvl->is_accepting_opens` + `open_q` flushes + the close-side `nv_wait_open_complete`), which *already* solves "async open that doesn't free `nvlfp` and synchronizes with close/remove" correctly — instead of A6's bespoke worker + refcount-2 + flush. This is also the right shape for **E27's in-driver recovery** (`docs/missions/mission-1-egpu-hot-plug-hot-power/design/in-driver-recovery-target-2026-05-29.md`).
+
+**Audit result (2026-05-31, `r0-flush-work-correctness-audit`, 4-agent):** R0 is **deadlock-free** (the flushing syscall under `ldata_lock` and the worker under the RM GPU-group lock are disjoint lock domains; the worker chain `rm_init_adapter → nv_start_device` takes no `ldata_lock`; same pattern A7's SH-3 already ships) and **UAF-solved** → R0 ships as the safe containment, and this redesign **stays post-v5** (not promoted to before-ship). The audit ruled **(b) deferred-open reuse is the most-correct fix** and **(a) ownership-transfer is strictly worse** (an `sp`-lifetime/double-free race vs flush_work's clean join) — so v5 should pursue **(b)**.
+
+Two findings that *sharpen* (b)'s case:
+- **The C5 sink cannot fast-fail this poll.** `rm_cleanup_gpu_lost_state()` itself takes a BLOCKING `rmapiLockAcquire(API_LOCK_FLAGS_NONE)` (osapi.c:1906 / rmapi.c:638), and the worker holds that RM API lock for the whole GSP-lockdown poll (the chip answers the reads, so no dead-bus sentinel trips). So R0's timeout branch re-couples the syscall and blocks for up to the **RM `gpuTimeout` (~4 s graphics / ~30 s compute, os.c gpu_timeout)** with `ldata_lock` HELD — the exact long-block A6 was built to avoid. (b) is the structural escape because it returns `-EIO` *without* joining and does not hold `ldata_lock` for the worker's run. This same sink-can't-fast-fail property also undercuts A7's "returns in microseconds" claim → fold into the C5-sink refinement (item 2).
+- **(b) is not free:** the close-side `nv_wait_open_complete` is currently UNBOUNDED, so close would re-inherit the hang unless given a timeout variant + lost-state gating.
+
+**Priority:** a refinement, NOT something R0 needs — R0 ships as the safe containment meanwhile; the actual `gpuTimeout` bound is measured by the recovery-validation R2/R3 rungs.
+
+## Naming hygiene — failure-mode IDs leaked into identifiers (added 2026-05-31)
+
+The user flagged that failure-mode catalog IDs (`F40b`) leak into implementation **identifiers**, not just comments. Failure-mode IDs are catalog/disease identifiers whose taxonomy EVOLVES (the same-day F40 → F40-open / F43 / F42 split is the proof); coupling code to them is the naming corollary of "patches != failure modes." **v5 sweep:** rename identifiers for behaviour/mechanism; keep F-IDs in comments/docs + the `fake-5090` reverse-map only. Inventory of current leaks:
+- fork branches `a{6,7,8}-f40b-*`; patch filenames `A{6,7,8}-f40b-*.patch`; C symbols `nv_f40b_*`, `nv_tb_egpu_f40b_fired`; log strings `tb_egpu [F40b]: ...`.
+- **`tb_egpu_f40b_fires` sysfs attr is user-visible ABI** — rename needs a deprecation path (expose the new name, keep the old as an alias for one cycle), NOT a free internal rename.
+
+Deferred by the user (do NOT rename mid-stream). Memory: `feedback_no_failure_mode_ids_in_code`.
+
 ## Process suggestion when we get to v5
 
 Per-patch deep dive, in order:
@@ -62,7 +87,7 @@ Two questions the open-arm work surfaced that belong in the strategic review:
 
 ## Cross-refs
 
-- F40 catalog (refreshed today): `fake-5090/failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md`
+- F40 catalog (refreshed today): `fake-5090/failure-modes/F40-reinit-gsp-lockdown-wedge.md`
 - Existing patch intents: `docs/patch-intents/`
 - In-driver recovery target design (sibling): `docs/missions/mission-1-egpu-hot-plug-hot-power/design/in-driver-recovery-target-2026-05-29.md`
 - Open-arm forensics ledger (#282): `docs/missions/mission-1-egpu-hot-plug-hot-power/open-arm-forensics-ledger.md`
