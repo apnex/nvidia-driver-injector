@@ -209,6 +209,29 @@ Replace the (retracted) "Missing re-attempt" entry with a new audit-grounded ent
 4. **bpftrace `pci_assign_unassigned_bridge_resources` at runtime hot-plug** — capture which branch FAILS in the 2-try loop. Direct evidence for which retry / release-strategy adjustment is needed.
 5. **Empirical Section 3 coverage (E20, E21, E22, E24)** — confirm or disconfirm audit predictions about each parameter's effect.
 
+## Section E — cmdline staleness vs the patch stack (FLAGGED 2026-05-30; deferred to strategic review)
+
+**Question (user, 2026-05-30):** is the current grubby cmdline scope still correct, or stale now that the patch stack (C/E/A) has evolved?
+
+**Top-line answer: largely STILL CORRECT, not made stale by our patches** — because almost every arg operates at the **kernel TB / PCIe / IOMMU layer, a different maintainer domain than our GPU-driver patches** (the three-domain split: NVIDIA driver vs kernel TB/PCIe vs GSP firmware). A patch to `nvidia.ko` cannot replace host IOMMU posture or PCIe bridge-window sizing. So the cmdline is *orthogonal* to the patches, not redundant with them — with three knobs worth re-validating.
+
+Canonical cmdline (live, apnex.23): `iommu=off intel_iommu=off thunderbolt.host_reset=false pcie_aspm.policy=performance thunderbolt.clx=0 pcie_port_pm=off pci=realloc=on,hpmmioprefsize=32G,resource_alignment=35@0000:03:00.0`. All eight are enumerated in `status.sh` + set by `apply.sh`.
+
+| Arg | Purpose / origin | Verdict vs patches | Validation test |
+|---|---|---|---|
+| `iommu=off` `intel_iommu=off` (Lever T) | eliminates DMAR faults during GSP boot (`project_iommu_dmar_finding`) | **LOAD-BEARING.** Orthogonal — patches don't touch IOMMU translation. Lane 1 confirmed the open-arm wedge reproduces *with* it (it fixes a *different*, cold-boot contributor). | boot IOMMU-on, cold-plug bring-up n≥3, grep `DMAR:` + `GSP_LOCKDOWN`. Future lane: per-device passthrough / trusted-TB. |
+| `thunderbolt.host_reset=false` | `host_reset=true` **breaks BAR1 sizing** (empirical 2026-05-08) | **LOAD-BEARING.** Known-bad to flip. | none — do NOT test the `=true` direction (guard in `feedback_check_existing_guards_before_cmdline_experiments`). |
+| `pci=realloc=on` | boot-time deep-retry for BAR1 convergence (Section B/C) | **LOAD-BEARING at boot** (does NOT reach runtime path, Finding 2). Allocator layer — patches can't replace. | covered by E18; keep until E27 lands. |
+| `pci=hpmmioprefsize=32G` | prefetchable MMIO budget for hotplug buses | **LOAD-BEARING.** `fix-bar1` + entrypoint precondition-check it. | covered by E19; keep until E27. |
+| `pci=resource_alignment=35@03:00.0` | forces bridge-window alignment for 32 GiB BAR1 (Finding 6, both paths) | **LOAD-BEARING.** `status.sh`: "BAR1 will not size to 32 GiB" without it. | E24 variants; keep until E27. |
+| `pcie_aspm.policy=performance` | ASPM policy (links in L0) | **CANDIDATE-STALE.** Gen3 work found ASPM already disabled by a Linux quirk on this bridge → possibly redundant (or belt-and-suspenders). | E22-style: remove / default, reboot, cold-plug + nvbandwidth + AER-correctable/link-downtrain watch, n≥3. |
+| `thunderbolt.clx=0` | disables TB CL link-power states | **CANDIDATE-STALE.** Added during reliability work; continued necessity unverified. | `clx` default vs 0, reboot, soak + nvbandwidth, watch TB link drops / H2D latency, n≥3. |
+| `pcie_port_pm=off` | disables PCIe **port** runtime PM | **LOAD-BEARING-BUT-INTERTWINED.** Directly bears on the open-arm **H-OA2** (>5 s-gap D3hot → pre-`nv_open_device` wedge): keeping ports out of runtime-suspend likely suppresses that site. **Do NOT remove in isolation — couple to the Lane 3 H-OA2 differential.** | with `pcie_port_pm` default: run the >58 s-gap precondition (chip allowed to autosuspend), watch whether the A6-uncovered pre-`nv_open_device` wedge appears. **DESTRUCTIVE** (Lane 3). |
+
+**Summary:** keep the six load-bearing args (IOMMU + host_reset + the three sizing args) until their kernel-layer fixes (E27 etc.) land upstream — patches cannot retire them. The two genuinely re-validatable knobs are `pcie_aspm.policy` and `thunderbolt.clx` (possibly redundant with kernel quirks). `pcie_port_pm=off` is load-bearing-suspected and must be tested *together* with the H-OA2 destructive differential, not bisected alone.
+
+**Test methodology (deferred — reboot-heavy):** one-arg-removal-per-reboot bisection against a fixed validation gate — cold-plug bring-up + BAR1=32 GiB + `nvbandwidth`/deviceQuery baseline (diag container) + n≥3 reboots for stability. Respect the empirical guards (never `host_reset=true`; cautious removing the sizing args — they break BAR1). Each arg = one reboot-set → belongs in the same reboot-loop budget as Lane 3; **defer to the strategic patch review.** The two candidate-stale knobs (`pcie_aspm.policy`, `thunderbolt.clx`) are the cheapest wins and could ride along with the Lane 3 reboots.
+
 ## Cross-references
 
 - `experiments/E18-cmdline-realloc-on.md` — empirical result that informed audit's `pci=realloc=on` analysis

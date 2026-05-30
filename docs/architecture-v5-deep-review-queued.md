@@ -53,8 +53,16 @@ Each axis is a corner of a quad — disagreements between corners are the refact
 - Not a commitment to a specific v5 timeline. The trigger is "current incremental work has stabilised enough that a focused architectural pass is the right next investment" — sometime after A9 lands and the soak gates pass.
 - Not a list of bugs. The current stack works (validated n=2 for F40b today). This is about code aesthetics, maintainability, and reviewer-friendliness of the patch set.
 
+## Inputs queued from #282 (open-arm forensics, 2026-05-30)
+
+Two questions the open-arm work surfaced that belong in the strategic review:
+
+1. **Does A3's `pci_reset_bus` cure, or only contain?** Lane 2 confirmed the open-arm wedge is the GSP lockdown-release wait; A3 already does a bridge bus-reset on rmInit-FAIL and is *designed* to recover-to-working, but no archive shows a successful recovery. The **reset-efficacy ladder** (`docs/missions/mission-1-egpu-hot-plug-hot-power/experiments/OA-reset-efficacy-ladder.md`) is the survivable (A6-net) experiment that settles it; if a secondary bus reset cures, the patch action is "A3 retries init after its existing reset" (contain→cure). Also revisit **A6 wrap-site placement** — Lane 2 *validated* A6 wraps the correct frame for the D0 site, but the >58 s-gap pre-`nv_open_device` site (H-OA2) is A6-uncovered.
+2. **cmdline staleness vs the patch stack** — assessed in `pci-cmdline-audit.md` §E: scope is largely still correct (orthogonal kernel-layer concerns), but `pcie_aspm.policy` + `thunderbolt.clx` are candidate-stale and `pcie_port_pm=off` is intertwined with H-OA2. Test plan deferred (reboot-heavy).
+
 ## Cross-refs
 
 - F40 catalog (refreshed today): `fake-5090/failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md`
 - Existing patch intents: `docs/patch-intents/`
 - In-driver recovery target design (sibling): `docs/missions/mission-1-egpu-hot-plug-hot-power/design/in-driver-recovery-target-2026-05-29.md`
+- Open-arm forensics ledger (#282): `docs/missions/mission-1-egpu-hot-plug-hot-power/open-arm-forensics-ledger.md`
