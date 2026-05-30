@@ -152,3 +152,65 @@ oa_pin_d0() {
     oa_log "D0 pin: GPU control=$(cat /sys/bus/pci/devices/$OA_GPU/power/control) status=$st"
     [[ "$st" == "active" ]] || oa_warn "GPU runtime_status=$st (expected active)"
 }
+
+# ===========================================================================
+# Deterministic-recovery validation gates (added 2026-05-31, per the R0 audit).
+# These close the "silent-safety-net-disable" confound class the 2026-05-31
+# R0.5 ladder fell into: the rung preconditions must HARD-ABORT on a state that
+# would make a fire unsafe, not merely warn.
+# ===========================================================================
+
+# oa_assert_r0 — HARD gate for R1/R2/R3: the loaded module MUST carry R0's
+# flush->join (else the induced A6 fire is the live F42 UAF), KFENCE MUST be
+# live (the runtime UAF detector), and the open-timeout MUST be the BOUNDED
+# lane (>0; 0 is the destructive synchronous lane). oa_die on any miss.
+oa_assert_r0() {
+    local v ko b
+    v="$(cat /sys/module/nvidia/version 2>/dev/null || echo '')"
+    ko="$(find "/lib/modules/$(uname -r)" -name 'nvidia.ko' 2>/dev/null | head -1)"
+    [[ -n "$ko" ]] || oa_die "cannot locate loaded nvidia.ko to verify R0"
+    strings "$ko" 2>/dev/null | grep -q 'setting sink and flushing worker' \
+        || oa_die "module '$v' lacks the R0 flush->join string — refusing (would run the determinism ladder on the unhardened-A6 UAF)"
+    [[ -d /sys/kernel/debug/kfence ]] \
+        || oa_die "KFENCE not live (/sys/kernel/debug/kfence absent) — the runtime UAF detector is required"
+    [[ -r /sys/module/nvidia/parameters/NVreg_TbEgpuOpenTimeoutMs ]] \
+        || oa_die "NVreg_TbEgpuOpenTimeoutMs absent — A6 not present in this module"
+    b="$(cat /sys/module/nvidia/parameters/NVreg_TbEgpuOpenTimeoutMs)"
+    [[ "$b" -gt 0 ]] \
+        || oa_die "open_timeout=0 = the DESTRUCTIVE synchronous lane; the determinism rungs require the BOUNDED lane (>0)"
+    oa_log "R0 build confirmed: $v (flush->join present), KFENCE live, open_timeout=${b}ms"
+}
+
+# oa_bridge_pref_window_mib — parent-bridge prefetchable window size in MiB,
+# via lspci (passive config reads only). -1 if disabled/unparseable.
+oa_bridge_pref_window_mib() {
+    local parent rng lo hi
+    parent="$(basename "$(readlink -f "/sys/bus/pci/devices/$OA_GPU/.." 2>/dev/null)")"; parent="${parent#0000:}"
+    rng="$(lspci -s "$parent" -vv 2>/dev/null | grep -oiE 'Prefetchable memory behind bridge: [0-9a-f]+-[0-9a-f]+' | head -1)"
+    [[ -n "$rng" ]] || { echo -1; return; }
+    lo="0x$(sed -E 's/.*: ([0-9a-f]+)-([0-9a-f]+).*/\1/I' <<<"$rng")"
+    hi="0x$(sed -E 's/.*: ([0-9a-f]+)-([0-9a-f]+).*/\2/I' <<<"$rng")"
+    echo $(( (hi - lo + 1) / 1024 / 1024 ))
+}
+
+# oa_bar1_recovered — TRUE only if BAR1 is EXACTLY 32768 MiB AND the bridge
+# prefetchable window is full (>= 33089). A plain `>=` check (oa_bar1_ok) would
+# pass a partial/fallback window; this catches the 288MB leg-b fallback.
+oa_bar1_recovered() {
+    local m w; m="$(oa_bar1_mib)"; [[ "$m" -eq "$OA_BAR1_MIN_MIB" ]] || return 1
+    w="$(oa_bridge_pref_window_mib)"; [[ "$w" -ge 33089 ]] || return 1
+}
+
+# oa_bar1_leg_diagnose — on a non-32768 BAR1, classify: leg-b fallback
+# (~288MB bridge window = E27/kernel territory, NOT an A6/recovery-loop failure)
+# vs a genuine recovery failure. echoes ok|leg-b|recovery-fail; logs detail.
+oa_bar1_leg_diagnose() {
+    local m w; m="$(oa_bar1_mib)"; w="$(oa_bridge_pref_window_mib)"
+    oa_log "BAR1 diagnose: BAR1=${m}MiB bridge_pref_window=${w}MiB"
+    if [[ "$m" -eq "$OA_BAR1_MIN_MIB" ]]; then echo ok
+    elif [[ "$m" -le 256 && "$w" -ge 0 && "$w" -lt 1024 ]]; then
+        oa_log "  -> LEG-B fallback (~288MB window): E27 territory, NOT an A6/recovery-loop failure"; echo leg-b
+    else
+        oa_log "  -> RECOVERY-LOOP FAILURE (BAR1=${m}, window=${w}; not the leg-b signature)"; echo recovery-fail
+    fi
+}
