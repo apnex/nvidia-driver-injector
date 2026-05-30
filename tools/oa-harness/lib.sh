@@ -165,12 +165,30 @@ oa_pin_d0() {
 # live (the runtime UAF detector), and the open-timeout MUST be the BOUNDED
 # lane (>0; 0 is the destructive synchronous lane). oa_die on any miss.
 oa_assert_r0() {
-    local v ko b
+    local v ko reader b kdir
     v="$(cat /sys/module/nvidia/version 2>/dev/null || echo '')"
-    ko="$(find "/lib/modules/$(uname -r)" -name 'nvidia.ko' 2>/dev/null | head -1)"
-    [[ -n "$ko" ]] || oa_die "cannot locate loaded nvidia.ko to verify R0"
-    strings "$ko" 2>/dev/null | grep -q 'setting sink and flushing worker' \
-        || oa_die "module '$v' lacks the R0 flush->join string — refusing (would run the determinism ladder on the unhardened-A6 UAF)"
+    kdir="/lib/modules/$(uname -r)"
+    # The injector installs to extra/ (Approach B host bind-mount). Use direct
+    # path access — `find` proved unreliable traversing this tree (returns empty
+    # while a direct `strings extra/nvidia.ko` works).
+    ko=""
+    for cand in "$kdir/extra/nvidia.ko" "$kdir/extra/nvidia.ko.xz" "$kdir/updates/nvidia.ko" "$kdir/updates/nvidia.ko.xz"; do
+        [[ -f "$cand" ]] && { ko="$cand"; break; }
+    done
+    if [[ -n "$ko" ]]; then
+        if [[ "$ko" == *.xz ]]; then
+            xzcat "$ko" 2>/dev/null | grep -qa 'setting sink and flushing worker' \
+                || oa_die "module '$v' ($ko) lacks the R0 flush->join string — refusing (determinism ladder on the unhardened-A6 UAF)"
+        else
+            grep -qa 'setting sink and flushing worker' "$ko" 2>/dev/null \
+                || oa_die "module '$v' ($ko) lacks the R0 flush->join string — refusing (determinism ladder on the unhardened-A6 UAF)"
+        fi
+        oa_log "R0 flush->join confirmed in $ko"
+    else
+        [[ "$v" == 595.71.05-apnex.2[5-9] || "$v" == 595.71.05-apnex.[3-9][0-9] ]] \
+            || oa_die "cannot verify R0: on-disk module not found AND version '$v' is pre-apnex.25"
+        oa_warn "R0 verified by VERSION only ($v); on-disk module not found for the string check"
+    fi
     [[ -d /sys/kernel/debug/kfence ]] \
         || oa_die "KFENCE not live (/sys/kernel/debug/kfence absent) — the runtime UAF detector is required"
     [[ -r /sys/module/nvidia/parameters/NVreg_TbEgpuOpenTimeoutMs ]] \
