@@ -1,6 +1,8 @@
 # OA reset-efficacy ladder — does a runtime reset CURE the open-arm wedge?
 
-**Status:** DESIGNED 2026-05-30, not yet executed. **Survivable** (A6 safety net) — does NOT need the destructive reboot-loop. Execution gated on a go.
+**Status:** DESIGNED 2026-05-30. **R0.5 EXECUTED 2026-05-31 → HOST WEDGE; the "survivable (A6 net)" premise is FALSIFIED.** Root cause: A6 does **not** guard the *first* open of a bind (`is_external_gpu` is set lazily during the first open's `RmInitAdapter`), and every variant's post-rebind cycle-2 *is* a first open → A6 bypassed → **uncontained wedge** regardless of reset depth. This ladder is **destructive** and **must be redesigned** before any re-run. Full forensics: `OA-reset-ladder-wedge-forensics-2026-05-31.md`.
+
+> ⚠️ **The "Method (contained, A6 safety-net, survivable)" section below is WRONG and retained only for provenance.** Do not run as written. Redesign options: (a) reboot-loop (treat as destructive); (b) gate every first-open on the new `tb_egpu_is_external` sysfs attribute (A8 v2.2) so it aborts instead of wedging; (c) fix the A6 first-open coverage hole first, then the net holds. Also unresolved: the BAR1-bridge-window coupling (FLR/SBR break BAR1; only a slot-cycle restores it), which confounds "reset depth" measurement.
 **Series:** Open-Arm (OA), task #282. Constructive form of ladder hypothesis **H-OA12** (PCI-reset differential).
 **Parent:** `open-arm-forensics-ledger.md` (Lane 2 confirmed the site = GSP lockdown-release wait).
 

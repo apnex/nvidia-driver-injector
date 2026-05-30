@@ -250,6 +250,8 @@ WPR2-already-up is already confirmed downstream of the GSP-loss from the `verify
 
 The wedge sits **inside `nv_open_device`** — exactly the worker-queued frame A6 wraps. At the D0/sub-5s site, **A6 is correctly placed and deterministically contains** (4/4). This is the key input the post-experiment strategic patch review was waiting on. (Caveat: the >58 s-gap / pre-`nv_open_device` site — H-OA2 — is A6-uncovered and is a **Lane 3** question.)
 
+> **2026-05-31 — A6 FIRST-OPEN COVERAGE HOLE (found via the reset-ladder wedge; sharpens this claim).** A6 wraps the correct *frame*, but it only engages on the **2nd+ open of a bind**: `is_external_gpu` (A6's gate) is set *lazily* during the first open's `RmInitAdapter` (`osinit.c:1301`), so **A6 does NOT guard the FIRST open of any bind**. A driver unbind→rebind (or any re-probe) onto a bad chip makes the dangerous re-init the *unguarded first open* → uncontained hard-wedge (this is how reset-ladder R0.5 wedged the host). Production-relevant: PCI-error-recovery / hotplug / `A3 slot_reset` re-probe paths all create first-opens. This is a patch-review-grade A6 defect. New `tb_egpu_is_external` attr (A8 v2.2) makes it observable. Full forensics: `experiments/OA-reset-ladder-wedge-forensics-2026-05-31.md`.
+
 ### Surviving questions → Lane 3 (destructive)
 
 - **H-OA2:** what is the >58 s-gap pre-`nv_open_device` site (A6-uncovered)?
