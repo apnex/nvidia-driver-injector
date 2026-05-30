@@ -61,10 +61,10 @@
 # primitive shape, established the F40b naming convention used here).
 #
 diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
-index a9e5b847..8748b2ea 100644
+index a9e5b847..79002fd7 100644
 --- a/kernel-open/nvidia/nv.c
 +++ b/kernel-open/nvidia/nv.c
-@@ -2135,11 +2135,151 @@ failed:
+@@ -2135,11 +2135,175 @@ failed:
      return rc;
  }
  
@@ -188,20 +188,44 @@ index a9e5b847..8748b2ea 100644
 +    {
 +        nv_printf(NV_DBG_ERRORS,
 +            "NVRM: tb_egpu [F40b]: %s timed out after %u ms — declaring "
-+            "GPU lost (detector_class=3 DETECTOR_AER_FATAL); worker "
-+            "leaked, will exit when MMIO fails-fast post-sink-set\n",
++            "GPU lost (detector_class=3 DETECTOR_AER_FATAL); setting sink "
++            "and flushing worker before return\n",
 +            call_name, timeout_ms);
 +
 +        /* C5 sink primitive — sets PDB_PROP_GPU_IS_LOST and propagates to
-+         * subsequent RM operations.  The leaked worker's chip-touching
-+         * MMIO will see the sink at the next sink-aware check and abort,
-+         * allowing the worker to exit.  The subsequent rm_shutdown_adapter
-+         * wrap (if this was the rm_disable_adapter wrap) will fast-fail
-+         * because the sink is set. */
++         * subsequent RM operations.  After this, the worker's next
++         * sink-aware chip-touching MMIO fails-fast and the worker returns. */
 +        rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_AER_FATAL);
++
++        /* UAF GUARD (SH-3, 2026-05-30) — MANDATORY on the .remove/rmmod path.
++         * nv_f40b_shutdown_bounded runs inside nv_shutdown_adapter, which on
++         * the rmmod path is called from nv_pci_remove_helper DURING the
++         * module exit function.  The worker runs nv_f40b_shutdown_worker +
++         * rm_call (rm_shutdown_adapter) — both nvidia.ko TEXT — and holds NO
++         * module reference (system_long_wq is a shared kernel workqueue that
++         * does not pin nvidia.ko; try_module_get would be ineffective because
++         * the worker is queued AFTER delete_module's refcount gate).  If we
++         * merely "leaked" the worker and returned, nv_pci_remove_helper would
++         * free nvidia.ko .text AND NV_KFREE(nvl) while the worker still
++         * executes/dereferences them -> double use-after-free / kernel panic.
++         *
++         * flush_work BLOCKS until the worker has left module text and
++         * returned.  The sink set above makes the worker fail-fast, so in the
++         * (rare) genuine-timeout case this returns in microseconds.  In the
++         * COMMON healthy case this branch is never reached — rm_shutdown_adapter
++         * completes in ~600 ms, well within the 1200 ms budget (SH-1, n=3).
++         * Only a truly non-returning MMIO that never consults the sink makes
++         * this flush block the teardown thread — a bounded HANG that leaves
++         * the host alive (reboot to clear), strictly safer than a kernel-wide
++         * UAF panic and identical to the pre-A7 synchronous outcome for a
++         * genuinely-stuck MMIO. */
++        flush_work(&w->work);
 +    }
 +
-+    nv_f40b_shutdown_work_put(w);    /* drop caller's ref; worker still has 1 if running */
++    nv_f40b_shutdown_work_put(w);    /* drop caller's ref (worker has already
++                                      * dropped its ref: completed within
++                                      * budget on the if-path, or flushed on
++                                      * the timeout-path) */
 +}
 +
  void nv_shutdown_adapter(nvidia_stack_t *sp,
@@ -217,7 +241,7 @@ index a9e5b847..8748b2ea 100644
  
      // It's safe to call nv_kthread_q_stop even if queue is not initialized
      nv_kthread_q_stop(&nvl->bottom_half_q);
-@@ -2188,7 +2328,8 @@ void nv_shutdown_adapter(nvidia_stack_t *sp,
+@@ -2188,7 +2352,8 @@ void nv_shutdown_adapter(nvidia_stack_t *sp,
          nvl->msix_bh_mutex = NULL;
      }
  

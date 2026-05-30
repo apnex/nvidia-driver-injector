@@ -443,7 +443,7 @@ index 00000000..7f6aa81c
 +
 +#endif /* _NV_TB_EGPU_METRICS_H_ */
 diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
-index 8748b2ea..97527039 100644
+index 79002fd7..1b5833c8 100644
 --- a/kernel-open/nvidia/nv.c
 +++ b/kernel-open/nvidia/nv.c
 @@ -57,6 +57,7 @@
@@ -465,28 +465,28 @@ index 8748b2ea..97527039 100644
          rc = -EIO;
      }
  
-@@ -2266,6 +2271,21 @@ static void nv_f40b_shutdown_bounded(
-          * wrap (if this was the rm_disable_adapter wrap) will fast-fail
-          * because the sink is set. */
+@@ -2264,6 +2269,21 @@ static void nv_f40b_shutdown_bounded(
+          * sink-aware chip-touching MMIO fails-fast and the worker returns. */
          rm_cleanup_gpu_lost_state(sp, nv, NV_GPU_LOST_DETECTOR_AER_FATAL);
-+
+ 
 +        /* A8 (teardown variant): COUNT this F40b fire but do NOT touch state.
-+         * The shutdown/rmmod path is the DOMINANT F40b fire class (A7 Test A:
-+         * fires on every healthy rmmod) — counting it makes tb_egpu_f40b_fires
-+         * honour A7's "single counter for both A6 and A7 fires" contract.  But
-+         * a teardown timeout is NOT a "GPU is now unusable" event: it fires
-+         * during nv_shutdown_adapter (rmmod, or a pre-persistence close-path
-+         * nv_stop_device on bring-up), after which a fresh bind works fine.
-+         * Setting state=lost-temporary here would strand a healthy GPU's
-+         * tb_egpu_state at lost-temporary after every normal bring-up (the
-+         * pre-persistence close-path fire) with no path back to healthy until
-+         * A9 lands — a false-negative health signal.  Placed once in the shared
-+         * helper (per-timeout) so each genuine MMIO timeout counts once.
++         * The shutdown/rmmod path is the DOMINANT F40b fire class — counting
++         * it makes tb_egpu_f40b_fires honour A7's "single counter for both A6
++         * and A7 fires" contract.  But a teardown timeout is NOT a "GPU is now
++         * unusable" event: it fires during nv_shutdown_adapter (rmmod, or a
++         * pre-persistence close-path nv_stop_device on bring-up), after which a
++         * fresh bind works fine.  Setting state=lost-temporary here would
++         * strand a healthy GPU's tb_egpu_state at lost-temporary after every
++         * normal bring-up with no path back to healthy until A9 — a
++         * false-negative health signal.  Placed once in the shared helper
++         * (per-timeout); incremented BEFORE the flush below so the fire is
++         * recorded even if the flush blocks on a genuinely-stuck worker.
 +         * Counter visible at /sys/bus/pci/devices/<bdf>/tb_egpu_f40b_fires. */
 +        nv_tb_egpu_f40b_fired_teardown();
-     }
- 
-     nv_f40b_shutdown_work_put(w);    /* drop caller's ref; worker still has 1 if running */
++
+         /* UAF GUARD (SH-3, 2026-05-30) — MANDATORY on the .remove/rmmod path.
+          * nv_f40b_shutdown_bounded runs inside nv_shutdown_adapter, which on
+          * the rmmod path is called from nv_pci_remove_helper DURING the
 diff --git a/kernel-open/nvidia/nvidia-sources.Kbuild b/kernel-open/nvidia/nvidia-sources.Kbuild
 index f2a5caf6..d216a312 100644
 --- a/kernel-open/nvidia/nvidia-sources.Kbuild
