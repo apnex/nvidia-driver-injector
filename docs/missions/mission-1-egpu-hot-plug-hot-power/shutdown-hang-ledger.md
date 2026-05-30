@@ -104,7 +104,7 @@ Every candidate metric for the shutdown-hang investigation, tagged by how it's o
 | **FIX** | Bump `NVreg_TbEgpuShutdownTimeoutMs` default 200 → ~1500–2000 ms → teardown completes normally (no premature GPU-lost) | **READY to implement** (aorus.22) |
 | **SH-3 gate** | Understand-pass (4-agent): worker/unload lifecycle, kernel wq semantics, 20:52 re-exam, residual-risk | **DONE 2026-05-30** — confirmed a real latent DOUBLE UAF on rmmod-path timeout; 1200ms narrows not closes it; 20:52 wedge was NOT this (A7 not in that build) |
 | **A7 UAF guard** | `flush_work(&w->work)` in the timeout branch after sink-set → unload-safe | **SHIPPED apnex.23** (fork a7 amended, compiled, applies clean) |
-| SH-3 Rung-1 | Measure rmmod-path rm_shutdown latency on normal persistence-engaged deploy-uninstalls @ 1200ms (low-risk) | NEXT — the deploy of apnex.23 (uninstall of apnex.22) is the first data point |
+| SH-3 Rung-1 | Measure rmmod-path rm_shutdown latency on normal persistence-engaged deploy-uninstalls @ 1200ms (low-risk) | **n=1 2026-05-30**: rmmod-path rm_shutdown **completed within budget at ~649 ms** (apnex.22 uninstall) — essentially the close-path ~600 ms; no timeout, no UAF, host clean. Budget covers the rmmod tail. n≥3 across reboots would harden. |
 | SH-2 | eBPF on `osDevReadReg032` → exact polled register + poll cadence (why ~600 ms?) | optional characterization; fold rmmod-vs-close latency comparison in |
 
 ## Cross-refs
