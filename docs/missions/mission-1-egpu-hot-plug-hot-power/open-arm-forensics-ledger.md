@@ -1,6 +1,6 @@
 # OPEN-ARM forensics ledger — #282 (RmInitAdapter wedge)
 
-**Status:** DESIGN COMPLETE — chip-free. Reviewed and corrected by an adversarial red-team pass (4 must-fix + 4 should-fix items folded in). **Not yet executed. No experiment runs until the design is signed off.**
+**Status:** DESIGN COMPLETE + **LANE 1 EXECUTED** (chip-free, 2026-05-30). Reviewed and corrected by an adversarial red-team pass (4 must-fix + 4 should-fix folded in). Lane 1 (Rungs 0-3) ran over the archived wedge captures + live passive sysfs — results and the design deltas they force are in **§ Lane 1 — RESULTS** below. **Lanes 2-3 (chip-touching) NOT started; gated on a separate go.**
 **Series:** Open-Arm (OA) — the sibling of the now-closed Shutdown-Hang (SH) series.
 **Parent:** the F40 failure class. See `shutdown-hang-ledger.md` (SH, RESOLVED) and `session-handover-2026-05-30.md` (two-arm framing).
 
@@ -157,6 +157,67 @@ The realistic destination (Mode-B precedent, OA-MODEB-1; #979 open with no NVIDI
 ## 7. Recommended first move
 
 **Run LANE 1 (Rungs 0-3) — it is entirely chip-free, zero-reboot, zero-thermal, reads only archived logs + sysfs + config-space, and can ELIMINATE entire hypotheses (and the recipe ambiguity) for free.** Rung 0 in particular is a prerequisite for safely entering the contained lane. Nothing in Lane 1 touches the production GPU. Lanes 2-3 are gated on Lane 1's outcomes and on a separate go.
+
+## Lane 1 — RESULTS (executed 2026-05-30, chip-free; 5-agent fan-out + adversarial verify)
+
+Run over the 13 archived 2026-05-29 wedge captures + live passive sysfs/config-space. No chip touched.
+
+### Hypotheses resolved chip-free (free eliminations)
+
+| ID | **Lane 1 verdict** | Basis (verbatim-grounded) |
+|---|---|---|
+| **H-OA7** firmware-load | **falsified-as-sole-cause** | `gsp_ga10x.bin` (72.8 MB) + `gsp_tu10x.bin` (30 MB) are real files for 595.71.05, no dangling symlink; `nvidia-kmod-common` absent (no deletion regression); zero fw-load signatures across all 6 journals. |
+| **H-OA4** IOMMU/DMAR | **falsified-as-sole-cause** | Lever T (`iommu=off`) confirmed live; all 4 wedge journals show only `DMAR: IOMMU disabled`, **zero** real faults / `fault reason` / `0x71`; wedge reproduced anyway. |
+| **H-OA5** Gen3 signal-integrity | **falsified-as-sole-cause** | Gen2+bit5 cap live; wedge reproduced n=13; the one real AER (verify-wedge 18:26 CmpltTO) is a *consequence*; live `LnkSta=2.5 GT/s x4` is the idle power state (trains up under load), not a fault. |
+| **H-OA8** surprise-removal/Xid | **FALSIFIED** | Xid==0 in all 5 wedge journals (no Xid 79/154; the only `Surprise+` tokens are pciehp slot-cap descriptors); holders drained, no-persistence trigger. |
+
+⇒ H-OA4/5/7 retained only as possible **contributors** in the H-OA9 residual. H-OA8 is out — the open-arm wedge is a **clean, Xid-free deadlock class**, mechanistically separate from the cable-yank surprise-removal family.
+
+### The `verify-wedge` "Rosetta Stone" (the one journal that survived past the trigger)
+
+5 of 6 wedge boots froze before journald flushed the trigger (host hard-locked). **`verify-wedge-2026-05-29` is the sole boot whose journal captured the wedge sequence**, and it is decisive:
+
+- cycle-2 hit **`NV_ERR_GPU_IS_LOST` at `GSP_INIT_DONE`** → direct **open-arm** support for **H-OA1** (the GSP init RPC losing the GPU), no longer reliant on the shutdown-arm SH-2 trace.
+- on the **retry**: **`unexpected WPR2 already up, cannot proceed` → "GPU likely in a bad state, may need reset" → `rm_init_adapter failed`** (×2 cycles).
+- ⇒ **H-OA3 (WPR2-stuck) is CONFIRMED real but is a DOWNSTREAM SEQUELA of H-OA1**, not an independent root cause: WPR2-already-up is the retry symptom *after* the init-RPC GPU-loss. **Reclassify H-OA3 as a consequence of H-OA1.** (Also refines `project_wpr2_mechanism_2026_05_06`: the "unrelated reason GSP boot fails first" = the init-RPC GPU-loss.)
+
+This is the strongest open-arm evidence to date and points at **H-OA1 for the canonical (D0 / sleep-2) site** — but does **not** settle the site question for the >5 s-gap regime (below).
+
+### Containment-boundary verdict (Rung 0 + adversarial verify) — SAFETY-CRITICAL
+
+- **A6 log strings pinned** (`nv.c:1880-1916`): `open scheduled to bounded worker (timeout=%u ms)` / `open completed within budget rc=%d` / `open timed out after %u ms — declaring GPU lost (detector_class=3 …)`. (A7 shutdown variant is separate, `nv.c:2245+`.)
+- **A6's bounded-wait was NEVER observed engaging on a real host-wedge fire.** 12 of 13 wedge archives **predate A6** (built before 2026-05-29 09:46:52 UTC); the 13th (`a7-deploy`) had A6 but the actual 20:52 fire was rmmod-path (A6 doesn't wrap it). The **only** positive "A6 contains it" datapoint is the **synthetic F40B-TEST n=2** (`-EIO`, host alive) at the sleep-2/RmInitAdapter site.
+- **Recipe split CONFIRMED as two distinct SITES:** FULLPRE used a **58 s** gap (> 5 s autosuspend → D3hot → wedge **before** `nv_open_device`, zero cycle-2 trace); canonical/Test-B used **same-second** gaps (D0 retained → wedge **at** RmInitAdapter MMIO = A6's site). Same #979 root cause + same `UESta=0x4000` CTO, **but A6 only covers the D0/RmInitAdapter site.**
+- **H-OA2 reframed (important):** the verifier found the design doc's **`power/control=on` differential already RULED OUT runtime-PM-resume** as the FULLPRE site (probe-sentinel also partly falsified). So the pre-`nv_open_device` site is **UNCHARACTERIZED, not "PM-resume"** — *worse* for containment (an uncharacterized, A6-uncovered site). **Renamed H-OA2: "uncharacterized pre-`nv_open_device` wedge site, idle/gap-regime-dependent, NOT contained by A6."**
+- **Live posture (passive sysfs):** GPU `power/control=on`, `runtime_status=active`, `runtime_suspended_time=0 ms` → production chip **pinned at D0**, never autosuspended. lsof empty, persistenced inactive, module=apnex.23 (carries A6). Audio fn 04:00.1 = `control=auto`/`suspended`.
+
+### Lane 2 safety determination (resolves the verifier's "gather-more-before-lane2")
+
+Lane 2 (contained) is **conditionally safe**, and the conditions are now **enforceable**:
+
+1. **Module must carry A6** — apnex.23 does (build ≫ aorus.18-f40b). Re-verify the build banner after any rebuild/reload.
+2. **Pin the chip at D0** so the wedge lands at A6's RmInitAdapter site (not the uncharacterized pre-`nv_open_device` site): after the no-persistence modprobe, `echo on > …/power/control` on **both** 04:00.0 and 04:00.1, and keep the inter-cycle gap < 5 s. (PM-state write, not MMIO — safe.) The production chip is already D0-pinned; a fresh no-persistence modprobe may default to `auto`, so the pin is mandatory, not assumed.
+3. **Treat every A6 invocation as wedge-class anyway:** even at A6's covered site, the AER-vs-deadlock worker-hop race means the host *can* still go silent instead of returning `-EIO`. Full freeze scaffolding + reboot-fallback armed; the "0-reboot" framing is the expected case, not a guarantee.
+
+### Ladder corrections forced by Lane 1
+
+- **Rung 4's >58 s-gap arm moves to LANE 3 (destructive).** A >5 s gap (or an un-pinned `control=auto` chip) reaches the A6-uncovered pre-`nv_open_device` site → genuine reboot. Contained Rung 4 runs **only** D0-pinned, gap < 5 s.
+- **New Rung 3.5 (chip-free, at Lane 2 entry):** assert module-carries-A6 (build banner) + pin `power/control=on` on both functions + confirm `runtime_status=active` before any contained fire.
+- **H-OA3 leaves Rung 7 as an independent target** — now a sequela of H-OA1; Rung 7's WPR2 read becomes a *confirmation the retry-symptom matches `verify-wedge`*, not a root-cause test (strict BAR0 gating retained).
+- **H-OA1 has direct open-arm support** (verify-wedge) for the D0 site; Rung 4 narrows to (a) confirm the pinned stack at `_kgspRpcRecvPoll`-via-`kgspWaitForRmInitDone` on the D0 site, and (b) characterize the relabelled H-OA2 site — which, being pre-A6-boundary, runs in **Lane 3**.
+
+### Surviving live hypotheses after Lane 1
+
+- **H-OA1** GSP init RPC loss — *supported* (verify-wedge), leading D0-site mechanism; confirm the pinned frame in Lane 2 Rung 4.
+- **H-OA2-reframed** uncharacterized pre-`nv_open_device` site (gap-dependent, A6-uncovered) — Lane 3.
+- **H-OA10** early sanity-check MMIO — same Rung-4 capture splits it from H-OA1 by frame.
+- **H-OA11** BAR mis-mapping — AER-identical to H-OA1, broken by the Rung-5 BAR0-target read.
+- **H-OA12** cycle-1 destructive-teardown state inconsistency — Lane 3 PCI-reset differential.
+- **H-OA6** deadlock-as-primary — Lane 3 slack A/B.
+- **H-OA9** no-single-fixable-cause residual — the running default; pre-registered rate-shift falsifier.
+- *Folded/retired:* H-OA3 → sequela of H-OA1; H-OA4/5/7 → contributors-only; H-OA8 → falsified.
+
+---
 
 ## Cross-refs
 
