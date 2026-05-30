@@ -5,6 +5,8 @@
 **Trigger:** Reliability test 2026-05-25 surfaced gap D-3 (`docs/reliability-test-2026-05-25-gpu-power-on.md`); user elevated it to project mission.\
 **Companion research:** [`audit/tb-pcie/CONSOLIDATED.md`](../audit/tb-pcie/CONSOLIDATED.md) (M1 deep-dive).
 
+> ⚠️ **SNAPSHOT 2026-05-25 — superseded for current status/priority by [`experiment-register.md`](./experiment-register.md).** This doc's hypothesis registry (H1–H10) is BAR1-centric and predates the open-arm/F40 wedge, the A6/A7/A9 patches, the SH series, and the F40/F41/F42/F43 catalog split. Notably **H10 is now CONFIRMED** (a software BAR1-recovery trigger exists: `tools/fix-bar1.sh` = E16 chip-CTRL write + E2 slot-cycle). Read the register for what's answered/open/retired today; read this for the original sub-mission framing + H1–H10 provenance.
+
 ---
 
 ## Mission statement
@@ -141,7 +143,7 @@ Numbered for cross-reference in commits and future tests. Each hypothesis has a 
 
 **Prediction:** Among the many sysfs / ioctl / netlink APIs touching PCIe + TB, at least one of them can trigger the same "do full bridge enumeration" code path that USB-C CC events trigger — we just haven't found it yet.\
 **Falsification gate:** exhaustively enumerate all sysfs paths under `/sys/bus/pci/` and `/sys/bus/thunderbolt/`, all ioctls in `<linux/pci.h>`, all kernel debugfs entries; test each that plausibly could trigger; document each as "doesn't trigger" or "does trigger" with evidence.\
-**Status:** OPEN — Phase 2 investigation. We have tried: `boltctl authorize`, `boltctl forget+enroll`, sysfs `authorized=0/1` toggle, `resource1_resize`, PCI `remove`+`rescan` at three different bridge levels. None worked. There are more paths we haven't tried.\
+**Status:** **CONFIRMED 2026-05-28** — the software trigger exists: `tools/fix-bar1.sh` = chip ReBAR-CTRL write (E16) + pciehp slot power-cycle (E2). The slot-cycle invokes `pci_assign_unassigned_bridge_resources` (the cold-boot bridge sizer, honoring `pci=hpmmioprefsize=32G`); BAR1 returns to 32 GB, n≥2. Refinement: bridge re-enum ALONE is insufficient (the chip's ReBAR advertisement also resets) — the chip CTRL write is the co-requisite. The earlier-tried paths that did NOT work (`resource1_resize`, bridge-scoped/global `rescan`, `authorized` toggle) are superseded by the slot-cycle path. See `experiments/h1-userspace-recovery-2026-05-28.md` + [`experiment-register.md`](./experiment-register.md).\
 **Why it matters:** if H10 holds, the mission collapses to "find the right sysfs write" + Option B watcher. Phase 3 (upstream patches) becomes unnecessary.
 
 (Hypothesis numbering: H1-H5 are pre-existing; H7-H9 were added 2026-05-25 to capture Sub-mission C; H10 was renumbered from earlier H6 to avoid collision.)

@@ -1,8 +1,10 @@
 # MISSION-1 Phase 2 — Software-path archaeology matrix
 
+> ⚠️ **RESOLVED / SUPERSEDED (2026-05-31).** This matrix's central question (H10 — does a software BAR1-recovery trigger exist) was **ANSWERED 2026-05-28**: `tools/fix-bar1.sh` is the trigger (= **E16** chip RBAR-CTRL write + **E2** pciehp slot-cycle). Exit-criterion (a) met. **E2–E24 are SUPERSEDED** (they searched for the trigger we found); **E27** (in-kernel) remains the target. Current status + priority live in [`experiment-register.md`](./experiment-register.md). This matrix is retained for the per-experiment protocols + numbering provenance.
+
 **Purpose:** Exhaustively enumerate untested userspace + kernel mechanisms that might restore BAR1=32GB / bridge window=32GB+ on a TB-attached eGPU at runtime, without host reboot.
 
-**Question we're answering:** Does **any** software-only path exist that triggers fresh PCIe bridge window allocation matching the device's actual ReBAR request? (H10 in `docs/mission-egpu-hot-plug-hot-power.md` — currently OPEN.)
+**Question we're answering:** Does **any** software-only path exist that triggers fresh PCIe bridge window allocation matching the device's actual ReBAR request? (H10 — **ANSWERED 2026-05-28 by `fix-bar1.sh`**; see banner above.)
 
 **Status of H1 (cable replug → 32GB)**: FALSIFIED 2026-05-25 by E7. This doc is the follow-up.
 

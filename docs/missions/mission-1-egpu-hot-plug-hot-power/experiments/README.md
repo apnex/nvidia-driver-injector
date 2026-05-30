@@ -1,5 +1,7 @@
 # MISSION-1 Phase 2 experiments — index
 
+> ⚠️ **Archaeology ANSWERED (2026-05-28) — see [`../experiment-register.md`](../experiment-register.md) for current status + priority.** The BAR1-recovery trigger these experiments hunted for is `tools/fix-bar1.sh` (= E16 chip-CTRL write + E2 slot-cycle). Most E2–E24 below are **SUPERSEDED**; **E27** (in-kernel) stays live. The statuses in the table below are frozen as historical.
+
 This directory carries one file per Phase 2 archaeology experiment.\
 Each file is a self-contained scientific-method record: **hypothesis, method, predicted outcomes, actual result, conclusion**.
 

@@ -21,7 +21,7 @@ A fourth observation, **out of scope for Test B but worth surfacing**: the new i
 - A7 patch intent v1.1: `../../../patch-intents/A7-f40b-bounded-wait-shutdown.md`
 - A7 patch source: `../../../../patches/addon/A7-f40b-bounded-wait-shutdown.patch`
 - A7 Test A validation (sibling): `A7-test-A-validation-2026-05-29.md`
-- F40 catalog (with two-arm framing): `/root/fake-5090/failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md`
+- F40 catalog (with two-arm framing): `/root/fake-5090/failure-modes/F40-reinit-gsp-lockdown-wedge.md`
 - Test B journal evidence: `/var/log/mission-1-archaeology/test-B-2026-05-29/journalctl-test-B-phases.log` (122 lines, full Phases 1-3 coverage)
 - A7 intent v1.1 scenarios this test validates / refines: §"Scenario: rm_shutdown_adapter completes-fast post-sink-set (PREDICTED, not yet validated)"
 

@@ -3,7 +3,7 @@
 **Date:** 2026-05-29 evening (revised)
 **Status:** Design phase — initial design REPLACED below per Test #1 (2026-05-29 evening) findings
 **Scope:** NVIDIA driver fork (this project) — independent of E27 (Linux kernel)
-**Cross-refs:** `fake-5090/failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md` (§Mechanism, revised 2026-05-29 evening); `docs/missions/.../experiments/h1-userspace-recovery-2026-05-28.md`
+**Cross-refs:** `fake-5090/failure-modes/F40-reinit-gsp-lockdown-wedge.md` (§Mechanism, revised 2026-05-29 evening); `docs/missions/.../experiments/h1-userspace-recovery-2026-05-28.md`
 
 ## What changed (2026-05-29 evening)
 

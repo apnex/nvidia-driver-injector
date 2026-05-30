@@ -74,6 +74,6 @@ Verify persistence is OFF and zero prior F40b shutdown-path fires this boot, OR 
 
 - A7 Test A validation (n=2): `A7-test-A-validation-2026-05-29.md`
 - A7 Test B validation (n=1): `A7-test-B-validation-2026-05-29.md`
-- F40 catalog (two-arm): `/root/fake-5090/failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md`
+- F40 catalog (two-arm): `/root/fake-5090/failure-modes/F40-reinit-gsp-lockdown-wedge.md`
 - A7 intent v1.1: `../../../patch-intents/A7-f40b-bounded-wait-shutdown.md`
 - Safety memories: `feedback_no_rpc_observability_on_broken_bar1`, `feedback_freeze_risk_methodology`, `feedback_surprise_removal_wedge_class_2026_05_26`

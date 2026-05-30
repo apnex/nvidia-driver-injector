@@ -110,7 +110,7 @@ Every candidate metric for the shutdown-hang investigation, tagged by how it's o
 ## Cross-refs
 
 - A7 Test A / Test B / Test B-prime plan: `design/A7-test-A-validation-2026-05-29.md`, `design/A7-test-B-validation-2026-05-29.md`, `design/test-B-prime-plan-2026-05-30.md`
-- F40 catalog (two-arm, shutdown-arm mechanism): `/root/fake-5090/failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md`
+- F40 catalog (two-arm, shutdown-arm mechanism): `/root/fake-5090/failure-modes/F40-reinit-gsp-lockdown-wedge.md`
 - A7 intent: `../../patch-intents/A7-f40b-bounded-wait-shutdown.md`
 - A8 v2.1 (the observability surface SH-1 reads): `../../patch-intents/A8-f40b-sysfs-observability.md`
 - Phase-2 BAR1 archaeology registry (distinct investigation): `matrix.md`

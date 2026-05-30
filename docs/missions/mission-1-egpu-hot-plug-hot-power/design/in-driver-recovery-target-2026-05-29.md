@@ -4,7 +4,7 @@
 **Status:** Design — informs A7 (rmmod-path bounded-wait wrapper) + A8 (sysfs observability) + A9 (in-driver recovery state machine)
 **Scope:** Long-term direction for the eGPU stack's response to F40-class wedge conditions
 **Cross-refs:**
-- F40 catalog (fake-5090): `failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md`
+- F40 catalog (fake-5090): `failure-modes/F40-reinit-gsp-lockdown-wedge.md`
 - F40b structural fix design: `F40b-structural-fix-2026-05-29.md` (same directory)
 - A7 patch intent: `docs/patch-intents/A7-f40b-bounded-wait-shutdown.md` (forthcoming — rmmod-path symmetric counterpart of A6)
 - A8 patch intent: `docs/patch-intents/A8-f40b-sysfs-observability.md` (forthcoming)

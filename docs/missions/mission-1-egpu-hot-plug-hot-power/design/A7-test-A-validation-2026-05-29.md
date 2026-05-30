@@ -13,7 +13,7 @@
 - A7 patch intent v1: `../../../patch-intents/A7-f40b-bounded-wait-shutdown.md`
 - A7 patch source: `../../../../patches/addon/A7-f40b-bounded-wait-shutdown.patch`
 - 20:52 wedge forensics: `/var/log/mission-1-archaeology/a7-deploy-wedge-2026-05-29/FORENSICS-REPORT.md`
-- F40 catalog (fake-5090): `/root/fake-5090/failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md`
+- F40 catalog (fake-5090): `/root/fake-5090/failure-modes/F40-reinit-gsp-lockdown-wedge.md`
 - F40b design (sibling): `F40b-structural-fix-2026-05-29.md`
 - In-driver recovery target (sibling): `in-driver-recovery-target-2026-05-29.md`
 - Reliability methodology (memory): `feedback_reliability_methodology`, `feedback_one_variable_per_test_perf`

@@ -80,7 +80,7 @@ eBPF on the symbolized closed accessor `osDevReadReg032` (os.c:2026): arg2 = pol
 
 ## Cross-refs
 
-Ledger: `../shutdown-hang-ledger.md` · (b) raw map: `../.workflow-b-observable-surface-raw-2026-05-30.json` · A4-vs-A7 model: this doc §centerpiece · F40 catalog: `/root/fake-5090/failure-modes/F40-rmshutdownadapter-incomplete-init-wedge.md`
+Ledger: `../shutdown-hang-ledger.md` · (b) raw map: `../.workflow-b-observable-surface-raw-2026-05-30.json` · A4-vs-A7 model: this doc §centerpiece · F40 catalog: `/root/fake-5090/failure-modes/F40-reinit-gsp-lockdown-wedge.md`
 
 ---
 
