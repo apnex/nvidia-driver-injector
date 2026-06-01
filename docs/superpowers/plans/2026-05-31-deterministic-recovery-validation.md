@@ -77,6 +77,14 @@ Two harness defects found+fixed via the cycle-1 smokes (the reason the smoke exi
 
 ---
 
+## R4 — cure-vs-contain (the science tail; reboot-risk; lower-priority)
+
+**Question:** does any runtime reset between cycle-1 (destructive close) and cycle-2 *cure* the F40-open GSP-lockdown divergence (cycle-2 opens clean), or only leave it *contained* (A6 fires)? = the safe re-incarnation of the retired #286 reset-ladder (which hard-wedged the host 2026-05-31 via the A6 first-open hole, now closed by A9). Designed + adversarially safety-reviewed via workflow `r4-cure-vs-contain-design`; runner `tools/oa-harness/rung4-cure.sh --reset {none|rebind|flr|sbr|slot}`. The load-bearing safety control: assert `tb_egpu_is_external==1` AFTER reset+rebind, ABORT the fire if 0 (the exact bypass that wedged 2026-05-31).
+
+**✅ RESULT — 2026-06-01 (CONTAIN-ONLY across all 5 variants; n=1 smoke each; ZERO reboots).** none/rebind/flr/sbr/slot all **CONTAINED** — every fire divergence-confirmed (`timed≥1`), bounded `-EIO` ~210 ms, 0 KFENCE UAF, recovered CUDA-functional. **No PCIe-level reset (FLR, SBR=A3 `pci_reset_bus`, pciehp slot-cycle) cures the divergence ⇒ sticky = #979; A6 + TB-reenum recovery is the right-and-only fix.** Refinement: slot-cycle re-enumerated the device (BAR1→32768) yet didn't cure, while recovery (which adds a **TB deauth/reauth**) does → cure boundary is the **TB-tunnel level, not PCIe**. A9 empirically validated: `rebind` (the 2026-05-31 wedge variant) + device-drop-risk `sbr`/`slot` all ran contained, zero reboots. **Open:** n=1 per variant (divergence-confirmed so valid, but a `slot`/`sbr` n≥3 would harden the null-cure claim); the TB-tunnel-cure-boundary hypothesis (slot-cycle vs TB-reenum) is untested mechanistically.
+
+---
+
 ## Global gates (every rung)
 
 Section-D quiesce (nodeSelector-patch to defeat DaemonSet respawn; `oa_die` if **any** `/dev/nvidia*` holder) · **BAR1-first passive** (no nvidia-smi/MMIO on suspected-broken-BAR1/wedged/post-EIO-sink chip) · **persistence on every bind** (`fix-bar1 --bind`; the durable F40 mitigation) · **human present** for R2/R3 + sysrq armed · **fsync'd markers** (`oa_mark`: printf→`sync`, mirrored to /dev/kmsg — fixes the lost-trigger problem) immediately before+after every wedge-capable step · **PMU sampler verified-flushing** (assert pmu.log non-zero before trusting; the R0.5 pmu.log was 0 bytes; 10 s thermal cap; treat PMU-on vs PMU-off outcome divergence as perturbation signal) · **KASAN** for R0/R2/R3 · **compile-validate not apply-check**.
