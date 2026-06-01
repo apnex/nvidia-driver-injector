@@ -212,11 +212,15 @@ oa_bridge_pref_window_mib() {
 }
 
 # oa_bar1_recovered — TRUE only if BAR1 is EXACTLY 32768 MiB AND the bridge
-# prefetchable window is full (>= 33089). A plain `>=` check (oa_bar1_ok) would
-# pass a partial/fallback window; this catches the 288MB leg-b fallback.
+# prefetchable window CONTAINS it (>= 32768). The window must span the 32768
+# BAR1; empirically the host-side fix-bar1 re-enum yields ~32800 and the
+# injector-pod boot path ~33089 — both valid full recoveries. The check still
+# rejects the ~288MB leg-b fallback (where BAR1 itself is also <=256).
+# NOTE: 33089 was an over-strict boot-time calibration that false-failed a clean
+# 32800 recovery on R1 cycle-1 (2026-06-01); the principled floor is the BAR1 size.
 oa_bar1_recovered() {
     local m w; m="$(oa_bar1_mib)"; [[ "$m" -eq "$OA_BAR1_MIN_MIB" ]] || return 1
-    w="$(oa_bridge_pref_window_mib)"; [[ "$w" -ge 33089 ]] || return 1
+    w="$(oa_bridge_pref_window_mib)"; [[ "$w" -ge "$OA_BAR1_MIN_MIB" ]] || return 1
 }
 
 # oa_bar1_leg_diagnose — on a non-32768 BAR1, classify: leg-b fallback
@@ -231,4 +235,69 @@ oa_bar1_leg_diagnose() {
     else
         oa_log "  -> RECOVERY-LOOP FAILURE (BAR1=${m}, window=${w}; not the leg-b signature)"; echo recovery-fail
     fi
+}
+
+# ===========================================================================
+# Injector DaemonSet drain / restore (deterministic-recovery rungs, 2026-06-01).
+# WHY: the injector pod's driver container has a GPU-presence guard — it exits
+# on 'no GPU matching <dev> on PCI' and the kubelet restarts it. During a rung's
+# TB-deauth window the GPU disappears, so the pod would restart and RACE the
+# host-side fix-bar1 recovery (both modprobe+bind+persistence). It also reacts
+# to a host-side rmmod. For host-owned recovery we drain it for the whole run
+# and restore at the end. Mechanism: patch a nodeSelector obpc can't satisfy
+# (the DS controller stops scheduling here, so it won't respawn) + delete the
+# live pod. Empirically the only GPU-module manager on this host (no separate
+# device-plugin / vLLM / persistenced holding the module — checked 2026-06-01).
+#
+# REBOOT-SAFETY CAVEAT: the nodeSelector patch PERSISTS in etcd across reboot.
+# If a cycle hard-wedges and you reboot, the DS stays drained -> boot will NOT
+# bring up the injector -> NO GPU driver on boot. oa_drain_injector writes the
+# un-drain command to $OA_RUNDIR/RESTORE-CMD.txt and logs it loudly; run it
+# after any wedge-reboot before expecting the GPU back.
+OA_DRAINED=0
+OA_DRAIN_LABEL="oa.recovery-drain/excluded"
+
+oa_injector_pod() { kubectl get pods -n "$OA_INJECTOR_NS" -o name 2>/dev/null | grep "$OA_INJECTOR_DS" | head -1; }
+
+oa_drain_injector() {
+    local pod t=0 timeout=60
+    pod="$(oa_injector_pod)"
+    if [[ -z "$pod" ]]; then oa_log "injector pod already absent — no drain needed"; OA_DRAINED=0; return 0; fi
+    {
+        echo "# oa: un-drain the injector DaemonSet (run after any wedge-reboot during this run):"
+        echo "kubectl patch ds -n $OA_INJECTOR_NS $OA_INJECTOR_DS --type json -p '[{\"op\":\"remove\",\"path\":\"/spec/template/spec/nodeSelector\"}]'"
+    } > "$OA_RUNDIR/RESTORE-CMD.txt"; sync
+    oa_mark "DRAIN injector: patch nodeSelector ${OA_DRAIN_LABEL} (obpc can't satisfy) + delete pod"
+    kubectl patch ds -n "$OA_INJECTOR_NS" "$OA_INJECTOR_DS" --type merge \
+        -p "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"${OA_DRAIN_LABEL}\":\"true\"}}}}}" >/dev/null 2>&1 \
+        || { oa_warn "drain nodeSelector patch FAILED — aborting drain"; return 1; }
+    OA_DRAINED=1
+    kubectl delete "$pod" -n "$OA_INJECTOR_NS" --wait=false >/dev/null 2>&1 || true
+    while [[ -n "$(oa_injector_pod)" ]]; do
+        (( ++t > timeout )) && { oa_warn "injector pod still present ${timeout}s after drain — check kubectl get pods -n $OA_INJECTOR_NS"; return 1; }
+        sleep 1
+    done
+    oa_mark "DRAIN complete: injector pod gone in ${t}s — host now owns module lifecycle"
+    return 0
+}
+
+oa_restore_injector() {
+    [[ "${OA_DRAINED:-0}" == "1" ]] || return 0
+    oa_mark "RESTORE injector: remove DS nodeSelector (pod respawns as bystander)"
+    kubectl patch ds -n "$OA_INJECTOR_NS" "$OA_INJECTOR_DS" --type json \
+        -p '[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]' >/dev/null 2>&1 \
+      || kubectl patch ds -n "$OA_INJECTOR_NS" "$OA_INJECTOR_DS" --type merge \
+            -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}' >/dev/null 2>&1
+    OA_DRAINED=0
+    local waited=0 timeout=180 pod ready
+    while (( waited <= timeout )); do
+        pod="$(oa_injector_pod)"; pod="${pod#pod/}"
+        if [[ -n "$pod" ]]; then
+            ready="$(kubectl get pod "$pod" -n "$OA_INJECTOR_NS" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null)"
+            [[ "$ready" == "true" ]] && { oa_mark "RESTORE complete: $pod ready in ${waited}s"; rm -f "$OA_RUNDIR/RESTORE-CMD.txt" 2>/dev/null; return 0; }
+        fi
+        sleep 3; (( waited += 3 ))
+    done
+    oa_warn "injector pod not ready ${timeout}s after restore (pod=${pod:-none}) — check manually; RESTORE-CMD.txt retained"
+    return 1
 }

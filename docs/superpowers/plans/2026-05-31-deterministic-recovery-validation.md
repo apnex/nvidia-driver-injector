@@ -45,6 +45,14 @@ The current `oa-harness/lib.sh` self-gates are **not implementable as the rungs 
 
 **Action (n≥5):** Section-D quiesce → TB deauth/reauth → BAR1-first (expect ~256) → `fix-bar1.sh --bind` → 6 per-cycle PRIMARY asserts: (1) post-replug BAR1 ~256; (2) post-fix-bar1 **BAR1 `==32768`** + bridge window `>=33089`; (3) link Gen-equiv ×4; (4) persistence **Enabled before any active query**; (5) deviceQuery PASS + nvbandwidth H2D 2.7–2.9 GB/s; (6) AER clean. ZERO reboots, ZERO A6 fires.
 
+**✅ RESULT — 2026-06-01 (DETERMINISTIC, n=5 clean, zero reboots).** Run `r1-baseline-determinism-20260601T044533Z` (preceded by 3× N=1 smokes). Every cycle identical: broken BAR1 256 → `fix-bar1 --bind` (rc=0) → **complete CUDA bringup** → BAR1 `==32768` + window 32800 → persistence Enabled + Gen3 ×4 → nvbandwidth H2D **2.71–2.75 GB/s** (TB4-saturated, no degradation across reps) → AER clean (device+bridge UE/CE=0) → `tb_egpu_f40b_fires=0` (A6 **never armed** — the non-adversarial path, as expected). Drain-first orchestration (DS nodeSelector-patch + delete / restore) validated chip-safe in isolation first.
+
+Two harness defects found+fixed via the cycle-1 smokes (the reason the smoke exists):
+- **Gate over-strict:** the planned bridge-window threshold `>=33089` was a *boot-time* artifact; the host-side `fix-bar1` re-enum yields a **32800 MiB** window (both fully contain the 32768 BAR1). `oa_bar1_recovered` recalibrated to `>= OA_BAR1_MIN_MIB`. **Supersedes the `>=33089` figure everywhere in this plan** (harness-prereq, this §, determinism metric).
+- **Recovery-completeness (substantive):** `fix-bar1 --bind` loads `nvidia` + persistence but **NOT `nvidia_uvm` / the UVM device node** → CUDA `cuInit` fails (`CUDA_ERROR_UNKNOWN`). A fix-bar1-only recovery is nvidia-smi-ready but **NOT CUDA/vLLM-ready**. Complete recipe = `fix-bar1 --bind` **+ `modprobe --ignore-install nvidia_uvm` + `nvidia-modprobe -u -c 0`** (mirrors the injector entrypoint); added to `rung1.sh` step 3b. **Open for strategic review:** fold the UVM bringup into `fix-bar1 --bind` itself so the recovery *primitive* is CUDA-complete; and **the E27 acceptance spec must mean "CUDA-ready", not just "BAR1=32 GiB"** (sharpens §E27 below).
+
+**Scope:** this validates the **baseline / non-adversarial** recovery (A6 never fires). The **adversarial** F40-precondition path (**R2**) and the re-recovery race (**R3**) remain — those exercise R0's flush-under-fire and are reboot-likely.
+
 ---
 
 ## R2 — adversarial bound (KASAN; HARD-BLOCKED on R0; reboot-likely)
@@ -55,6 +63,8 @@ The current `oa-harness/lib.sh` self-gates are **not implementable as the rungs 
 
 **wedgeIf:** cycle-2 hard-wedges with no matching `timed out` line (R0.5 signature → A9 didn't arm / synchronous / lock held), OR KASAN UAF at the recovery rmmod (R0's join didn't self-terminate the worker → STOP, return to R0).
 
+**✅ RESULT — 2026-06-01 (CONTAINED, n=10, 0 fails; KFENCE not KASAN per amendment).** Runner `tools/oa-harness/rung2.sh` (drain-first + no-persistence F40 precond + cycle-1 destructive close + cycle-2 fire). Smoke n=1 then bound n=10 (`r2-adversarial-bound-*`). **All 10 iterations were genuine divergent fires** (`open timed out`, not "completed within budget") and **every one contained**: bounded `-EIO` 205–214 ms, host survived, **every `scheduled` matched by a `timed out`/`completed` (worker JOINED)** — zero unmatched, `tb_egpu_f40b_fires` incremented, **0 KFENCE UAF** at `sample_interval=1`, each re-recovered to BAR1 32768. The wedgeIf never triggered. **Closes the R0 stop-rule favorably:** the worker self-terminates fast (~200 ms timeout + ~10 ms join ≈ 210 ms total), NOT the feared ~4–30 s — `flush_work` is cheap, not a soft-block. (n=10 iter-1 also showed a single open fanning out to 16 bounded-worker dispatches, all 16 matched/joined.)
+
 ---
 
 ## R3 — re-recovery race (KASAN; HARD-BLOCKED on R0+R1+R2; reboot-likely)
@@ -62,6 +72,8 @@ The current `oa-harness/lib.sh` self-gates are **not implementable as the rungs 
 **Gate:** R0 landed + R1 clean n≥5 + R2 bounded n≥10 (every fire matched) + `oa_assert_r0_kasan` + Section-D quiesce + BAR1==32768.
 
 **Action (n≥10):** induce the bounded `-EIO` → **immediately** begin the recovery `rmmod` (deliberately race it against any still-in-flight A6 open-worker — the F42 double-UAF trigger). Confirm rmmod completes with **NO KASAN UAF** and **does not hang** (R0's join is microseconds; worker self-terminated). Instrument the worker with an **exit sentinel** so a hang is detected as "worker still running" not an indefinite block. Complete the loop → full clean cycle. **Framed as hypothesis-under-test**, not foregone: exit criterion = join `<X ms` across n≥10 forced races, zero KASAN, zero hangs. If R0's self-termination can't be demonstrated → escalate to the R0 stop-rule (route to E27).
+
+**✅ RESULT — 2026-06-01 (RACE-SAFE, n=10, 0 fails) + CUDA-functional recovery.** Runner `tools/oa-harness/rung3.sh` (same precond/fire as R2; the IMMEDIATE timed `rmmod` race is the core; exit-sentinel = `timeout 15s` per rmmod). Smoke n=1 then bound n=10 (`r3-rerecovery-race-*`). **All 10 were timed-fires**, and on every one the immediate post-`-EIO` `rmmod nvidia_uvm`+`nvidia` completed **bounded 53–86 ms**, `hung=0`, module unloaded, **`kfence_new=0`** — no F42 double-UAF, because R0 joined the worker before the open returned `-EIO` (no in-flight worker for rmmod to race). The hypothesis "join is microseconds" → ~60–80 ms observed. Recovery additionally ran the **CUDA workload** (nvbandwidth H2D **2.72–2.76 GB/s**, 10/10) → post-fire recovery is **CUDA-functional**, not just BAR1-restored. (CUDA workload added to `rung1/2/3` recovery; R2 alone did not run it.)
 
 ---
 

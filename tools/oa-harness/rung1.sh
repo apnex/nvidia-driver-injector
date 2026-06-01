@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # rung1.sh — R1 baseline recovery determinism (deterministic-recovery validation).
 #
-# N consecutive: quiesce+uninstall -> TB deauth/reauth (broken-BAR1) ->
+# Injector pod drained for the whole run (it would race host-side recovery).
+# N consecutive: quiesce + host-side rmmod -> TB deauth/reauth (broken-BAR1) ->
 # fix-bar1.sh --bind (chip ReBAR CTRL + slot-cycle + modprobe apnex.25 +
-# persistence) -> the 6 PRIMARY per-cycle asserts. ZERO reboots is the bar.
+# persistence) -> complete CUDA bringup (nvidia_uvm + UVM device node, which
+# fix-bar1 --bind does NOT do) -> the PRIMARY per-cycle asserts. Restore the pod
+# at the end. ZERO reboots is the bar.
 #
 # This is the NON-adversarial path: fix-bar1 --bind engages persistence right
 # after modprobe, so the destructive LAST-CLOSE never runs -> the F40-open
@@ -30,7 +33,26 @@ oa_assert_r0                         # HARD: R0 build + KFENCE live + bounded la
 [[ -x "$FIXBAR1" ]] || oa_die "fix-bar1.sh not executable at $FIXBAR1"
 oa_mark "R1 start: N=$N  fix-bar1=$FIXBAR1"
 
-POD() { kubectl get pods -n "$OA_INJECTOR_NS" -o name 2>/dev/null | grep "$OA_INJECTOR_DS" | head -1 | cut -d/ -f2; }
+# Drain the injector pod for the WHOLE run: on the per-cycle TB-deauth the GPU
+# disappears, the pod's GPU-presence guard exits, the kubelet restarts it, and
+# that restart would RACE host-side fix-bar1 recovery. Drain once, recover
+# host-side N times, restore once. Restore on ANY exit (clean / break / Ctrl-C).
+oa_drain_injector || oa_die "could not drain injector pod — aborting R1 (it would race recovery)"
+trap 'oa_restore_injector' EXIT
+
+# host_unload — disengage persistence, then rmmod the module host-side (the pod
+# is drained, so the host owns the module lifecycle). The host modprobe.d
+# blacklist uses `install ... /bin/false`, which gates LOAD only — rmmod is
+# unaffected. Returns nonzero if /sys/module/nvidia survives.
+host_unload() {
+    local c="$1" m
+    timeout 30 nvidia-smi -pm 0 >/dev/null 2>&1 || true   # disengage persistence (clean LAST-CLOSE)
+    sync
+    for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do
+        [[ -d /sys/module/$m ]] && timeout 30 rmmod "$m" >>"$OA_RUNDIR/c${c}-unload.log" 2>&1
+    done
+    [[ ! -d /sys/module/nvidia ]]
+}
 
 # Workload assert (PRIMARY #5): H2D via the diag container. Hard floor >1.0 GB/s
 # (a hang/regression fails); logs the actual value (TB4-saturated band 2.7-2.9).
@@ -48,14 +70,13 @@ PASS=0; FAIL=0; HALT=""
 for c in $(seq 1 "$N"); do
     oa_mark "===== R1 cycle $c/$N START ====="
 
-    # --- 1. quiesce + uninstall (chip must be driver-free for TB deauth+slot-cycle) ---
-    oa_mark "c$c: disable persistence + uninstall apnex.25"
-    timeout 30 nvidia-smi -pm 0 >/dev/null 2>&1
-    timeout 60 kubectl exec -n "$OA_INJECTOR_NS" "$(POD)" -- /entrypoint.sh uninstall \
-        > "$OA_RUNDIR/c${c}-uninstall.log" 2>&1
-    if [[ -d /sys/module/nvidia ]]; then
-        oa_mark "c$c: FAIL — module still loaded after uninstall"; oa_passive_snapshot "c$c-uninstall-fail"
-        FAIL=$((FAIL+1)); HALT="uninstall-fail"; break
+    # --- 1. quiesce + host-side unload (pod drained; host owns the module) ---
+    oa_mark "c$c: disable persistence + host-side rmmod"
+    if ! host_unload "$c"; then
+        oa_mark "c$c: FAIL — module still loaded after host unload"
+        { echo "--- holders ---"; lsmod | grep -E '^nvidia'; lsof /dev/nvidia* 2>/dev/null; } >> "$OA_RUNDIR/c${c}-unload.log" 2>&1
+        oa_passive_snapshot "c$c-unload-fail"
+        FAIL=$((FAIL+1)); HALT="unload-fail"; break
     fi
 
     # --- 2. TB deauth/reauth -> broken-BAR1 (driver unloaded, so no surprise-removal wedge) ---
@@ -67,10 +88,23 @@ for c in $(seq 1 "$N"); do
     oa_mark "c$c: post-replug BAR1=$(oa_bar1_mib)MiB (expect ~256 broken)"
 
     # --- 3. fix-bar1.sh --bind (restore 32GB + bind apnex.25 + engage persistence) ---
-    oa_mark "c$c: setpci COMMAND mem-decode OFF + fix-bar1 --bind"
-    setpci -s "$OA_GPU_SHORT" COMMAND=0:3 2>/dev/null
+    # full-clear COMMAND (not the partial 0:3 mask) — fix-bar1 fatals unless it
+    # reads EXACTLY 0000; the device is unbound + about to be slot-cycled.
+    oa_mark "c$c: setpci COMMAND=0000 (mem-decode OFF, fix-bar1 contract) + fix-bar1 --bind"
+    setpci -s "$OA_GPU_SHORT" COMMAND=0000 2>/dev/null
     timeout 180 "$FIXBAR1" --bind > "$OA_RUNDIR/c${c}-fixbar1.log" 2>&1
     oa_mark "c$c: fix-bar1 rc=$?"
+
+    # --- 3b. complete the CUDA bringup. fix-bar1 --bind loads `nvidia` + engages
+    #     persistence but NOT nvidia_uvm or the UVM device node; CUDA cuInit needs
+    #     /dev/nvidia-uvm (a fix-bar1-only recovery is graphics/nvidia-smi-ready but
+    #     NOT CUDA-ready -> nvbandwidth/vLLM fail). Mirror the injector entrypoint:
+    #     load_module nvidia_uvm + nvidia-modprobe -u -c 0. This is part of the
+    #     complete deterministic userspace recovery recipe R1 validates. ---
+    oa_mark "c$c: complete CUDA bringup (modprobe nvidia_uvm + nvidia-modprobe -u -c 0)"
+    modprobe --ignore-install nvidia_uvm >>"$OA_RUNDIR/c${c}-uvm.log" 2>&1
+    nvidia-modprobe -u -c 0 >>"$OA_RUNDIR/c${c}-uvm.log" 2>&1
+    [[ -e /dev/nvidia-uvm ]] || oa_mark "c$c: WARN — /dev/nvidia-uvm absent after bringup (workload will fail)"
 
     # --- 4. PRIMARY asserts (BAR1-first, passive before any nvidia-smi) ---
     if ! oa_bar1_recovered; then
@@ -100,3 +134,5 @@ done
 oa_mark "===== R1 COMPLETE: PASS=$PASS FAIL=$FAIL of $N${HALT:+ (halted: $HALT)} ====="
 oa_log "verdict: $([[ $PASS -eq $N && $FAIL -eq 0 ]] && echo "DETERMINISTIC (n=$N clean)" || echo "NOT clean — see $OA_RUNDIR")"
 oa_log "forensics: $OA_RUNDIR"
+
+oa_restore_injector   # bring the bystander pod back (trap EXIT is the idempotent backstop)
