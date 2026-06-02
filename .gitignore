@@ -24,3 +24,4 @@ build/
 
 # nvidia-open-src checkout (fetched at image-build time)
 nvidia-open-gpu-kernel-modules/
+docs/missions/mission-1-egpu-hot-plug-hot-power/vmcore-symbols-*/
