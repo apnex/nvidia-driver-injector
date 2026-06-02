@@ -10,6 +10,7 @@
 # Row order = apply order.
 #
 # id                        layer  upstreamed_in  source
+  C6-cond-acquire-rwlock-fix base   -              fork:c6-cond-acquire-rwlock-fix
   C1-kbuild-version-mk       base   -              fork:c1-kbuild-version-mk
   C2-aer-internal-unmask     base   -              fork:c2-aer-internal-unmask
   C3-gpu-lost-retry          base   -              fork:c3-gpu-lost-retry
