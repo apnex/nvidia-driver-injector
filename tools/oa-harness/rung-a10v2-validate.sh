@@ -232,6 +232,10 @@ fire_fastfail() {
     oa_mark "i$i: ff mode bits set timeout=${FF_TO}ms grace=${FF_GR}ms (healthy open trips A6, worker returns within grace)"
     local sentinel="oa-mark: i$i: FF-FIRE-SENTINEL"
     oa_mark "i$i: FF-FIRE-SENTINEL"
+    # /dev/kmsg→dmesg visibility can lag the write on a busy ring; bounded poll
+    # before warning (the authoritative anchor read via dmesg_since runs later,
+    # after the multi-second timed_open, and never races). Harness-only nit.
+    for _ in 1 2 3 4 5; do dmesg 2>/dev/null | grep -q "i$i: FF-FIRE-SENTINEL" && break; sleep 0.2; done
     dmesg 2>/dev/null | grep -q "i$i: FF-FIRE-SENTINEL" || oa_mark "i$i: WARN — FF sentinel did not mirror to kmsg; will classify anchor-lost INCONCLUSIVE"
     oa_mark "i$i: FAST-FAIL FIRE (lazy first-open /dev/nvidia0, timeout ${REOPEN_TIMEOUT}s) — induced A6 timeout"
     timed_open 3; local rc="$FIRE_RC" dt="$FIRE_DT"
@@ -310,6 +314,7 @@ fire_lockdown() {
     sleep 2
     local fsent="oa-mark: i$i: LD-FIRE-SENTINEL"
     oa_mark "i$i: LD-FIRE-SENTINEL"
+    for _ in 1 2 3 4 5; do dmesg 2>/dev/null | grep -q "i$i: LD-FIRE-SENTINEL" && break; sleep 0.2; done
     dmesg 2>/dev/null | grep -q "i$i: LD-FIRE-SENTINEL" || oa_mark "i$i: WARN — LD sentinel did not mirror to kmsg; will classify anchor-lost"
     oa_mark "i$i: RE-OPEN FIRE (exec open /dev/nvidia0, timeout ${REOPEN_TIMEOUT}s) <<< pre-v2 WEDGE point"
     timed_open 3; local rc="$FIRE_RC" dt="$FIRE_DT"
