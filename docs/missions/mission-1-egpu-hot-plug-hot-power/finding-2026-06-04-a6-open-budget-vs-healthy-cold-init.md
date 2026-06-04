@@ -205,6 +205,19 @@ the 256 MB power-on default; TB replug needs re-auth; broken-BAR1 is the runtime
 hot-add allocator (not silicon state); `fix-bar1` rebuilds the 32 GB window at
 runtime via the pciehp slot-cycle — all without a reboot, OS up throughout.
 
+## H-OA2 design conclusion (2026-06-04 — supersedes the "separable H-OA2" note below)
+
+The H-OA2 un-bounded second site was taken through a 4-pass adversarial design pursuit. Verdict
+(full record: `design/A12-init-funnel-design-of-record-2026-06-04.md`, catalog `[[F46]]`):
+- The GSP-bootstrap entry set is **provably closed** — two RM families (`kgspBootstrap` has exactly 2
+  call sites), no hidden entry; the funnel can be **complete**.
+- The host **wedge is perfectly closeable** in-driver by the **A12 complete funnel** (extend A6's
+  bounded-wait + A10-v2 discriminator over all entries).
+- **Instant** self-termination is NOT achievable in-driver (closed-RM: dead-bus marker covers only the
+  lockdown poll; resume holds the RM API lock; a timeout ≠ proof of loss). So `flush_work`/grace are
+  **load-bearing** (the apnex.29 mechanism is vindicated as near-optimal), and the **sole residual is
+  a bounded recovery latency — upstream-RM, not a wedge.** A12 = the next planned version (post-soak).
+
 ## Open / next steps
 
 1. **Measure** worst-case healthy cold-init latency (n≥5, induced-timeout timing;
