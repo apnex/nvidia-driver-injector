@@ -44,13 +44,16 @@ two RM bootstrap families.
 - **Family-2 system-resume:** `rm_power_management(RESUME)` bounded via
   `__nv_pm_resume_locked`. (`kgspBootstrap` has exactly 2 RM call sites — cold
   init + resume — so the entry set is provably closed; no hidden 3rd family.)
+- **Family-2 runtime-PM:** `rm_transition_dynamic_power` on the GC6/RTD3-exit
+  (`enter==NV_FALSE`) path bounded via `nv_dynpower_bounded` (a dedicated wrapper —
+  the generic fn-pointer funnel can't carry its `bTryAgain` out-param). Holds no
+  `ldata_lock` (PM-core runtime callback, lower severity), bounded for completeness.
 
 ### Provably-closed entry set
 `kgspBootstrap_HAL`: `kernel_gsp.c:4798` (cold) + `gpu_suspend.c:250` (resume).
-Bounding `{nv_start_device}` + `{rm_power_management RESUME}` covers all present
-GSP-bootstrap entries. The runtime-PM `rm_transition_dynamic_power` site (RTD3/GC6,
-holds no `ldata_lock` → lower severity, different out-param shape) is a tracked
-fast-follow, not yet bounded.
+Bounding `{nv_start_device}` (Family-1, all 5 cold-init limbs) + `{rm_power_management
+RESUME, rm_transition_dynamic_power exit}` (Family-2, both sites) covers EVERY
+GSP-bootstrap entry. No hidden 3rd family.
 
 ### Why `flush_work` is KEPT (load-bearing, not a stopgap)
 The four-pass adversarial design (design-of-record §3) proved instant in-driver
@@ -68,9 +71,10 @@ F42 UAF surface is gone).
 ### Requirement: Every GSP-bootstrap entry is bounded by construction
 On an E1/A9-classified external GPU with `NVreg_TbEgpuOpenTimeoutMs > 0`, a
 chip-touching init reached via ANY of {foreground open, deferred open,
-`nvidia_dev_get`, `nvidia_dev_get_uuid`, `nv_pci_probe`, system-resume} SHALL run
-off the lock-holding caller thread and return a finite `-EIO` on timeout, never an
-unbounded wedge. Non-eGPU / `timeout==0` paths SHALL fall through byte-identically.
+`nvidia_dev_get`, `nvidia_dev_get_uuid`, `nv_pci_probe`, system-resume,
+runtime-PM GC6/RTD3-exit} SHALL run off the lock-holding caller thread and return a
+finite error on timeout, never an unbounded wedge. Non-eGPU / `timeout==0` paths
+SHALL fall through byte-identically.
 
 ### Requirement: A slow-but-healthy init must not be sunk
 The grace discriminator (`NVreg_TbEgpuOpenGraceMs`) SHALL distinguish a worker that
@@ -96,8 +100,8 @@ release the API lock on resume); parked behind the deliberate upstream gate.
   against kernel 7.0.9-204.fc44. PASS.
 - **Verbatim move:** range-diff confirms no `__nv_start_device_locked` body
   statement changed.
-- **Live fastfail** (`rung-a10v2-validate.sh fastfail`, all 5 cold-init limbs + a
-  resume path) + apnex.30 cutover: DEFERRED to post-apnex.29-soak, operator-present.
+- **Live fastfail** (`rung-a10v2-validate.sh fastfail`, all 5 cold-init limbs + both
+  Family-2 sites) + apnex.30 cutover: DEFERRED to post-apnex.29-soak, operator-present.
 
 ## Cross-refs
 Design-of-record `docs/missions/mission-1-egpu-hot-plug-hot-power/design/A12-init-funnel-design-of-record-2026-06-04.md`;

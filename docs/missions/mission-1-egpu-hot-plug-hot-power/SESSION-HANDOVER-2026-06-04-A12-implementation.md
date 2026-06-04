@@ -8,10 +8,12 @@
 > (`patches/addon/A12-init-funnel.patch` + intent `docs/patch-intents/A12-init-funnel.md` + manifest);
 > fork `a12-init-funnel` + `a5` (apnex.30). Verified: verbatim body-move (range-diff clean), composed
 > budget preserved (3000/2000), A3 grafts worker-safe, no `nvlfp` in the worker, flush kept.
-> **REMAINING:** (1) **Task 10 — live fastfail validation + apnex.30 cutover, DEFERRED to post-soak,
-> operator-present** (rung-a10v2 is disruptive); (2) **runtime-PM `rm_transition_dynamic_power`
-> fast-follow** (the 2nd Family-2 site, deliberately not bounded yet — lower severity, no ldata_lock);
-> (3) catalog #301 commit decision. Plan: `docs/superpowers/plans/2026-06-04-a12-init-funnel.md`.
+> **Family-2 NOW FULLY COVERED:** the runtime-PM `rm_transition_dynamic_power` GC6/RTD3-exit site is
+> also bounded (`nv_dynpower_bounded`, a12 HEAD `39696397`, injector main `694929e`) — both Family-2
+> sites done; composition still compiles. **REMAINING:** (1) **Task 10 — live fastfail validation +
+> apnex.30 cutover, DEFERRED to post-soak, operator-present** (rung-a10v2 is disruptive — drains the
+> injector, takes over the module); (2) catalog #301 commit decision (user-review-gated).
+> Plan: `docs/superpowers/plans/2026-06-04-a12-init-funnel.md`.
 
 Next session: **implement A12** (the complete GSP-bootstrap funnel). This session designed it
 (4-pass adversarial), shipped the cold-init budget fix as apnex.29, and wrote the docs. No code for
