@@ -1,5 +1,18 @@
 # Session handover — 2026-06-04 — A12 implementation (READ FIRST)
 
+> **⚡ UPDATE (later same session): A12 IS NOW IMPLEMENTED + COMPILED + PUSHED.** The "no code yet"
+> note below is superseded. Done this session: fork branch `a12-init-funnel` (on a10 tip) carries the
+> `nv_bootstrap_bounded` funnel at `nv_start_device` (subsumes A6, bounds all 5 cold-init limbs) +
+> the system-resume wrap; version bumped → **apnex.30** (a5). Full composition (19 patches, A12 after
+> A10) **compiles** against kernel 7.0.9-204.fc44. Committed + pushed: injector `main` `667fb89`
+> (`patches/addon/A12-init-funnel.patch` + intent `docs/patch-intents/A12-init-funnel.md` + manifest);
+> fork `a12-init-funnel` + `a5` (apnex.30). Verified: verbatim body-move (range-diff clean), composed
+> budget preserved (3000/2000), A3 grafts worker-safe, no `nvlfp` in the worker, flush kept.
+> **REMAINING:** (1) **Task 10 — live fastfail validation + apnex.30 cutover, DEFERRED to post-soak,
+> operator-present** (rung-a10v2 is disruptive); (2) **runtime-PM `rm_transition_dynamic_power`
+> fast-follow** (the 2nd Family-2 site, deliberately not bounded yet — lower severity, no ldata_lock);
+> (3) catalog #301 commit decision. Plan: `docs/superpowers/plans/2026-06-04-a12-init-funnel.md`.
+
 Next session: **implement A12** (the complete GSP-bootstrap funnel). This session designed it
 (4-pass adversarial), shipped the cold-init budget fix as apnex.29, and wrote the docs. No code for
 A12 yet. **Nothing upstream until the user's deliberate gate.**
