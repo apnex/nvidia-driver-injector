@@ -14,6 +14,28 @@ obpc (→ reboot, → this session dies). This doc is the resume point.
 - BAR1 was recovered earlier this boot via `tools/fix-bar1.sh` — the GPU was
   hot-added AFTER the NUC booted (256 MiB ReBAR), see Operational notes.
 
+## ===== UPDATE 2026-06-04 (post-fastfail) — READ THIS =====
+- **`fastfail` live validation PASSED 3/3.** A10-v2's completion-state discriminator
+  correctly skips the sink when the worker returns within grace (config-vendor
+  `0x10de` = bus alive, next-open rc=0, KFENCE clean, host alive). The narrow F44
+  fix works. Run: `/var/log/mission-1-archaeology/ra10v2-fastfail-20260604T052224Z/`.
+- **NEW INCIDENTAL FINDING (more important than the PASS):** the A6 open budget
+  (200ms) + A10 grace (50ms) are SHORTER than a healthy full cold init (~1.3s), so a
+  CUDA open of a cold/uninitialised GPU via the A6-bounded H-OA1 path would be
+  mis-classified as a stuck lockdown and **dead-bused**. Latent in this deployment
+  (masked by persistence+ordering → 0 production A6 timeouts ever); real for the
+  upstream/no-persistence target and recovery races. Twin of the A7 budget bug
+  (#279). Full writeup: `finding-2026-06-04-a6-open-budget-vs-healthy-cold-init.md`.
+  Fix tracked: tasks **#299** (measure worst-case cold init) → **#300** (raise
+  budget+grace, re-validate). A6+A10 intent docs updated with the correction.
+- **`lockdown`-mode test is now DE-PRIORITISED:** on healthy hardware it would do a
+  1.3s healthy init through H-OA1 → trip the lockdown arm → sink the chip → falsely
+  report "contained". Genuine stuck-poll containment needs the fake-5090 F44 model
+  (#290), OR run it only AFTER the budget fix (so a healthy init no longer trips it).
+- **Recommended next step:** do #299 (non-destructive measurement) → #300 (tune +
+  re-validate) BEFORE any lockdown test. The chip is back to healthy production
+  (apnex.28, BAR1 32G, injector running).
+
 ## The deployed fix (what each patch does)
 - **C6** `cond-acquire-rwlock-fix` (base, applies FIRST): corrects the stock
   inverted `os_cond_acquire_rwlock_{read,write}` in `os-interface.c` (rwsem
@@ -77,16 +99,35 @@ BTF present):**
   the pci_dev `error_state`, and the global RM API lock owner
   (`g_RmApiLock.pLock`) if a wedge happens (the F45 unnamed-holder question).
 
-**Harness:** `tools/oa-harness/` has the drain-first rung pattern
-(`oa_drain_injector` nodeSelector-patch + delete pod; `oa_restore_injector`;
-fsync'd `oa_mark` markers; BAR1-first passive gates). `rung6-a10-validate.sh`
-(UNCOMMITTED, in the working tree) was the A10-v1 validation runner — it needs
-adapting for A10-v2: assert version==apnex.28; classify fast-fail vs lockdown by
-the NEW dmesg lines; on fast-fail assert error_state stays normal + next-open
-rc=0 (the regression gate); the WPR2 dmesg read in rung6 was UNRELIABLE (stale
-post-shutdown line) — fix the anchor. The re-open op: `exec 3</dev/nvidia0`
-triggers RmInitAdapter; `nvidia-smi -pm 0` is the heavier re-open that hit the
-lockdown in the tb-only wedge.
+**Harness — runner READY (built+reviewed+verified 2026-06-04, UNCOMMITTED in the
+working tree):** `tools/oa-harness/rung-a10v2-validate.sh` (+ `drgn-error-state.py`
+best-effort helper) supersedes `rung6-a10-validate.sh` (A10-v1/apnex.26 era).
+Two modes:
+- `fastfail` (DEFAULT, deterministic, wedge-risk-BOUNDED): lowers
+  `NVreg_TbEgpuOpenTimeoutMs`→1ms + raises grace→30000ms so a HEALTHY first-open
+  trips A6 and the worker returns within grace → exercises the EXACT "chip NOT
+  sunk" skip-sink path. Regression gate = a passive **config-space vendor probe**
+  (`setpci 0x00.w`: `10de`=bus alive / `ffff`=sunk) — the drgn-FREE authoritative
+  sink read (drgn is BTF-only here so `error_state` is corroboration). NOTE:
+  next-open rc=0 is NOT load-bearing (the worker completed RmInitAdapter →
+  `NV_FLAG_INITIALIZED` set → next open skips the bus), so the config-vendor probe
+  is the real discriminator. A lockdown-arm fire in fastfail mode = a HARD ANOMALY
+  (halt), not a contained pass.
+- `lockdown` (RISKY, explicit): rung6 substrate (no-persist clean LAST-CLOSE →
+  WPR2→0 → bootstrap poll). Asserts host ALIVE + "GSP lockdown poll" + bounded dt
+  + sink(expected) + fix-bar1 recovery. CAN HARD-WEDGE; kdump can't capture.
+Hardened via a 4-lens adversarial review (workflow `ws2kgirub`, 13 findings, ALL
+applied) + an independent verify pass (13/13 landed, 0 regressions). Two were
+must-fix: (1) a **Ctrl-C param-strand** that stranded `timeout=1ms` and would have
+made every production open `-EIO` — fixed with traps-before-mutation + INT/TERM +
+backgrounded `& wait` fire + a `RESTORE-PARAMS.txt` breadcrumb (empirically
+verified SIGINT→restore); (2) the non-discriminating next-open gate above. Also:
+KFENCE detector now `BUG: (KFENCE|KASAN):` (all classes), dmesg anchor-loss →
+INCONCLUSIVE (no stale fabrication), `nvidia-smi -pm 0` removed from the unload
+path, N≥3 floor + `PASS≥N` verdict. Static: `bash -n` + `shellcheck` clean.
+Invoke: `sudo tools/oa-harness/rung-a10v2-validate.sh fastfail 3` (safe-first),
+then `... lockdown 3` only with operator at console. The re-open op is
+`exec 3</dev/nvidia0` (triggers RmInitAdapter via the A6 worker).
 
 **RISK + STAGING (do ALL before firing):**
 1. Operator (you) at the console — a wedge = human reboot loop.

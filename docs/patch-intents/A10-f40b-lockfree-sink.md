@@ -83,6 +83,24 @@ former.
 - The completion discriminator depends on `complete(&w->done)` firing only on
   worker RETURN (never mid-GSP-retry), which holds for the current worker.
 
+> **⚠️ FOLLOW-UP 2026-06-04 — grace must exceed a healthy full cold init.** The
+> discriminator only distinguishes "worker returned" from "worker stuck" if the
+> grace is long enough to *wait for* a slow-but-healthy worker to return. A
+> healthy **full cold init** (`RmInitAdapter`) through the A6 path measures
+> **~1.3 s** (n=3, 2026-06-04 `fastfail` run). With the production grace at
+> **50 ms** (and A6 budget 200 ms), a healthy cold open that takes the A6-bounded
+> H-OA1 path is mis-classified as lockdown and **sunk** — a healthy-chip dead-bus,
+> not a real stuck poll. The deployed config avoids this only because production
+> cold inits run off-A6 (H-OA2 / persistence engage); it breaks for a CUDA
+> consumer opening a cold adapter directly (no-persistence / recovery race /
+> upstream). Fix = raise A6 `NVreg_TbEgpuOpenTimeoutMs` (so a healthy cold init
+> completes-within-budget → open succeeds) AND/OR raise `NVreg_TbEgpuOpenGraceMs`
+> (so it fast-fails → chip preserved). Pending a worst-case cold-init measurement.
+> Full analysis: `docs/missions/mission-1-egpu-hot-plug-hot-power/finding-2026-06-04-a6-open-budget-vs-healthy-cold-init.md`. The `fastfail` validation
+> on 2026-06-04 PASSED only because it overrode the grace to 30000 ms — i.e. it
+> proved the *mechanism*, while incidentally exposing that the *default* grace is
+> the misclassifier.
+
 ## Telemetry contract
 
 | Event | Level | Format |
