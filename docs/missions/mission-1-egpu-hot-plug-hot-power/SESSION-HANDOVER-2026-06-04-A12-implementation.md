@@ -10,10 +10,20 @@
 > budget preserved (3000/2000), A3 grafts worker-safe, no `nvlfp` in the worker, flush kept.
 > **Family-2 NOW FULLY COVERED:** the runtime-PM `rm_transition_dynamic_power` GC6/RTD3-exit site is
 > also bounded (`nv_dynpower_bounded`, a12 HEAD `39696397`, injector main `694929e`) — both Family-2
-> sites done; composition still compiles. **REMAINING:** (1) **Task 10 — live fastfail validation +
-> apnex.30 cutover, DEFERRED to post-soak, operator-present** (rung-a10v2 is disruptive — drains the
-> injector, takes over the module); (2) catalog #301 commit decision (user-review-gated).
-> Plan: `docs/superpowers/plans/2026-06-04-a12-init-funnel.md`.
+> sites done; composition compiles.
+>
+> **⚡⚡ CUTOVER + LIVE VALIDATION DONE (2026-06-04 ~21:30): apnex.30 IS LIVE.** Driver reloaded to
+> apnex.30 (BAR1 32GiB, nvidia-smi healthy, persistence engaged). At cutover the funnel bounded a real
+> cold init within budget (`[F40b]: open completed within budget rc=0`). **`rung-a10v2-validate.sh
+> fastfail 3` → FAST-FAIL VALIDATED 3/3** (induced-timeout opens kept bus alive `0x10de`, next-open
+> rc=0, chip NOT sunk) — A6/A10-v2 fast-fail behavior proven THROUGH the funnel. Host restored healthy
+> (params 3000/2000, injector 1/1). Cutover gotchas handled: firmware symlink `595.71.05-apnex.30`
+> created (#294); docker image imported into k3s containerd (`k3s ctr -n k8s.io images import`); DS is
+> OnDelete (cutover = delete the pod). apnex.30 now SOAKING. **REMAINING:** (1) apnex.30 14-day soak
+> (ongoing); (2) catalog #301 commit decision (user-review-gated); (3) MINOR: fastfail FF-sentinel did
+> not mirror to kmsg (anchor-lost WARN, result unaffected — authoritative config-vendor probe carried
+> it); cosmetic: funnel reuses A6's `[F40b]` log label not `[A12]`. Plan:
+> `docs/superpowers/plans/2026-06-04-a12-init-funnel.md`.
 
 Next session: **implement A12** (the complete GSP-bootstrap funnel). This session designed it
 (4-pass adversarial), shipped the cold-init budget fix as apnex.29, and wrote the docs. No code for
