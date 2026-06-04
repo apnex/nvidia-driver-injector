@@ -93,7 +93,7 @@ N="${2:-3}"
 case "$MODE" in fastfail|lockdown) ;; *) oa_die "mode must be 'fastfail' or 'lockdown' (got '$MODE')";; esac
 [[ "$N" =~ ^[0-9]+$ && "$N" -ge 3 ]] || oa_die "N must be an integer >= 3 (got '$N'); the regression gate needs n>=3"
 
-A10_VER="595.71.05-apnex.28"
+A10_VER="${A10_VER:-595.71.05-apnex.29}"   # expected current ship version (env-overridable; for the start banner). The precond gate accepts any apnex.28+ A10-v2 build.
 FIXBAR1="$OA_REPO_ROOT/tools/fix-bar1.sh"
 DRGN_HELPER="$HERE/drgn-error-state.py"
 KF_PARAM=/sys/module/kfence/parameters/sample_interval
@@ -176,7 +176,7 @@ establish_precond() {
     modprobe --ignore-install nvidia >>"$OA_RUNDIR/i${i}-precond.log" 2>&1
     sleep 2
     local ver; ver="$(cat /sys/module/nvidia/version 2>/dev/null)"
-    [[ "$ver" == "$A10_VER" ]] || { oa_mark "i$i: PRECOND FAIL — loaded '$ver' NOT $A10_VER (A10-v2 not installed!)"; return 1; }
+    [[ "$ver" =~ ^595\.71\.05-apnex\.(2[89]|[3-9][0-9])$ ]] || { oa_mark "i$i: PRECOND FAIL — loaded '$ver' is not an A10-v2 build (need apnex.28+; expected ~$A10_VER)"; return 1; }
     local drv; drv="$(basename "$(readlink "/sys/bus/pci/devices/$OA_GPU/driver" 2>/dev/null || echo none)")"
     [[ "$drv" == nvidia ]] || { oa_mark "i$i: PRECOND FAIL — nvidia did not bind ($drv)"; return 1; }
     oa_assert_a6; oa_pin_d0
