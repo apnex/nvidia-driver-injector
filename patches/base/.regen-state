@@ -1,4 +1,4 @@
-# regen-base-patches.sh state -- generated 2026-06-04T11:09:55Z
+# regen-base-patches.sh state -- generated 2026-06-04T11:23:10Z
 # base tag: 595.71.05 (51edebee79919b54f498c19a0be31982cd97646e)
 C6-cond-acquire-rwlock-fix  c6-cond-acquire-rwlock-fix  1f196b6193e55b40ed89739c5978b53d10272ee3
 C1-kbuild-version-mk  c1-kbuild-version-mk  51cfd01e9cfe62d3559fcd127a29e68d727803cb
@@ -18,4 +18,4 @@ A8-f40b-sysfs-observability  a8-f40b-sysfs-observability  0e7b9a37c90e63cb99a44b
 A9-egpu-probe-classify  a9-egpu-probe-classify  6a25b26c105a3110a3b8756fcd14f2f966dc445d
 A11-f45-deadlock-breaker  a11-f45-deadlock-breaker  2532aac92caab64208bbb64aef63cd8af36c147f
 A10-f40b-lockfree-sink  a10-f40b-lockfree-sink  a93196d79745126d8bb8655add91309b7e1cd5aa
-A12-init-funnel  a12-init-funnel  2595e78d3f1b5a7197702b772acf0adbd2133021
+A12-init-funnel  a12-init-funnel  396963972bab7238ef5f4b6325777a7f77d31dfa
