@@ -28,3 +28,4 @@
   A9-egpu-probe-classify     addon  -              fork:a9-egpu-probe-classify
   A11-f45-deadlock-breaker   addon  -              fork:a11-f45-deadlock-breaker
   A10-f40b-lockfree-sink    addon  -              fork:a10-f40b-lockfree-sink
+  A12-init-funnel            addon  -              fork:a12-init-funnel
