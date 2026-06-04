@@ -10,6 +10,7 @@
 # Row order = apply order.
 #
 # id                        layer  upstreamed_in  source
+  C6-cond-acquire-rwlock-fix base   -              fork:c6-cond-acquire-rwlock-fix
   C1-kbuild-version-mk       base   -              fork:c1-kbuild-version-mk
   C2-aer-internal-unmask     base   -              fork:c2-aer-internal-unmask
   C3-gpu-lost-retry          base   -              fork:c3-gpu-lost-retry
@@ -25,3 +26,5 @@
   A7-f40b-bounded-wait-shutdown addon -              fork:a7-f40b-bounded-wait-shutdown
   A8-f40b-sysfs-observability addon -              fork:a8-f40b-sysfs-observability
   A9-egpu-probe-classify     addon  -              fork:a9-egpu-probe-classify
+  A11-f45-deadlock-breaker   addon  -              fork:a11-f45-deadlock-breaker
+  A10-f40b-lockfree-sink    addon  -              fork:a10-f40b-lockfree-sink

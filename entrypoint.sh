@@ -256,11 +256,21 @@ cmd_uninstall() {
             fail "$EXIT_UNKNOWN" "stop GPU consumers (vLLM, ollama, nvidia-persistenced, …) and retry"
         fi
     else
-        # fuser not in image → fall back to checking refcount.
+        # fuser not in image → fall back to checking nvidia's refcount. Our OWN
+        # dependent modules (nvidia_uvm/drm/modeset) each hold a ref on nvidia, so
+        # they must come off FIRST (#298 part 2) — otherwise this gate false-positives
+        # on our own deps (the apnex.27 reload found refcnt=1 = just nvidia_uvm).
+        local m
+        for m in nvidia_uvm nvidia_drm nvidia_modeset; do
+            if grep -q "^${m} " /proc/modules; then
+                log "rmmod ${m} (dep, before nvidia-refcnt gate) ..."
+                rmmod "$m" || fail "$EXIT_UNKNOWN" "rmmod ${m} failed — kernel state may be inconsistent"
+            fi
+        done
         local rc
         rc="$(cat /sys/module/nvidia/refcnt 2>/dev/null || echo 0)"
         if [[ "$rc" != "0" ]]; then
-            fail "$EXIT_UNKNOWN" "/sys/module/nvidia/refcnt = ${rc} (≠ 0) — module in use; refusing rmmod"
+            fail "$EXIT_UNKNOWN" "/sys/module/nvidia/refcnt = ${rc} (≠ 0) after dep-unload — an EXTERNAL consumer holds nvidia; refusing rmmod"
         fi
     fi
 
@@ -674,6 +684,36 @@ load_module() {
 }
 
 write_state "modprobe"
+
+# Gap-fix (#298 part 1): load_module() skips on mere presence, so an IMAGE
+# version bump (e.g. apnex.25 -> apnex.27) would silently keep the STALE in-kernel
+# driver and the freshly-built target would never load. If a different nvidia
+# version is loaded, unload the stale driver here so load_module loads the target.
+target_version="$(awk -F= '/^NVIDIA_VERSION/{gsub(/[ \t]/,"",$2); print $2}' \
+    /src/nvidia-open-gpu-kernel-modules/version.mk 2>/dev/null || echo)"
+if grep -q "^nvidia " /proc/modules; then
+    cur_version="$(cat /sys/module/nvidia/version 2>/dev/null || echo unknown)"
+    if [[ -n "$target_version" && "$cur_version" != "$target_version" ]]; then
+        warn "loaded nvidia ${cur_version} != image target ${target_version} — unloading stale driver to load the target"
+        # Refuse ONLY on an EXTERNAL holder (a process with /dev/nvidia* open).
+        # Our own nvidia_uvm/modeset deps are expected and unloaded below — they
+        # must come off BEFORE any nvidia-refcnt gate, else the gate false-positives.
+        if command -v fuser >/dev/null 2>&1; then
+            stale_holders="$(fuser /dev/nvidia* 2>&1 || true)"
+            if [[ -n "$stale_holders" ]] && echo "$stale_holders" | grep -qE '[0-9]+'; then
+                echo "$stale_holders" | sed 's/^/    /' >&2
+                fail "$EXIT_UNKNOWN" "stale nvidia ${cur_version} held by GPU consumers (persistence/vLLM/device-plugin); quiesce them and redeploy to load ${target_version}"
+            fi
+        fi
+        for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do
+            if grep -q "^${m} " /proc/modules; then
+                log "rmmod ${m} (stale-version unload) ..."
+                rmmod "$m" || fail "$EXIT_UNKNOWN" "rmmod ${m} failed unloading stale driver — quiesce consumers and redeploy to load ${target_version}"
+            fi
+        done
+    fi
+fi
+
 load_module "nvidia"     "$KO_NVIDIA"
 load_module "nvidia_uvm" "$KO_UVM"
 

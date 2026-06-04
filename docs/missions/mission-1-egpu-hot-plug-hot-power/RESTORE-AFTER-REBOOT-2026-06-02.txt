@@ -1,0 +1,17 @@
+# Run AFTER the 2026-06-02 reboot (injector DS is drained from the recovery attempt)
+
+# 1. Un-drain the injector DaemonSet so it cold-boots the fresh GPU:
+kubectl -n kube-system patch ds nvidia-driver-injector --type json \
+  -p '[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]'
+
+# 2. Watch the pod bring up + engage (expect "engage ✓" with a REAL device this time):
+kubectl -n kube-system logs -l app=nvidia-driver-injector -c driver --tail=20 -f
+
+# 3. Verify thermal engaged:
+kubectl -n kube-system exec ds/nvidia-driver-injector -c driver -- \
+  nvidia-smi --query-gpu=name,persistence_mode,power.draw,temperature.gpu,fan.speed,pstate --format=csv
+
+# Context: wedge-2026-06-02-coldboot-apilock-deadlock.md (RCA)
+# A10-v2 design saved: a10-v2-surgical-design-workflow-2026-06-02.json
+# apnex.26 firmware symlink already created (ln -sfn 595.71.05 /lib/firmware/nvidia/595.71.05-apnex.26)
+#   — but a clean reboot + DS rebuild of apnex.25 is the expected end state unless you re-test A10.

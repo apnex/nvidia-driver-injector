@@ -1,5 +1,6 @@
-# regen-base-patches.sh state -- generated 2026-05-30T13:42:26Z
+# regen-base-patches.sh state -- generated 2026-06-04T07:04:12Z
 # base tag: 595.71.05 (51edebee79919b54f498c19a0be31982cd97646e)
+C6-cond-acquire-rwlock-fix  c6-cond-acquire-rwlock-fix  1f196b6193e55b40ed89739c5978b53d10272ee3
 C1-kbuild-version-mk  c1-kbuild-version-mk  51cfd01e9cfe62d3559fcd127a29e68d727803cb
 C2-aer-internal-unmask  c2-aer-internal-unmask  403d5daf8d80da79991534b3c9d2ef70ac91b63a
 C3-gpu-lost-retry  c3-gpu-lost-retry  c589673a33729e24c5179f92c5c98dbac4886d6b
@@ -10,8 +11,10 @@ A1-pcie-primitives  a1-pcie-primitives  26431cbd65d447ac9d5b9b96c7ece933ae42f960
 A2-bus-loss-watchdog  a2-bus-loss-watchdog  1e1fc329dae24680bb5a2b9e4ffd7776c159280d
 A3-recovery  a3-recovery  8530669cbfe612171984604f213f4cd60eae8217
 A4-close-path-telemetry  a4-close-path-telemetry  125072b08c95c8d0bc94a8bc35a2f93f86f6bd5c
-A5-version-and-toggles  a5-version-and-toggles  2290c423dfee48e52e98dd57a10910427d63b454
-A6-f40b-bounded-wait-open  a6-f40b-bounded-wait-open  690e13c5d1ca10b4870310a1f67647e36c3d2e60
+A5-version-and-toggles  a5-version-and-toggles  39b425612ed321b6610a5365204e70780ed2091e
+A6-f40b-bounded-wait-open  a6-f40b-bounded-wait-open  4470cbffc55779f1d7c5b8fb73d97c177db2d295
 A7-f40b-bounded-wait-shutdown  a7-f40b-bounded-wait-shutdown  55d2af38677ffd6f9d115d103c6ff7c377911d88
 A8-f40b-sysfs-observability  a8-f40b-sysfs-observability  0e7b9a37c90e63cb99a44b5ccdcb23bd9d7f56ef
 A9-egpu-probe-classify  a9-egpu-probe-classify  6a25b26c105a3110a3b8756fcd14f2f966dc445d
+A11-f45-deadlock-breaker  a11-f45-deadlock-breaker  2532aac92caab64208bbb64aef63cd8af36c147f
+A10-f40b-lockfree-sink  a10-f40b-lockfree-sink  a93196d79745126d8bb8655add91309b7e1cd5aa
