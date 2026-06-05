@@ -1,4 +1,4 @@
-# regen-base-patches.sh state -- generated 2026-06-04T12:10:29Z
+# regen-base-patches.sh state -- generated 2026-06-05T08:31:30Z
 # base tag: 595.71.05 (51edebee79919b54f498c19a0be31982cd97646e)
 C6-cond-acquire-rwlock-fix  c6-cond-acquire-rwlock-fix  1f196b6193e55b40ed89739c5978b53d10272ee3
 C1-kbuild-version-mk  c1-kbuild-version-mk  51cfd01e9cfe62d3559fcd127a29e68d727803cb
@@ -11,7 +11,7 @@ A1-pcie-primitives  a1-pcie-primitives  26431cbd65d447ac9d5b9b96c7ece933ae42f960
 A2-bus-loss-watchdog  a2-bus-loss-watchdog  1e1fc329dae24680bb5a2b9e4ffd7776c159280d
 A3-recovery  a3-recovery  8530669cbfe612171984604f213f4cd60eae8217
 A4-close-path-telemetry  a4-close-path-telemetry  125072b08c95c8d0bc94a8bc35a2f93f86f6bd5c
-A5-version-and-toggles  a5-version-and-toggles  565868d1e7037d9de6766b232102637adbfac87c
+A5-version-and-toggles  a5-version-and-toggles  44c1b4a7620ba2b42c54131ab3e6282b440c30e9
 A6-f40b-bounded-wait-open  a6-f40b-bounded-wait-open  4470cbffc55779f1d7c5b8fb73d97c177db2d295
 A7-f40b-bounded-wait-shutdown  a7-f40b-bounded-wait-shutdown  55d2af38677ffd6f9d115d103c6ff7c377911d88
 A8-f40b-sysfs-observability  a8-f40b-sysfs-observability  0e7b9a37c90e63cb99a44b5ccdcb23bd9d7f56ef
@@ -19,3 +19,4 @@ A9-egpu-probe-classify  a9-egpu-probe-classify  6a25b26c105a3110a3b8756fcd14f2f9
 A11-f45-deadlock-breaker  a11-f45-deadlock-breaker  2532aac92caab64208bbb64aef63cd8af36c147f
 A10-f40b-lockfree-sink  a10-f40b-lockfree-sink  a93196d79745126d8bb8655add91309b7e1cd5aa
 A12-init-funnel  a12-init-funnel  b595aa45caa4309f6f2b32dd1d4a3cb47bfd64e1
+A13-292-inflight-aer-earlyfree  a13-292-inflight-aer-earlyfree  52cb64a671edfcd927d7ab312aea8c4140ae3eff

@@ -29,3 +29,4 @@
   A11-f45-deadlock-breaker   addon  -              fork:a11-f45-deadlock-breaker
   A10-f40b-lockfree-sink    addon  -              fork:a10-f40b-lockfree-sink
   A12-init-funnel            addon  -              fork:a12-init-funnel
+  A13-292-inflight-aer-earlyfree addon -           fork:a13-292-inflight-aer-earlyfree
