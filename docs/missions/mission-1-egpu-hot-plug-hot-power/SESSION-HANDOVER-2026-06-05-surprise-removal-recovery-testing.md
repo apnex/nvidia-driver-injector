@@ -1,6 +1,33 @@
 # Session handover — 2026-06-05 — surprise-removal recovery testing (READ FIRST)
 
-## TL;DR — current state
+## ⮕ ADDENDUM (2026-06-05 PM — supersedes the TL;DR below)
+The session that wrote the TL;DR died on a repeated cyber-safeguard API error mid-forensics; a follow-up
+session recovered its lost progress from the transcript + two netconsole captures and **corrected the
+#292 root cause**. Net new state:
+- **GPU is HEALTHY again (cold-plugged):** BAR1=32768 MiB, TB `0-1 authorized`. **Injector un-drained →
+  apnex.30 loaded, persistence engaged** (P8 / ~33 W / cooler 41%); **apnex.30 soak RESUMED.** **Capture
+  DISARMED.** (The TL;DR's "GPU OFF-BUS / injector DRAINED / capture ARMED" is now obsolete.)
+- **#292 CAPTURED + RE-ROOT-CAUSED (verified, 3/3 adversarial):** it is the **in-flight re-OPEN RM
+  GSP-lockdown bring-up deadlock** (`RmInitAdapter → kgspBootstrap_GH100 → gpuTimeoutCondWait` spinning
+  while holding the GPU group lock), **NOT** a close-path teardown and **NOT** the AER/secondary-bus-reset
+  path. The close completes cleanly; the CmpltTO AER is a *symptom* of the hung re-open; our `tb_egpu
+  recover` handler is **exonerated** (the kernel reset nothing — audio-fn `NO_AER_DRIVER` vote aborts
+  recovery). An interim "bus-reset wedges the host" claim was **retracted**. A12 bounds the *caller*, not
+  the lock-holding *worker* — that's why it didn't save it. Full writeup:
+  `finding-2026-06-05-recovery-bringup-wedge-forensics.md` **§CAPTURED (v3)**.
+- **E27 pinned + documented** (separate, graceful, NON-wedging): intermediate TB bridge `02:00.0` gets
+  only a 256 MiB prefetch window → 32 G child can't fit. `finding-2026-06-05-E27-intermediate-bridge-window.md`.
+- **Captures archived:** `captures/netcon2-…-292-pathB-wedge.log`, `captures/netcon-…-E27-coldchassis-retest.log`.
+- **Decisive next experiment** (settles the one residual): re-run Path-B with `NVreg_TbEgpuRecoverEnable=0`
+  (cheap control — if it still wedges, re-open is conclusively the cause); then a kernel-side
+  `/proc/sysrq-trigger` task dump (keyboard SysRq is dead) for the worker stack; then port to fake-5090
+  (#290). Fix lands at the **re-open gate** (F1/F2), not the AER state machine (F3/F4 are defense-in-depth).
+- **Tasks:** #292 re-scoped (see finding). **E27 needs a tracking task.** #304/#305 (fix-bar1 P1 BAR1=0
+  false-success / P2 COMMAND-decode self-heal) still queued.
+
+---
+
+## TL;DR — current state (⚠ SUPERSEDED by the addendum above — kept for provenance)
 - **GPU is OFF the bus.** TB `0-1` `authorized=0` (tunnel down), PCI `0000:04:00.0` absent, nvidia not
   loaded. **Host is HEALTHY** (up ~4h, no wedge, no Call-Trace/hung signs).
 - **Injector is DRAINED** (DS nodeSelector `oa.recovery-drain/excluded`, desired=0 — persisted across

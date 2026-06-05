@@ -2,6 +2,19 @@
 
 **Severity:** total host loss, 2 reboots to recover. **Status:** root-caused + REPRODUCIBLE. The wedge is the trigger for fixing a real in-driver patch gap (task #292) and is blocked-cause for #291 (TB-tunnel cure isolation).
 
+> ⚠️ **LOCK-MODEL SUPERSEDED (added 2026-06-05).** §"What wedged" below (item 3) describes an **RM
+> API-lock inversion** (`rm_cleanup_gpu_lost_state → rmapiLockAcquire(API_LOCK_FLAGS_NONE)` blocking behind
+> the worker holding the API lock). That reading was **falsified the SAME day** by the source-comment
+> correction now in `nv.c:1950-1959` ("corrected 2026-06-02; the old comment here was FALSE"): under relaxed
+> GSP init locking the worker **releases the RM API lock** at `kernel_gsp.c:4785` and holds only the **GPU
+> group lock**, so the wedge is **`ldata_lock` + an unbounded `flush_work`**, *not* an API-lock inversion.
+> This doc was never updated. **What HOLDS:** item 4's prediction — *the AER `error_detected` path as a
+> second lock-contender → instant total wedge* — which the **2026-06-05 Path-B capture live-confirmed**
+> (the AER fires in the in-flight bounded-wait window, before the A10-v2 timeout+grace discriminator runs).
+> Current, source-true mechanism + the fix design:
+> [`finding-2026-06-05-recovery-bringup-wedge-forensics.md`](./finding-2026-06-05-recovery-bringup-wedge-forensics.md)
+> §"Reconciliation with the CURRENT source" and `experiment-register.md` #292.
+
 ## What ran
 
 `tools/oa-harness/rung5-tbcure.sh --variant tb-only 1` (the lowest-risk guard-smoke of the #2 TB-tunnel-recovery isolation matrix), on `595.71.05-apnex.25`. Predicted "low-risk / INCONCLUSIVE-by-construction" (the cycle-2 fire would be refused at the BAR1 gate). **That prediction was wrong** — the wedge was in the *pre-fire recovery*, never reaching the gate.

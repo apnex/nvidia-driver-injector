@@ -1,0 +1,1400 @@
+[ 8939.664039] netconsole: network logging started
+[ 8939.664754] WEDGE-CAPTURE ARMED 2026-06-05T03:16:24Z
+[ 8939.667030] WEDGE-CAPTURE TEST 2026-06-05T03:16:24Z — visible on the receiver ⇒ netconsole works
+[ 8940.669928] WEDGE-CAPTURE TEST 2026-06-05T03:16:25Z — visible on the receiver ⇒ netconsole works
+[ 9034.586038] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot plug event on 0:1
+[ 9034.586134] thunderbolt:tb_handle_hotplug:2510: thunderbolt 0000:00:0d.2: 0:1: hotplug: scanning
+[ 9034.586730] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot plug event on 0:2
+[ 9034.586827] thunderbolt:tb_wait_for_port:538: thunderbolt 0000:00:0d.2: 0:1: is connected, link is up (state: 2)
+[ 9034.587801] thunderbolt:tb_switch_alloc:2489: thunderbolt 0000:00:0d.2: current switch config:
+[ 9034.587813] thunderbolt:tb_dump_switch:1571: thunderbolt 0000:00:0d.2:  USB4 Switch: 8087:5786 (Revision: 133, TB Version: 64)
+[ 9034.587824] thunderbolt:tb_dump_switch:1574: thunderbolt 0000:00:0d.2:   Max Port Number: 23
+[ 9034.587828] thunderbolt:tb_dump_switch:1575: thunderbolt 0000:00:0d.2:   Config:
+[ 9034.587831] thunderbolt:tb_dump_switch:1576: thunderbolt 0000:00:0d.2:    Upstream Port Number: 1 Depth: 0 Route String: 0x0 Enabled: 0, PlugEventsDelay: 10ms
+[ 9034.587837] thunderbolt:tb_dump_switch:1581: thunderbolt 0000:00:0d.2:    unknown1: 0x0 unknown4: 0x0
+[ 9034.592970] thunderbolt:tb_switch_configure:2618: thunderbolt 0000:00:0d.2: initializing Switch at 0x1 (depth: 1, up port: 1)
+[ 9034.593662] thunderbolt:usb4_switch_setup:260: thunderbolt 0000:00:0d.2: 1: link: USB4
+[ 9034.593668] thunderbolt:usb4_switch_setup:265: thunderbolt 0000:00:0d.2: 1: TBT3 support: yes, xHCI: yes
+[ 9034.596182] thunderbolt:usb4_switch_credits_init:780: thunderbolt 0000:00:0d.2: 1: credit allocation parameters:
+[ 9034.596185] thunderbolt:usb4_switch_credits_init:790: thunderbolt 0000:00:0d.2: 1:  USB3: 20
+[ 9034.596188] thunderbolt:usb4_switch_credits_init:794: thunderbolt 0000:00:0d.2: 1:  DP AUX: 1
+[ 9034.596189] thunderbolt:usb4_switch_credits_init:798: thunderbolt 0000:00:0d.2: 1:  DP main: 6
+[ 9034.596191] thunderbolt:usb4_switch_credits_init:802: thunderbolt 0000:00:0d.2: 1:  PCIe: 76
+[ 9034.596192] thunderbolt:usb4_switch_credits_init:810: thunderbolt 0000:00:0d.2: 1:  unknown credit allocation index 0x0, skipping
+[ 9034.603599] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot plug event on 1:13
+[ 9034.603888] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot plug event on 1:2
+[ 9034.604222] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot plug event on 1:14
+[ 9034.604556] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot plug event on 1:16
+[ 9034.604702] thunderbolt:tb_drom_parse:640: thunderbolt 0000:00:0d.2: 1: DROM version: 1
+[ 9034.607236] thunderbolt:tb_switch_add:3321: thunderbolt 0000:00:0d.2: 1: uid: 0xe87ca900808714c4
+[ 9034.608911] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 1: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[ 9034.608919] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[ 9034.608925] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 4
+[ 9034.608930] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x4a000000
+[ 9034.608935] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[ 9034.610413] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 2: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[ 9034.610419] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[ 9034.610421] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 0
+[ 9034.610423] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0xca000000
+[ 9034.610429] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[ 9034.612079] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 3: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[ 9034.612081] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[ 9034.612085] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 4
+[ 9034.612086] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x8a000000
+[ 9034.612087] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[ 9034.613586] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 4: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[ 9034.613591] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[ 9034.613593] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 0
+[ 9034.613599] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x8a000000
+[ 9034.613602] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[ 9034.615251] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 5: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[ 9034.615253] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[ 9034.615257] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 4
+[ 9034.615257] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x8a000000
+[ 9034.615258] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[ 9034.616753] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 6: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[ 9034.616755] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[ 9034.616760] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 0
+[ 9034.616761] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x8a000000
+[ 9034.616762] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[ 9034.618424] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 7: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[ 9034.618426] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[ 9034.618427] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 4
+[ 9034.618427] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x8a000000
+[ 9034.618428] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[ 9034.619931] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 8: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[ 9034.619933] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[ 9034.619934] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 0
+[ 9034.619935] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x8a000000
+[ 9034.906851] thunderbolt:tb_retimer_nvm_add:104: thunderbolt 0-0:1.1: NVM version 26.85
+[ 9034.906861] thunderbolt 0-0:1.1: new retimer found, vendor=0x8087 device=0xd9c
+[ 9034.906884] thunderbolt:tb_retimer_unset_inbound_sbtx:243: thunderbolt 0000:00:0d.2: 0:1: disabling sideband transactions
+[ 9035.008409] thunderbolt:tb_switch_tmu_configure:1066: thunderbolt 0000:00:0d.2: 1: TMU: mode change off -> bi-directional, HiFi requested
+[ 9035.008576] thunderbolt:tb_switch_tmu_post_time:473: thunderbolt 0000:00:0d.2: 0: TMU: local_time[0]=0xe9000000
+[ 9035.008582] thunderbolt:tb_switch_tmu_post_time:473: thunderbolt 0000:00:0d.2: 0: TMU: local_time[1]=0x0839ba55
+[ 9035.008583] thunderbolt:tb_switch_tmu_post_time:473: thunderbolt 0000:00:0d.2: 0: TMU: local_time[2]=0x03e80000
+[ 9035.009579] thunderbolt:tb_switch_tmu_post_time:533: thunderbolt 0000:00:0d.2: 1: TMU: updated local time to 0x839ba55e900
+[ 9035.011918] thunderbolt:tb_switch_tmu_enable:1014: thunderbolt 0000:00:0d.2: 1: TMU: mode set to: bi-directional, HiFi
+[ 9035.015391] thunderbolt:tb_retimer_nvm_authenticate_status:201: thunderbolt 0000:00:0d.2: 1:1: reading NVM authentication status of retimers
+[ 9035.229282] thunderbolt:tb_retimer_unset_inbound_sbtx:243: thunderbolt 0000:00:0d.2: 1:1: disabling sideband transactions
+[ 9035.239284] usb 3-1: new high-speed USB device number 15 using xhci_hcd
+[ 9035.332641] thunderbolt:tb_maximum_bandwidth:790: thunderbolt 0000:00:0d.2: 0:1: link maximum bandwidth 36000/36000 Mb/s
+[ 9035.333141] thunderbolt:tb_maximum_bandwidth:790: thunderbolt 0000:00:0d.2: 1:1: link maximum bandwidth 36000/36000 Mb/s
+[ 9035.333399] thunderbolt:tb_tunnel_usb3:956: thunderbolt 0000:00:0d.2: 1:20: available bandwidth for new USB3 tunnel 36000/36000 Mb/s
+[ 9035.333896] thunderbolt:tb_tunnel_alloc_usb3:2300: thunderbolt 0000:00:0d.2: 1:20: maximum required bandwidth for USB3 tunnel 14738 Mb/s
+[ 9035.333915] thunderbolt:tb_tunnel_activate:2380: thunderbolt 0000:00:0d.2: 0:12 <-> 1:20 (USB3): activating
+[ 9035.333917] thunderbolt:tb_usb3_pre_activate:2017: thunderbolt 0000:00:0d.2: 0:12 <-> 1:20 (USB3): allocating initial bandwidth 14738/14738 Mb/s
+[ 9035.335478] thunderbolt:usb4_usb3_port_write_allocated_bandwidth:2390: thunderbolt 0000:00:0d.2: 0:12: scaled bandwidth 3599/3599, scale 0
+[ 9035.336729] thunderbolt:tb_path_activate:514: thunderbolt 0000:00:0d.2: activating USB3 Down path from 0:12 to 1:20
+[ 9035.336982] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 1:1: Writing hop 1
+[ 9035.336988] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 1:1:  In HopID: 8 => Out port: 20 Out HopID: 8
+[ 9035.336990] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 1:1:   Weight: 2 Priority: 3 Credits: 20 Drop: 0 PM: 0
+[ 9035.336993] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 1:1:    Counter enabled: 0 Counter index: 2047
+[ 9035.336994] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 1:1:   Flow Control (In/Eg): 1/0 Shared Buffer (In/Eg): 0/0
+[ 9035.336996] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 1:1:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[ 9035.337481] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 0:12: Writing hop 0
+[ 9035.337485] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 0:12:  In HopID: 8 => Out port: 1 Out HopID: 8
+[ 9035.337487] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 0:12:   Weight: 2 Priority: 3 Credits: 7 Drop: 0 PM: 0
+[ 9035.337489] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 0:12:    Counter enabled: 0 Counter index: 2047
+[ 9035.337491] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 0:12:   Flow Control (In/Eg): 1/1 Shared Buffer (In/Eg): 0/0
+[ 9035.337492] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 0:12:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[ 9035.337732] thunderbolt:tb_path_activate:586: thunderbolt 0000:00:0d.2: USB3 Down path activation complete
+[ 9035.337736] thunderbolt:tb_path_activate:514: thunderbolt 0000:00:0d.2: activating USB3 Up path from 1:20 to 0:12
+[ 9035.337985] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 0:1: Writing hop 1
+[ 9035.337990] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 0:1:  In HopID: 8 => Out port: 12 Out HopID: 8
+[ 9035.337992] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 0:1:   Weight: 2 Priority: 3 Credits: 32 Drop: 0 PM: 0
+[ 9035.337995] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 0:1:    Counter enabled: 0 Counter index: 2047
+[ 9035.337997] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 0:1:   Flow Control (In/Eg): 1/0 Shared Buffer (In/Eg): 0/0
+[ 9035.338000] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 0:1:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[ 9035.338484] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 1:20: Writing hop 0
+[ 9035.338488] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 1:20:  In HopID: 8 => Out port: 1 Out HopID: 8
+[ 9035.338491] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 1:20:   Weight: 2 Priority: 3 Credits: 7 Drop: 0 PM: 0
+[ 9035.338493] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 1:20:    Counter enabled: 0 Counter index: 2047
+[ 9035.338495] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 1:20:   Flow Control (In/Eg): 1/1 Shared Buffer (In/Eg): 0/0
+[ 9035.338498] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 1:20:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[ 9035.338737] thunderbolt:tb_path_activate:586: thunderbolt 0000:00:0d.2: USB3 Up path activation complete
+[ 9035.339574] thunderbolt:tb_wait_for_port:530: thunderbolt 0000:00:0d.2: 1:3: is unplugged (state: 7)
+[ 9035.339827] thunderbolt:tb_wait_for_port:530: thunderbolt 0000:00:0d.2: 1:5: is unplugged (state: 7)
+[ 9035.340079] thunderbolt:tb_wait_for_port:530: thunderbolt 0000:00:0d.2: 1:7: is unplugged (state: 7)
+[ 9035.340830] thunderbolt:tb_handle_hotplug:2504: thunderbolt 0000:00:0d.2: 0:2: got plug event for connected port, ignoring
+[ 9035.340843] thunderbolt:tb_handle_hotplug:2451: thunderbolt 0000:00:0d.2: hotplug event for upstream port 1:2 (unplug: 0)
+[ 9035.340848] thunderbolt:tb_handle_hotplug:2500: thunderbolt 0000:00:0d.2: 0:2: got unplug event for disconnected port, ignoring
+[ 9035.340850] thunderbolt:tb_handle_hotplug:2451: thunderbolt 0000:00:0d.2: hotplug event for upstream port 1:2 (unplug: 1)
+[ 9035.363652] usb 3-1: New USB device found, idVendor=1d5c, idProduct=5801, bcdDevice= 1.01
+[ 9035.363658] usb 3-1: New USB device strings: Mfr=1, Product=2, SerialNumber=0
+[ 9035.363660] usb 3-1: Product: USB2.0 Hub
+[ 9035.363660] usb 3-1: Manufacturer: Fresco Logic, Inc.
+[ 9035.364523] hub 3-1:1.0: USB hub found
+[ 9035.364545] hub 3-1:1.0: 6 ports detected
+[ 9035.589604] usb 2-1: new SuperSpeed Plus Gen 2x2 USB device number 2 using xhci_hcd
+[ 9035.601751] usb 2-1: New USB device found, idVendor=8087, idProduct=5787, bcdDevice= 0.00
+[ 9035.601757] usb 2-1: New USB device strings: Mfr=1, Product=2, SerialNumber=0
+[ 9035.601761] usb 2-1: Product: USB3 HUB
+[ 9035.601763] usb 2-1: Manufacturer: Intel Corporation
+[ 9035.602886] hub 2-1:1.0: USB hub found
+[ 9035.602925] hub 2-1:1.0: 4 ports detected
+[ 9035.876409] usb 2-1.4: new SuperSpeed Plus Gen 2x1 USB device number 3 using xhci_hcd
+[ 9035.892695] usb 2-1.4: New USB device found, idVendor=0bda, idProduct=0423, bcdDevice= 0.03
+[ 9035.892704] usb 2-1.4: New USB device strings: Mfr=1, Product=2, SerialNumber=0
+[ 9035.892705] usb 2-1.4: Product: 4-Port USB 3.0 Hub
+[ 9035.892706] usb 2-1.4: Manufacturer: Generic
+[ 9035.893408] usb 3-1.3: new full-speed USB device number 16 using xhci_hcd
+[ 9035.894818] hub 2-1.4:1.0: USB hub found
+[ 9035.895292] hub 2-1.4:1.0: 4 ports detected
+[ 9035.978679] usb 3-1.3: New USB device found, idVendor=0414, idProduct=7a61, bcdDevice= 1.00
+[ 9035.978688] usb 3-1.3: New USB device strings: Mfr=1, Product=2, SerialNumber=3
+[ 9035.978692] usb 3-1.3: Product: USB-HID Device
+[ 9035.978694] usb 3-1.3: Manufacturer: HOLTEK
+[ 9035.978695] usb 3-1.3: SerialNumber: 000000000000
+[ 9035.985933] usbhid 3-1.3:1.0: fixing wrong optional hid class descriptors count
+[ 9035.986564] hid-generic 0003:0414:7A61.0008: hiddev98,hidraw6: USB HID v1.11 Device [HOLTEK USB-HID Device] on usb-0000:00:14.0-1.3/input0
+[ 9035.986645] usbhid 3-1.3:1.1: couldn't find an input interrupt endpoint
+[ 9035.987335] input: HOLTEK USB-HID Device as /devices/pci0000:00/0000:00:14.0/usb3/3-1/3-1.3/3-1.3:1.2/0003:0414:7A61.0009/input/input28
+[ 9035.987447] hid-generic 0003:0414:7A61.0009: input,hidraw7: USB HID v1.11 Mouse [HOLTEK USB-HID Device] on usb-0000:00:14.0-1.3/input2
+[ 9036.061367] usb 3-1.4: new high-speed USB device number 17 using xhci_hcd
+[ 9036.148252] usb 3-1.4: New USB device found, idVendor=0bda, idProduct=5423, bcdDevice= 0.03
+[ 9036.148267] usb 3-1.4: New USB device strings: Mfr=1, Product=2, SerialNumber=0
+[ 9036.148275] usb 3-1.4: Product: 4-Port USB 2.0 Hub
+[ 9036.148277] usb 3-1.4: Manufacturer: Generic
+[ 9036.149169] hub 3-1.4:1.0: USB hub found
+[ 9036.149367] hub 3-1.4:1.0: 5 ports detected
+[ 9036.183338] usb 2-1.4.4: new SuperSpeed USB device number 4 using xhci_hcd
+[ 9036.195292] usb 2-1.4.4: New USB device found, idVendor=0bda, idProduct=8153, bcdDevice=31.00
+[ 9036.195297] usb 2-1.4.4: New USB device strings: Mfr=1, Product=2, SerialNumber=6
+[ 9036.195300] usb 2-1.4.4: Product: USB 10/100/1000 LAN
+[ 9036.195302] usb 2-1.4.4: Manufacturer: Realtek
+[ 9036.195303] usb 2-1.4.4: SerialNumber: 001000001
+[ 9036.223447] usb 3-1.5: new full-speed USB device number 18 using xhci_hcd
+[ 9036.258466] r8152-cfgselector 2-1.4.4: reset SuperSpeed USB device number 4 using xhci_hcd
+[ 9036.310917] usb 3-1.5: New USB device found, idVendor=0414, idProduct=7a62, bcdDevice=10.22
+[ 9036.310924] usb 3-1.5: New USB device strings: Mfr=1, Product=2, SerialNumber=3
+[ 9036.310927] usb 3-1.5: Product: DMC Device
+[ 9036.310930] usb 3-1.5: Manufacturer: Gigabyte
+[ 9036.310933] usb 3-1.5: SerialNumber: 1234
+[ 9036.346686] r8152 2-1.4.4:1.0 enp0s13f0u1u4u4: renamed from eth0
+[ 9062.425976] ===== RETEST: TB re-auth + GPU enumerate (cold chassis power-on) 2026-06-05T03:18:27Z =====
+[ 9062.434635] thunderbolt:tb_tunnel_activate:2380: thunderbolt 0000:00:0d.2: 0:8 <-> 1:9 (PCI): activating
+[ 9062.434641] thunderbolt:tb_path_activate:514: thunderbolt 0000:00:0d.2: activating PCIe Down path from 0:8 to 1:9
+[ 9062.435020] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 1:1: Writing hop 1
+[ 9062.435025] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 1:1:  In HopID: 9 => Out port: 9 Out HopID: 8
+[ 9062.435028] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 1:1:   Weight: 1 Priority: 3 Credits: 76 Drop: 0 PM: 0
+[ 9062.435030] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 1:1:    Counter enabled: 0 Counter index: 2047
+[ 9062.435031] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 1:1:   Flow Control (In/Eg): 1/0 Shared Buffer (In/Eg): 0/0
+[ 9062.435033] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 1:1:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[ 9062.435476] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 0:8: Writing hop 0
+[ 9062.435479] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 0:8:  In HopID: 8 => Out port: 1 Out HopID: 9
+[ 9062.435480] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 0:8:   Weight: 1 Priority: 3 Credits: 7 Drop: 0 PM: 0
+[ 9062.435481] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 0:8:    Counter enabled: 0 Counter index: 2047
+[ 9062.435482] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 0:8:   Flow Control (In/Eg): 1/1 Shared Buffer (In/Eg): 0/0
+[ 9062.435483] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 0:8:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[ 9062.435643] thunderbolt:tb_path_activate:586: thunderbolt 0000:00:0d.2: PCIe Down path activation complete
+[ 9062.435645] thunderbolt:tb_path_activate:514: thunderbolt 0000:00:0d.2: activating PCIe Up path from 1:9 to 0:8
+[ 9062.435898] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 0:1: Writing hop 1
+[ 9062.435903] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 0:1:  In HopID: 9 => Out port: 8 Out HopID: 8
+[ 9062.435906] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 0:1:   Weight: 1 Priority: 3 Credits: 64 Drop: 0 PM: 0
+[ 9062.435909] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 0:1:    Counter enabled: 0 Counter index: 2047
+[ 9062.435910] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 0:1:   Flow Control (In/Eg): 1/0 Shared Buffer (In/Eg): 0/0
+[ 9062.435911] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 0:1:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[ 9062.436235] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 1:9: Writing hop 0
+[ 9062.436238] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 1:9:  In HopID: 8 => Out port: 1 Out HopID: 9
+[ 9062.436240] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 1:9:   Weight: 1 Priority: 3 Credits: 7 Drop: 0 PM: 0
+[ 9062.436241] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 1:9:    Counter enabled: 0 Counter index: 2047
+[ 9062.436243] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 1:9:   Flow Control (In/Eg): 1/1 Shared Buffer (In/Eg): 0/0
+[ 9062.436244] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 1:9:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[ 9062.436403] thunderbolt:tb_path_activate:586: thunderbolt 0000:00:0d.2: PCIe Up path activation complete
+[ 9062.436729] pcieport 0000:00:07.0: pciehp: Slot(12): Card present
+[ 9062.564027] pci 0000:02:00.0: [8086:5786] type 01 class 0x060400 PCIe Switch Upstream Port
+[ 9062.564078] pci 0000:02:00.0: PCI bridge to [bus 00]
+[ 9062.564092] pci 0000:02:00.0:   bridge window [io  0x0000-0x0fff]
+[ 9062.564097] pci 0000:02:00.0:   bridge window [mem 0x00000000-0x000fffff]
+[ 9062.564115] pci 0000:02:00.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[ 9062.564135] pci 0000:02:00.0: enabling Extended Tags
+[ 9062.564325] pci 0000:02:00.0: supports D1 D2
+[ 9062.564327] pci 0000:02:00.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 9062.564467] pci 0000:02:00.0: PTM enabled, 4ns granularity
+[ 9062.566819] pci 0000:02:00.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[ 9062.567011] pci 0000:03:00.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[ 9062.567057] pci 0000:03:00.0: PCI bridge to [bus 00]
+[ 9062.567068] pci 0000:03:00.0:   bridge window [io  0x0000-0x0fff]
+[ 9062.567073] pci 0000:03:00.0:   bridge window [mem 0x00000000-0x000fffff]
+[ 9062.567091] pci 0000:03:00.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[ 9062.567114] pci 0000:03:00.0: enabling Extended Tags
+[ 9062.567343] pci 0000:03:00.0: supports D1 D2
+[ 9062.567346] pci 0000:03:00.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 9062.567809] pci 0000:03:01.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[ 9062.567854] pci 0000:03:01.0: PCI bridge to [bus 00]
+[ 9062.567865] pci 0000:03:01.0:   bridge window [io  0x0000-0x0fff]
+[ 9062.567869] pci 0000:03:01.0:   bridge window [mem 0x00000000-0x000fffff]
+[ 9062.567887] pci 0000:03:01.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[ 9062.567911] pci 0000:03:01.0: enabling Extended Tags
+[ 9062.568085] pci 0000:03:01.0: supports D1 D2
+[ 9062.568087] pci 0000:03:01.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 9062.568447] pci 0000:03:02.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[ 9062.568491] pci 0000:03:02.0: PCI bridge to [bus 00]
+[ 9062.568502] pci 0000:03:02.0:   bridge window [io  0x0000-0x0fff]
+[ 9062.568507] pci 0000:03:02.0:   bridge window [mem 0x00000000-0x000fffff]
+[ 9062.568525] pci 0000:03:02.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[ 9062.568548] pci 0000:03:02.0: enabling Extended Tags
+[ 9062.568721] pci 0000:03:02.0: supports D1 D2
+[ 9062.568723] pci 0000:03:02.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 9062.569084] pci 0000:03:03.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[ 9062.569127] pci 0000:03:03.0: PCI bridge to [bus 00]
+[ 9062.569139] pci 0000:03:03.0:   bridge window [io  0x0000-0x0fff]
+[ 9062.569145] pci 0000:03:03.0:   bridge window [mem 0x00000000-0x000fffff]
+[ 9062.569163] pci 0000:03:03.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[ 9062.569186] pci 0000:03:03.0: enabling Extended Tags
+[ 9062.569360] pci 0000:03:03.0: supports D1 D2
+[ 9062.569362] pci 0000:03:03.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 9062.569707] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[ 9062.569729] pci 0000:03:00.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[ 9062.569743] pci 0000:03:01.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[ 9062.569756] pci 0000:03:02.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[ 9062.569768] pci 0000:03:03.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[ 9062.569959] pci 0000:04:00.0: [10de:2b85] type 00 class 0x030000 PCIe Legacy Endpoint
+[ 9062.570039] pci 0000:04:00.0: BAR 0 [mem 0x00000000-0x03ffffff]
+[ 9062.570047] pci 0000:04:00.0: BAR 1 [mem 0x00000000-0x0fffffff 64bit pref]
+[ 9062.570053] pci 0000:04:00.0: BAR 3 [mem 0x00000000-0x01ffffff 64bit pref]
+[ 9062.570057] pci 0000:04:00.0: BAR 5 [io  0x0000-0x007f]
+[ 9062.570061] pci 0000:04:00.0: ROM [mem 0x00000000-0x0007ffff pref]
+[ 9062.570146] pci 0000:04:00.0: Enabling HDA controller
+[ 9062.570326] pci 0000:04:00.0: PME# supported from D0 D3hot
+[ 9062.570434] pci 0000:04:00.0: VF BAR 0 [mem 0x00000000-0x0003ffff 64bit pref]
+[ 9062.570437] pci 0000:04:00.0: VF BAR 0 [mem 0x00000000-0x0003ffff 64bit pref]: contains BAR 0 for 1 VFs
+[ 9062.570443] pci 0000:04:00.0: VF BAR 2 [mem 0x00000000-0x0fffffff 64bit pref]
+[ 9062.570446] pci 0000:04:00.0: VF BAR 2 [mem 0x00000000-0x0fffffff 64bit pref]: contains BAR 2 for 1 VFs
+[ 9062.570450] pci 0000:04:00.0: VF BAR 4 [mem 0x00000000-0x01ffffff 64bit pref]
+[ 9062.570452] pci 0000:04:00.0: VF BAR 4 [mem 0x00000000-0x01ffffff 64bit pref]: contains BAR 4 for 1 VFs
+[ 9062.570820] pci 0000:04:00.0: 8.000 Gb/s available PCIe bandwidth, limited by 2.5 GT/s PCIe x4 link at 0000:00:07.0 (capable of 504.112 Gb/s with 32.0 GT/s PCIe x16 link)
+[ 9062.570985] pci 0000:04:00.0: vgaarb: bridge control possible
+[ 9062.570986] pci 0000:04:00.0: vgaarb: VGA device added: decodes=io+mem,owns=none,locks=none
+[ 9062.570993] i915 0000:00:02.0: vgaarb: VGA decodes changed: olddecodes=io+mem,decodes=none:owns=io+mem
+[ 9062.571113] pci 0000:04:00.1: [10de:22e8] type 00 class 0x040300 PCIe Endpoint
+[ 9062.571194] pci 0000:04:00.1: BAR 0 [mem 0x00000000-0x00003fff]
+[ 9062.573836] pci 0000:03:00.0: PCI bridge to [bus 04-2b]
+[ 9062.573862] pci_bus 0000:04: busn_res: [bus 04-2b] end is updated to 04
+[ 9062.573963] pci 0000:03:01.0: PCI bridge to [bus 05-2b]
+[ 9062.573983] pci_bus 0000:05: busn_res: [bus 05-2b] end is updated to 11
+[ 9062.574066] pci 0000:03:02.0: PCI bridge to [bus 12-2b]
+[ 9062.574087] pci_bus 0000:12: busn_res: [bus 12-2b] end is updated to 1e
+[ 9062.574171] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[ 9063.453248] ===== RETEST: enumerate phase done — fix-bar1 next 2026-06-05T03:18:28Z =====
+[ 9761.484120] r8152-cfgselector 3-3.4: USB disconnect, device number 14
+[ 9761.484273] r8152 3-3.4:1.0 enp0s20f0u3u4: Stop submitting intr, status -108
+[ 9884.054472] usb 3-3.4: new high-speed USB device number 19 using xhci_hcd
+[ 9884.140032] usb 3-3.4: New USB device found, idVendor=0bda, idProduct=8153, bcdDevice=31.00
+[ 9884.140042] usb 3-3.4: New USB device strings: Mfr=1, Product=2, SerialNumber=6
+[ 9884.140046] usb 3-3.4: Product: USB 10/100/1000 LAN
+[ 9884.140048] usb 3-3.4: Manufacturer: Realtek
+[ 9884.140050] usb 3-3.4: SerialNumber: 001000001
+[ 9884.214994] r8152-cfgselector 3-3.4: reset high-speed USB device number 19 using xhci_hcd
+[ 9884.372129] r8152 3-3.4:1.0 enp0s20f0u3u4: renamed from eth0
+[ 9886.207156] usb 3-3: USB disconnect, device number 13
+[ 9886.207163] r8152-cfgselector 3-3.4: USB disconnect, device number 19
+[ 9886.207299] r8152 3-3.4:1.0 enp0s20f0u3u4: Stop submitting intr, status -108
+[ 9889.070333] usb 3-3: new high-speed USB device number 20 using xhci_hcd
+[ 9889.256100] usb 3-3: New USB device found, idVendor=0451, idProduct=8242, bcdDevice= 1.00
+[ 9889.256110] usb 3-3: New USB device strings: Mfr=0, Product=0, SerialNumber=1
+[ 9889.256115] usb 3-3: SerialNumber: E6010071B0CE
+[ 9889.257294] hub 3-3:1.0: USB hub found
+[ 9889.257423] hub 3-3:1.0: 4 ports detected
+[ 9890.502409] usb 3-3.4: new high-speed USB device number 21 using xhci_hcd
+[ 9890.587745] usb 3-3.4: New USB device found, idVendor=0bda, idProduct=8153, bcdDevice=31.00
+[ 9890.587751] usb 3-3.4: New USB device strings: Mfr=1, Product=2, SerialNumber=6
+[ 9890.587754] usb 3-3.4: Product: USB 10/100/1000 LAN
+[ 9890.587756] usb 3-3.4: Manufacturer: Realtek
+[ 9890.587757] usb 3-3.4: SerialNumber: 001000001
+[ 9890.652603] r8152-cfgselector 3-3.4: reset high-speed USB device number 21 using xhci_hcd
+[ 9890.808516] r8152 3-3.4:1.0 enp0s20f0u3u4: renamed from eth0
+[ 9890.813547] input: Surface Arc Mouse as /devices/virtual/misc/uhid/0005:045E:0932.000A/input/input29
+[ 9890.813827] input: Surface Arc Mouse Keyboard as /devices/virtual/misc/uhid/0005:045E:0932.000A/input/input30
+[ 9890.813875] input: Surface Arc Mouse as /devices/virtual/misc/uhid/0005:045E:0932.000A/input/input31
+[ 9890.813919] input: Surface Arc Mouse as /devices/virtual/misc/uhid/0005:045E:0932.000A/input/input33
+[ 9890.813976] hid-generic 0005:045E:0932.000A: input,hidraw5: BLUETOOTH HID v2.02 Mouse [Surface Arc Mouse] on 28:92:00:f7:c7:da
+[10518.980526] ===== RETEST: fix-bar1 --bind START 2026-06-05T03:42:43Z =====
+[10519.036899] i915 0000:00:02.0: vgaarb: VGA decodes changed: olddecodes=none,decodes=io+mem:owns=io+mem
+[10519.037001] pci_bus 0000:04: busn_res: [bus 04] is released
+[10519.037052] pci_bus 0000:05: busn_res: [bus 05-11] is released
+[10519.037091] pci_bus 0000:12: busn_res: [bus 12-1e] is released
+[10519.037143] pci_bus 0000:1f: busn_res: [bus 1f-2b] is released
+[10519.037173] pci_bus 0000:03: busn_res: [bus 03-2b] is released
+[10522.038161] pcieport 0000:00:07.0: pciehp: Slot(12): Card present
+[10522.038176] pcieport 0000:00:07.0: pciehp: Slot(12): Link Up
+[10522.162360] pci 0000:02:00.0: [8086:5786] type 01 class 0x060400 PCIe Switch Upstream Port
+[10522.162414] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[10522.162429] pci 0000:02:00.0:   bridge window [io  0x5000-0x8fff]
+[10522.162435] pci 0000:02:00.0:   bridge window [mem 0x88000000-0x8bffffff]
+[10522.162452] pci 0000:02:00.0:   bridge window [mem 0x4810000000-0x5001ffffff 64bit pref]
+[10522.162657] pci 0000:02:00.0: supports D1 D2
+[10522.162660] pci 0000:02:00.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10522.162800] pci 0000:02:00.0: PTM enabled, 4ns granularity
+[10522.163226] pci 0000:03:00.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[10522.163275] pci 0000:03:00.0: PCI bridge to [bus 04]
+[10522.163287] pci 0000:03:00.0:   bridge window [io  0x5000-0x5fff]
+[10522.163309] pci 0000:03:00.0:   bridge window [mem 0x4810000000-0x4821ffffff 64bit pref]
+[10522.163539] pci 0000:03:00.0: supports D1 D2
+[10522.163542] pci 0000:03:00.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10522.163982] pci 0000:03:01.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[10522.164030] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[10522.164041] pci 0000:03:01.0:   bridge window [io  0x6000-0x6fff]
+[10522.164047] pci 0000:03:01.0:   bridge window [mem 0x88400000-0x885fffff]
+[10522.164065] pci 0000:03:01.0:   bridge window [mem 0x4822000000-0x4ac1ffffff 64bit pref]
+[10522.164258] pci 0000:03:01.0: supports D1 D2
+[10522.164262] pci 0000:03:01.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10522.164622] pci 0000:03:02.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[10522.164671] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[10522.164684] pci 0000:03:02.0:   bridge window [io  0x7000-0x7fff]
+[10522.164689] pci 0000:03:02.0:   bridge window [mem 0x88200000-0x883fffff]
+[10522.164707] pci 0000:03:02.0:   bridge window [mem 0x4ac2000000-0x4d61ffffff 64bit pref]
+[10522.164896] pci 0000:03:02.0: supports D1 D2
+[10522.164900] pci 0000:03:02.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10522.165261] pci 0000:03:03.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[10522.165309] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[10522.165325] pci 0000:03:03.0:   bridge window [io  0x8000-0x8fff]
+[10522.165331] pci 0000:03:03.0:   bridge window [mem 0x88000000-0x881fffff]
+[10522.165349] pci 0000:03:03.0:   bridge window [mem 0x4d62000000-0x5001ffffff 64bit pref]
+[10522.165538] pci 0000:03:03.0: supports D1 D2
+[10522.165540] pci 0000:03:03.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10522.165898] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[10522.166080] pci 0000:04:00.0: [10de:2b85] type 00 class 0x030000 PCIe Legacy Endpoint
+[10522.166165] pci 0000:04:00.0: BAR 0 [mem 0x00000000-0x03ffffff]
+[10522.166171] pci 0000:04:00.0: BAR 1 [mem 0x4800000000-0x4fffffffff 64bit pref]
+[10522.166179] pci 0000:04:00.0: BAR 3 [mem 0x4820000000-0x4821ffffff 64bit pref]
+[10522.166183] pci 0000:04:00.0: BAR 5 [io  0x5000-0x507f]
+[10522.166187] pci 0000:04:00.0: ROM [mem 0x00000000-0x0007ffff pref]
+[10522.166266] pci 0000:04:00.0: Enabling HDA controller
+[10522.166444] pci 0000:04:00.0: PME# supported from D0 D3hot
+[10522.166551] pci 0000:04:00.0: VF BAR 0 [mem 0x00000000-0x0003ffff 64bit pref]
+[10522.166553] pci 0000:04:00.0: VF BAR 0 [mem 0x00000000-0x0003ffff 64bit pref]: contains BAR 0 for 1 VFs
+[10522.166559] pci 0000:04:00.0: VF BAR 2 [mem 0x00000000-0x0fffffff 64bit pref]
+[10522.166561] pci 0000:04:00.0: VF BAR 2 [mem 0x00000000-0x0fffffff 64bit pref]: contains BAR 2 for 1 VFs
+[10522.166566] pci 0000:04:00.0: VF BAR 4 [mem 0x00000000-0x01ffffff 64bit pref]
+[10522.166568] pci 0000:04:00.0: VF BAR 4 [mem 0x00000000-0x01ffffff 64bit pref]: contains BAR 4 for 1 VFs
+[10522.166929] pci 0000:04:00.0: 8.000 Gb/s available PCIe bandwidth, limited by 2.5 GT/s PCIe x4 link at 0000:00:07.0 (capable of 504.112 Gb/s with 32.0 GT/s PCIe x16 link)
+[10522.167075] pci 0000:04:00.0: vgaarb: bridge control possible
+[10522.167076] pci 0000:04:00.0: vgaarb: VGA device added: decodes=io+mem,owns=none,locks=none
+[10522.167081] i915 0000:00:02.0: vgaarb: VGA decodes changed: olddecodes=io+mem,decodes=none:owns=io+mem
+[10522.167200] pci 0000:04:00.1: [10de:22e8] type 00 class 0x040300 PCIe Endpoint
+[10522.167280] pci 0000:04:00.1: BAR 0 [mem 0x00000000-0x00003fff]
+[10522.167694] pci 0000:03:00.0: PCI bridge to [bus 04]
+[10522.167778] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[10522.167861] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[10522.167944] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[10522.168019] pci 0000:03:00.0: bridge window [mem size 0x802000000 64bit pref] to [bus 04] add_size 12100000 add_align 800000000
+[10522.168022] pci 0000:03:01.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 05-11] add_size 800000000 add_align 100000
+[10522.168024] pci 0000:03:01.0: bridge window [mem 0x00100000-0x000fffff] to [bus 05-11] add_size 200000 add_align 100000
+[10522.168025] pci 0000:03:02.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 12-1e] add_size 800000000 add_align 100000
+[10522.168027] pci 0000:03:02.0: bridge window [mem 0x00100000-0x000fffff] to [bus 12-1e] add_size 200000 add_align 100000
+[10522.168029] pci 0000:03:03.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 1f-2b] add_size 800000000 add_align 100000
+[10522.168030] pci 0000:03:03.0: bridge window [mem 0x00100000-0x000fffff] to [bus 1f-2b] add_size 200000 add_align 100000
+[10522.168032] pci 0000:02:00.0: bridge window [mem 0x800000000-0x1001ffffff 64bit pref] to [bus 03-2b] add_size 1812100000 add_align 800000000
+[10522.168034] pci 0000:02:00.0: bridge window [mem 0x04000000-0x080fffff] to [bus 03-2b] add_size 600000 add_align 4000000
+[10522.168039] pci 0000:02:00.0: bridge window [mem 0x5000000000-0x500fffffff 64bit pref]: assigned
+[10522.168040] pci 0000:02:00.0: bridge window [mem 0x88000000-0x8bffffff]: assigned
+[10522.168042] pci 0000:02:00.0: bridge window [io  0x5000-0x8fff]: assigned
+[10522.168045] pci 0000:03:00.0: bridge window [mem size 0x814100000 64bit pref]: can't assign; no space
+[10522.168046] pci 0000:03:00.0: bridge window [mem size 0x814100000 64bit pref]: failed to assign
+[10527.211578] nvidia: loading out-of-tree module taints kernel.
+[10527.211605] nvidia: module verification failed: signature and/or required key missing - tainting kernel
+[10527.270122] nvidia-nvlink: Nvlink Core is being initialized, major device number 510
+[10527.270132] 
+[10527.274201] nvidia 0000:04:00.0: AER: unmasked Uncorrectable Internal Error at probe
+[10527.274218] nvidia 0000:04:00.0: enabling device (0000 -> 0001)
+[10527.274267] NVRM: This PCI I/O region assigned to your NVIDIA device is invalid:
+[10527.274267] NVRM: BAR0 is 0M @ 0x0 (PCI:0000:04:00.0)
+[10527.274283] nvidia 0000:04:00.0: probe with driver nvidia failed with error -1
+[10527.274350] NVRM: The NVIDIA probe routine failed for 1 device(s).
+[10527.274352] NVRM: None of the NVIDIA devices were initialized.
+[10527.275286] nvidia-nvlink: Unregistered Nvlink Core, major device number 510
+[10527.356356] ===== RETEST: fix-bar1 --bind RETURNED rc=1 2026-06-05T03:42:52Z =====
+[10588.912212] ===== RETEST: post-fail state check 2026-06-05T03:43:53Z =====
+[10886.583701] ===== RETEST-2: TB deauth/reauth (rebuild tunnel) 2026-06-05T03:48:51Z =====
+[10886.583783] thunderbolt:tb_tunnel_deactivate:2433: thunderbolt 0000:00:0d.2: 0:8 <-> 1:9 (PCI): deactivating
+[10886.584932] thunderbolt:tb_path_deactivate:485: thunderbolt 0000:00:0d.2: deactivating PCIe Down path from 0:8 to 1:9
+[10886.586341] thunderbolt:tb_path_deactivate:485: thunderbolt 0000:00:0d.2: deactivating PCIe Up path from 1:9 to 0:8
+[10886.608525] pcieport 0000:00:07.0: pciehp: Slot(12): Link Down
+[10886.608542] pcieport 0000:00:07.0: pciehp: Slot(12): Card not present
+[10886.608924] i915 0000:00:02.0: vgaarb: VGA decodes changed: olddecodes=none,decodes=io+mem:owns=io+mem
+[10886.609075] pci_bus 0000:04: busn_res: [bus 04] is released
+[10886.609137] pci_bus 0000:05: busn_res: [bus 05-11] is released
+[10886.609181] pci_bus 0000:12: busn_res: [bus 12-1e] is released
+[10886.609211] pci_bus 0000:1f: busn_res: [bus 1f-2b] is released
+[10886.609248] pci_bus 0000:03: busn_res: [bus 03-2b] is released
+[10887.590225] thunderbolt:tb_tunnel_activate:2380: thunderbolt 0000:00:0d.2: 0:8 <-> 1:9 (PCI): activating
+[10887.590237] thunderbolt:tb_path_activate:514: thunderbolt 0000:00:0d.2: activating PCIe Down path from 0:8 to 1:9
+[10887.590403] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 1:1: Writing hop 1
+[10887.590407] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 1:1:  In HopID: 9 => Out port: 9 Out HopID: 8
+[10887.590409] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 1:1:   Weight: 1 Priority: 3 Credits: 76 Drop: 0 PM: 0
+[10887.590411] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 1:1:    Counter enabled: 0 Counter index: 2047
+[10887.590412] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 1:1:   Flow Control (In/Eg): 1/0 Shared Buffer (In/Eg): 0/0
+[10887.590413] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 1:1:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[10887.590729] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 0:8: Writing hop 0
+[10887.590738] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 0:8:  In HopID: 8 => Out port: 1 Out HopID: 9
+[10887.590740] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 0:8:   Weight: 1 Priority: 3 Credits: 7 Drop: 0 PM: 0
+[10887.590742] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 0:8:    Counter enabled: 0 Counter index: 2047
+[10887.590743] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 0:8:   Flow Control (In/Eg): 1/1 Shared Buffer (In/Eg): 0/0
+[10887.590744] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 0:8:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[10887.590998] thunderbolt:tb_path_activate:586: thunderbolt 0000:00:0d.2: PCIe Down path activation complete
+[10887.591004] thunderbolt:tb_path_activate:514: thunderbolt 0000:00:0d.2: activating PCIe Up path from 1:9 to 0:8
+[10887.591169] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 0:1: Writing hop 1
+[10887.591172] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 0:1:  In HopID: 9 => Out port: 8 Out HopID: 8
+[10887.591173] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 0:1:   Weight: 1 Priority: 3 Credits: 64 Drop: 0 PM: 0
+[10887.591176] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 0:1:    Counter enabled: 0 Counter index: 2047
+[10887.591177] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 0:1:   Flow Control (In/Eg): 1/0 Shared Buffer (In/Eg): 0/0
+[10887.591178] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 0:1:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[10887.591484] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 1:9: Writing hop 0
+[10887.591488] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 1:9:  In HopID: 8 => Out port: 1 Out HopID: 9
+[10887.591490] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 1:9:   Weight: 1 Priority: 3 Credits: 7 Drop: 0 PM: 0
+[10887.591491] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 1:9:    Counter enabled: 0 Counter index: 2047
+[10887.591493] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 1:9:   Flow Control (In/Eg): 1/1 Shared Buffer (In/Eg): 0/0
+[10887.591494] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 1:9:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[10887.591651] thunderbolt:tb_path_activate:586: thunderbolt 0000:00:0d.2: PCIe Up path activation complete
+[10887.592061] pcieport 0000:00:07.0: pciehp: Slot(12): Card present
+[10887.592073] pcieport 0000:00:07.0: pciehp: Slot(12): Link Up
+[10887.715892] pci 0000:02:00.0: [8086:5786] type 01 class 0x060400 PCIe Switch Upstream Port
+[10887.715943] pci 0000:02:00.0: PCI bridge to [bus 00]
+[10887.715959] pci 0000:02:00.0:   bridge window [io  0x0000-0x0fff]
+[10887.715964] pci 0000:02:00.0:   bridge window [mem 0x00000000-0x000fffff]
+[10887.715981] pci 0000:02:00.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[10887.716003] pci 0000:02:00.0: enabling Extended Tags
+[10887.716203] pci 0000:02:00.0: supports D1 D2
+[10887.716206] pci 0000:02:00.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10887.716344] pci 0000:02:00.0: PTM enabled, 4ns granularity
+[10887.716603] pcieport 0000:00:07.0: ASPM: current common clock configuration is inconsistent, reconfiguring
+[10887.717754] pci 0000:02:00.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[10887.717935] pci 0000:03:00.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[10887.717981] pci 0000:03:00.0: PCI bridge to [bus 00]
+[10887.717993] pci 0000:03:00.0:   bridge window [io  0x0000-0x0fff]
+[10887.718000] pci 0000:03:00.0:   bridge window [mem 0x00000000-0x000fffff]
+[10887.718019] pci 0000:03:00.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[10887.718043] pci 0000:03:00.0: enabling Extended Tags
+[10887.718269] pci 0000:03:00.0: supports D1 D2
+[10887.718272] pci 0000:03:00.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10887.718720] pci 0000:03:01.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[10887.718769] pci 0000:03:01.0: PCI bridge to [bus 00]
+[10887.718780] pci 0000:03:01.0:   bridge window [io  0x0000-0x0fff]
+[10887.718786] pci 0000:03:01.0:   bridge window [mem 0x00000000-0x000fffff]
+[10887.718804] pci 0000:03:01.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[10887.718828] pci 0000:03:01.0: enabling Extended Tags
+[10887.719003] pci 0000:03:01.0: supports D1 D2
+[10887.719006] pci 0000:03:01.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10887.719365] pci 0000:03:02.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[10887.719409] pci 0000:03:02.0: PCI bridge to [bus 00]
+[10887.719421] pci 0000:03:02.0:   bridge window [io  0x0000-0x0fff]
+[10887.719428] pci 0000:03:02.0:   bridge window [mem 0x00000000-0x000fffff]
+[10887.719446] pci 0000:03:02.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[10887.719471] pci 0000:03:02.0: enabling Extended Tags
+[10887.719645] pci 0000:03:02.0: supports D1 D2
+[10887.719648] pci 0000:03:02.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10887.720009] pci 0000:03:03.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[10887.720053] pci 0000:03:03.0: PCI bridge to [bus 00]
+[10887.720065] pci 0000:03:03.0:   bridge window [io  0x0000-0x0fff]
+[10887.720070] pci 0000:03:03.0:   bridge window [mem 0x00000000-0x000fffff]
+[10887.720087] pci 0000:03:03.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[10887.720113] pci 0000:03:03.0: enabling Extended Tags
+[10887.720286] pci 0000:03:03.0: supports D1 D2
+[10887.720290] pci 0000:03:03.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10887.720623] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[10887.720648] pci 0000:03:00.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[10887.720661] pci 0000:03:01.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[10887.720675] pci 0000:03:02.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[10887.720689] pci 0000:03:03.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[10887.720891] pci 0000:04:00.0: [10de:2b85] type 00 class 0x030000 PCIe Legacy Endpoint
+[10887.720973] pci 0000:04:00.0: BAR 0 [mem 0x00000000-0x03ffffff]
+[10887.720981] pci 0000:04:00.0: BAR 1 [mem 0x00000000-0x0fffffff 64bit pref]
+[10887.720987] pci 0000:04:00.0: BAR 3 [mem 0x00000000-0x01ffffff 64bit pref]
+[10887.720992] pci 0000:04:00.0: BAR 5 [io  0x0000-0x007f]
+[10887.720996] pci 0000:04:00.0: ROM [mem 0x00000000-0x0007ffff pref]
+[10887.721083] pci 0000:04:00.0: Enabling HDA controller
+[10887.721264] pci 0000:04:00.0: PME# supported from D0 D3hot
+[10887.721373] pci 0000:04:00.0: VF BAR 0 [mem 0x00000000-0x0003ffff 64bit pref]
+[10887.721377] pci 0000:04:00.0: VF BAR 0 [mem 0x00000000-0x0003ffff 64bit pref]: contains BAR 0 for 1 VFs
+[10887.721383] pci 0000:04:00.0: VF BAR 2 [mem 0x00000000-0x0fffffff 64bit pref]
+[10887.721385] pci 0000:04:00.0: VF BAR 2 [mem 0x00000000-0x0fffffff 64bit pref]: contains BAR 2 for 1 VFs
+[10887.721392] pci 0000:04:00.0: VF BAR 4 [mem 0x00000000-0x01ffffff 64bit pref]
+[10887.721394] pci 0000:04:00.0: VF BAR 4 [mem 0x00000000-0x01ffffff 64bit pref]: contains BAR 4 for 1 VFs
+[10887.721763] pci 0000:04:00.0: 8.000 Gb/s available PCIe bandwidth, limited by 2.5 GT/s PCIe x4 link at 0000:00:07.0 (capable of 504.112 Gb/s with 32.0 GT/s PCIe x16 link)
+[10887.721913] pci 0000:04:00.0: vgaarb: bridge control possible
+[10887.721914] pci 0000:04:00.0: vgaarb: VGA device added: decodes=io+mem,owns=none,locks=none
+[10887.721922] i915 0000:00:02.0: vgaarb: VGA decodes changed: olddecodes=io+mem,decodes=none:owns=io+mem
+[10887.722040] pci 0000:04:00.1: [10de:22e8] type 00 class 0x040300 PCIe Endpoint
+[10887.722123] pci 0000:04:00.1: BAR 0 [mem 0x00000000-0x00003fff]
+[10887.723771] pci 0000:03:00.0: PCI bridge to [bus 04-2b]
+[10887.723794] pci_bus 0000:04: busn_res: [bus 04-2b] end is updated to 04
+[10887.723887] pci 0000:03:01.0: PCI bridge to [bus 05-2b]
+[10887.723909] pci_bus 0000:05: busn_res: [bus 05-2b] end is updated to 11
+[10887.723992] pci 0000:03:02.0: PCI bridge to [bus 12-2b]
+[10887.724012] pci_bus 0000:12: busn_res: [bus 12-2b] end is updated to 1e
+[10887.724093] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[10887.724113] pci_bus 0000:1f: busn_res: [bus 1f-2b] end is updated to 2b
+[10887.724120] pci_bus 0000:03: busn_res: [bus 03-2b] end is updated to 2b
+[10887.724129] pci 0000:03:00.0: bridge window [mem size 0x12000000 64bit pref] to [bus 04] add_size 12100000 add_align 10000000
+[10887.724132] pci 0000:03:01.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 05-11] add_size 800000000 add_align 100000
+[10887.724134] pci 0000:03:01.0: bridge window [mem 0x00100000-0x000fffff] to [bus 05-11] add_size 200000 add_align 100000
+[10887.724135] pci 0000:03:02.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 12-1e] add_size 800000000 add_align 100000
+[10887.724136] pci 0000:03:02.0: bridge window [mem 0x00100000-0x000fffff] to [bus 12-1e] add_size 200000 add_align 100000
+[10887.724137] pci 0000:03:03.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 1f-2b] add_size 800000000 add_align 100000
+[10887.724138] pci 0000:03:03.0: bridge window [mem 0x00100000-0x000fffff] to [bus 1f-2b] add_size 200000 add_align 100000
+[10887.724140] pci 0000:02:00.0: bridge window [mem 0x10000000-0x21ffffff 64bit pref] to [bus 03-2b] add_size 1812100000 add_align 10000000
+[10887.724141] pci 0000:02:00.0: bridge window [mem 0x04000000-0x080fffff] to [bus 03-2b] add_size 600000 add_align 4000000
+[10887.724147] pci 0000:02:00.0: bridge window [mem 0x4810000000-0x5001ffffff 64bit pref]: assigned
+[10887.724148] pci 0000:02:00.0: bridge window [mem 0x88000000-0x8bffffff]: assigned
+[10887.724148] pci 0000:02:00.0: bridge window [io  0x5000-0x8fff]: assigned
+[10887.724151] pci 0000:03:00.0: bridge window [mem 0x4810000000-0x48340fffff 64bit pref]: assigned
+[10887.724152] pci 0000:03:00.0: bridge window [mem size 0x04100000]: can't assign; no space
+[10887.724153] pci 0000:03:00.0: bridge window [mem size 0x04100000]: failed to assign
+[10887.724154] pci 0000:03:01.0: bridge window [mem 0x88000000-0x881fffff]: assigned
+[10887.724155] pci 0000:03:01.0: bridge window [mem 0x4834100000-0x4ad40fffff 64bit pref]: assigned
+[10887.724155] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: assigned
+[10887.724156] pci 0000:03:02.0: bridge window [mem 0x4ad4100000-0x4d740fffff 64bit pref]: assigned
+[10887.724156] pci 0000:03:03.0: bridge window [mem 0x88400000-0x885fffff]: assigned
+[10887.724157] pci 0000:03:03.0: bridge window [mem size 0x2a0000000 64bit pref]: can't assign; no space
+[10887.724158] pci 0000:03:03.0: bridge window [mem size 0x2a0000000 64bit pref]: failed to assign
+[10887.724159] pci 0000:03:00.0: bridge window [io  0x5000-0x5fff]: assigned
+[10887.724160] pci 0000:03:01.0: bridge window [io  0x6000-0x6fff]: assigned
+[10887.724160] pci 0000:03:02.0: bridge window [io  0x7000-0x7fff]: assigned
+[10887.724161] pci 0000:03:03.0: bridge window [io  0x8000-0x8fff]: assigned
+[10887.724162] pci 0000:03:00.0: bridge window [mem 0x4810000000-0x48340fffff 64bit pref]: releasing
+[10887.724163] pci 0000:03:01.0: bridge window [mem 0x88000000-0x881fffff]: releasing
+[10887.724163] pci 0000:03:01.0: bridge window [mem 0x4834100000-0x4ad40fffff 64bit pref]: releasing
+[10887.724164] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: releasing
+[10887.724164] pci 0000:03:02.0: bridge window [mem 0x4ad4100000-0x4d740fffff 64bit pref]: releasing
+[10887.724165] pci 0000:03:03.0: bridge window [mem 0x88400000-0x885fffff]: releasing
+[10887.724166] pci 0000:03:00.0: bridge window [mem 0x4810000000-0x4821ffffff 64bit pref]: assigned
+[10887.724166] pci 0000:03:00.0: bridge window [mem size 0x04100000]: can't assign; no space
+[10887.724167] pci 0000:03:00.0: bridge window [mem size 0x04100000]: failed to assign
+[10887.724168] pci 0000:03:01.0: bridge window [mem 0x4822000000-0x4ac1ffffff 64bit pref]: assigned
+[10887.724168] pci 0000:03:02.0: bridge window [mem 0x4ac2000000-0x4d61ffffff 64bit pref]: assigned
+[10887.724169] pci 0000:03:03.0: bridge window [mem 0x4d62000000-0x5001ffffff 64bit pref]: assigned
+[10887.724170] pci 0000:03:03.0: bridge window [mem 0x88000000-0x881fffff]: assigned
+[10887.724171] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: assigned
+[10887.724171] pci 0000:03:01.0: bridge window [mem 0x88400000-0x885fffff]: assigned
+[10887.724172] pci 0000:03:00.0: bridge window [mem 0x4810000000-0x4821ffffff 64bit pref]: failed to expand by 0x12100000
+[10887.724173] pci 0000:03:00.0: bridge window [mem 0x4810000000-0x4821ffffff 64bit pref]: failed to add optional 12100000
+[10887.724175] pci 0000:04:00.0: BAR 1 [mem 0x4810000000-0x481fffffff 64bit pref]: assigned
+[10887.724192] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[10887.724193] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[10887.724193] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: can't assign; no space
+[10887.724194] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: failed to assign
+[10887.724195] pci 0000:04:00.0: BAR 3 [mem 0x4820000000-0x4821ffffff 64bit pref]: assigned
+[10887.724211] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[10887.724212] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[10887.724213] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: can't assign; no space
+[10887.724213] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: failed to assign
+[10887.724214] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: can't assign; no space
+[10887.724215] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: failed to assign
+[10887.724215] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: can't assign; no space
+[10887.724216] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: failed to assign
+[10887.724217] pci 0000:04:00.0: BAR 5 [io  0x5000-0x507f]: assigned
+[10887.724222] pci 0000:04:00.0: BAR 1 [mem 0x4810000000-0x481fffffff 64bit pref]: releasing
+[10887.724223] pci 0000:04:00.0: BAR 3 [mem 0x4820000000-0x4821ffffff 64bit pref]: releasing
+[10887.724223] pci 0000:04:00.0: BAR 1 [mem 0x4810000000-0x481fffffff 64bit pref]: assigned
+[10887.724239] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: can't assign; no space
+[10887.724240] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: failed to assign
+[10887.724241] pci 0000:04:00.0: BAR 3 [mem 0x4820000000-0x4821ffffff 64bit pref]: assigned
+[10887.724257] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: can't assign; no space
+[10887.724258] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: failed to assign
+[10887.724259] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: can't assign; no space
+[10887.724260] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: failed to assign
+[10887.724260] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[10887.724261] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[10887.724262] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[10887.724263] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[10887.724264] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: can't assign; no space
+[10887.724264] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: failed to assign
+[10887.724266] pci 0000:03:00.0: PCI bridge to [bus 04]
+[10887.724268] pci 0000:03:00.0:   bridge window [io  0x5000-0x5fff]
+[10887.724279] pci 0000:03:00.0:   bridge window [mem 0x4810000000-0x4821ffffff 64bit pref]
+[10887.724287] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[10887.724290] pci 0000:03:01.0:   bridge window [io  0x6000-0x6fff]
+[10887.724297] pci 0000:03:01.0:   bridge window [mem 0x88400000-0x885fffff]
+[10887.724302] pci 0000:03:01.0:   bridge window [mem 0x4822000000-0x4ac1ffffff 64bit pref]
+[10887.724310] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[10887.724313] pci 0000:03:02.0:   bridge window [io  0x7000-0x7fff]
+[10887.724320] pci 0000:03:02.0:   bridge window [mem 0x88200000-0x883fffff]
+[10887.724325] pci 0000:03:02.0:   bridge window [mem 0x4ac2000000-0x4d61ffffff 64bit pref]
+[10887.724333] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[10887.724337] pci 0000:03:03.0:   bridge window [io  0x8000-0x8fff]
+[10887.724343] pci 0000:03:03.0:   bridge window [mem 0x88000000-0x881fffff]
+[10887.724348] pci 0000:03:03.0:   bridge window [mem 0x4d62000000-0x5001ffffff 64bit pref]
+[10887.724357] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[10887.724360] pci 0000:02:00.0:   bridge window [io  0x5000-0x8fff]
+[10887.724368] pci 0000:02:00.0:   bridge window [mem 0x88000000-0x8bffffff]
+[10887.724373] pci 0000:02:00.0:   bridge window [mem 0x4810000000-0x5001ffffff 64bit pref]
+[10887.724381] pcieport 0000:00:07.0: PCI bridge to [bus 02-2b]
+[10887.724384] pcieport 0000:00:07.0:   bridge window [io  0x5000-0x8fff]
+[10887.724388] pcieport 0000:00:07.0:   bridge window [mem 0x86000000-0x8bffffff]
+[10887.724391] pcieport 0000:00:07.0:   bridge window [mem 0x4810000000-0x500fffffff 64bit pref]
+[10887.724396] PCI: No. 2 try to assign unassigned res
+[10887.724398] release child resource [mem 0x4810000000-0x481fffffff 64bit pref]
+[10887.724399] release child resource [mem 0x4820000000-0x4821ffffff 64bit pref]
+[10887.724401] pci 0000:03:00.0: bridge window [mem 0x4810000000-0x4821ffffff 64bit pref]: releasing
+[10887.724410] pci 0000:03:01.0: bridge window [mem 0x88400000-0x885fffff]: releasing
+[10887.724414] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: releasing
+[10887.724417] pci 0000:03:03.0: bridge window [mem 0x88000000-0x881fffff]: releasing
+[10887.724421] pci 0000:02:00.0: bridge window [mem 0x88000000-0x8bffffff]: releasing
+[10887.724426] pci 0000:03:00.0: bridge window [mem size 0x12000000 64bit pref] to [bus 04] add_size 12100000 add_align 10000000
+[10887.724427] pci 0000:03:01.0: bridge window [mem size 0x00000000] to [bus 05-11] add_size 200000 add_align 100000
+[10887.724430] pci 0000:03:02.0: bridge window [mem size 0x00000000] to [bus 12-1e] add_size 200000 add_align 100000
+[10887.724432] pci 0000:03:03.0: bridge window [mem size 0x00000000] to [bus 1f-2b] add_size 200000 add_align 100000
+[10887.724434] pci 0000:02:00.0: bridge window [mem size 0x04100000] to [bus 03-2b] add_size 600000 add_align 4000000
+[10887.724437] pci 0000:02:00.0: bridge window [mem 0x88000000-0x8bffffff]: assigned
+[10887.724440] pci 0000:03:00.0: bridge window [mem size 0x24100000 64bit pref]: can't assign; no space
+[10887.724441] pci 0000:03:00.0: bridge window [mem size 0x24100000 64bit pref]: failed to assign
+[10887.724444] pci 0000:03:00.0: bridge window [mem size 0x04100000]: can't assign; no space
+[10887.724445] pci 0000:03:00.0: bridge window [mem size 0x04100000]: failed to assign
+[10887.724446] pci 0000:03:01.0: bridge window [mem 0x88000000-0x881fffff]: assigned
+[10887.724448] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: assigned
+[10887.724449] pci 0000:03:03.0: bridge window [mem 0x88400000-0x885fffff]: assigned
+[10887.724451] pci 0000:03:01.0: bridge window [mem 0x88000000-0x881fffff]: releasing
+[10887.724452] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: releasing
+[10887.724454] pci 0000:03:03.0: bridge window [mem 0x88400000-0x885fffff]: releasing
+[10887.724455] pci 0000:03:00.0: bridge window [mem 0x4810000000-0x4821ffffff 64bit pref]: assigned
+[10887.724456] pci 0000:03:00.0: bridge window [mem size 0x04100000]: can't assign; no space
+[10887.724457] pci 0000:03:00.0: bridge window [mem size 0x04100000]: failed to assign
+[10887.724459] pci 0000:03:03.0: bridge window [mem 0x88000000-0x881fffff]: assigned
+[10887.724460] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: assigned
+[10887.724462] pci 0000:03:01.0: bridge window [mem 0x88400000-0x885fffff]: assigned
+[10887.724463] pci 0000:03:00.0: bridge window [mem 0x4810000000-0x4821ffffff 64bit pref]: failed to expand by 0x12100000
+[10887.724465] pci 0000:03:00.0: bridge window [mem 0x4810000000-0x4821ffffff 64bit pref]: failed to add optional 12100000
+[10887.724468] pci 0000:04:00.0: BAR 1 [mem 0x4810000000-0x481fffffff 64bit pref]: assigned
+[10887.724486] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[10887.724487] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[10887.724489] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: can't assign; no space
+[10887.724490] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: failed to assign
+[10887.724491] pci 0000:04:00.0: BAR 3 [mem 0x4820000000-0x4821ffffff 64bit pref]: assigned
+[10887.724509] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[10887.724510] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[10887.724511] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: can't assign; no space
+[10887.724513] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: failed to assign
+[10887.724514] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: can't assign; no space
+[10887.724515] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: failed to assign
+[10887.724516] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: can't assign; no space
+[10887.724517] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: failed to assign
+[10887.724518] pci 0000:04:00.0: BAR 1 [mem 0x4810000000-0x481fffffff 64bit pref]: releasing
+[10887.724520] pci 0000:04:00.0: BAR 3 [mem 0x4820000000-0x4821ffffff 64bit pref]: releasing
+[10887.724521] pci 0000:04:00.0: BAR 1 [mem 0x4810000000-0x481fffffff 64bit pref]: assigned
+[10887.724538] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: can't assign; no space
+[10887.724540] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: failed to assign
+[10887.724541] pci 0000:04:00.0: BAR 3 [mem 0x4820000000-0x4821ffffff 64bit pref]: assigned
+[10887.724557] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: can't assign; no space
+[10887.724558] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: failed to assign
+[10887.724559] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: can't assign; no space
+[10887.724560] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: failed to assign
+[10887.724561] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[10887.724561] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[10887.724562] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[10887.724563] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[10887.724564] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: can't assign; no space
+[10887.724564] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: failed to assign
+[10887.724565] pci 0000:03:00.0: PCI bridge to [bus 04]
+[10887.724568] pci 0000:03:00.0:   bridge window [io  0x5000-0x5fff]
+[10887.724578] pci 0000:03:00.0:   bridge window [mem 0x4810000000-0x4821ffffff 64bit pref]
+[10887.724587] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[10887.724590] pci 0000:03:01.0:   bridge window [io  0x6000-0x6fff]
+[10887.724596] pci 0000:03:01.0:   bridge window [mem 0x88400000-0x885fffff]
+[10887.724601] pci 0000:03:01.0:   bridge window [mem 0x4822000000-0x4ac1ffffff 64bit pref]
+[10887.724609] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[10887.724612] pci 0000:03:02.0:   bridge window [io  0x7000-0x7fff]
+[10887.724619] pci 0000:03:02.0:   bridge window [mem 0x88200000-0x883fffff]
+[10887.724624] pci 0000:03:02.0:   bridge window [mem 0x4ac2000000-0x4d61ffffff 64bit pref]
+[10887.724632] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[10887.724635] pci 0000:03:03.0:   bridge window [io  0x8000-0x8fff]
+[10887.724641] pci 0000:03:03.0:   bridge window [mem 0x88000000-0x881fffff]
+[10887.724646] pci 0000:03:03.0:   bridge window [mem 0x4d62000000-0x5001ffffff 64bit pref]
+[10887.724654] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[10887.724657] pci 0000:02:00.0:   bridge window [io  0x5000-0x8fff]
+[10887.724663] pci 0000:02:00.0:   bridge window [mem 0x88000000-0x8bffffff]
+[10887.724667] pci 0000:02:00.0:   bridge window [mem 0x4810000000-0x5001ffffff 64bit pref]
+[10887.724676] pcieport 0000:00:07.0: PCI bridge to [bus 02-2b]
+[10887.724680] pcieport 0000:00:07.0:   bridge window [io  0x5000-0x8fff]
+[10887.724684] pcieport 0000:00:07.0:   bridge window [mem 0x86000000-0x8bffffff]
+[10887.724688] pcieport 0000:00:07.0:   bridge window [mem 0x4810000000-0x500fffffff 64bit pref]
+[10887.725035] pcieport 0000:02:00.0: enabling device (0000 -> 0003)
+[10887.726773] pcieport 0000:03:00.0: enabling device (0000 -> 0003)
+[10887.727725] pcieport 0000:03:01.0: enabling device (0000 -> 0003)
+[10887.727831] pcieport 0000:03:01.0: pciehp: Slot #1 AttnBtn- PwrCtrl- MRL- AttnInd- PwrInd- HotPlug+ Surprise+ Interlock- NoCompl+ IbPresDis- LLActRep+
+[10887.728210] pcieport 0000:03:02.0: enabling device (0000 -> 0003)
+[10887.728335] pcieport 0000:03:02.0: pciehp: Slot #2 AttnBtn- PwrCtrl- MRL- AttnInd- PwrInd- HotPlug+ Surprise+ Interlock- NoCompl+ IbPresDis- LLActRep+
+[10887.728627] pcieport 0000:03:03.0: enabling device (0000 -> 0003)
+[10887.728768] pcieport 0000:03:03.0: pciehp: Slot #3 AttnBtn- PwrCtrl- MRL- AttnInd- PwrInd- HotPlug+ Surprise+ Interlock- NoCompl+ IbPresDis- LLActRep+
+[10887.729151] pci 0000:04:00.1: extending delay after power-on from D3hot to 20 msec
+[10887.729185] pci 0000:04:00.1: D0 power state depends on 0000:04:00.0
+[10888.603214] ===== RETEST-2: re-enumerate done 2026-06-05T03:48:53Z =====
+[10929.344014] ===== RETEST-2: fix-bar1 --bind START (warm chip) 2026-06-05T03:49:34Z =====
+[10929.397535] i915 0000:00:02.0: vgaarb: VGA decodes changed: olddecodes=none,decodes=io+mem:owns=io+mem
+[10929.397655] pci_bus 0000:04: busn_res: [bus 04] is released
+[10929.397715] pci_bus 0000:05: busn_res: [bus 05-11] is released
+[10929.397784] pci_bus 0000:12: busn_res: [bus 12-1e] is released
+[10929.397826] pci_bus 0000:1f: busn_res: [bus 1f-2b] is released
+[10929.397868] pci_bus 0000:03: busn_res: [bus 03-2b] is released
+[10932.398832] pcieport 0000:00:07.0: pciehp: Slot(12): Card present
+[10932.398849] pcieport 0000:00:07.0: pciehp: Slot(12): Link Up
+[10932.523102] pci 0000:02:00.0: [8086:5786] type 01 class 0x060400 PCIe Switch Upstream Port
+[10932.523156] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[10932.523171] pci 0000:02:00.0:   bridge window [io  0x5000-0x8fff]
+[10932.523178] pci 0000:02:00.0:   bridge window [mem 0x88000000-0x8bffffff]
+[10932.523198] pci 0000:02:00.0:   bridge window [mem 0x4810000000-0x5001ffffff 64bit pref]
+[10932.523405] pci 0000:02:00.0: supports D1 D2
+[10932.523408] pci 0000:02:00.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10932.523548] pci 0000:02:00.0: PTM enabled, 4ns granularity
+[10932.523978] pci 0000:03:00.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[10932.524027] pci 0000:03:00.0: PCI bridge to [bus 04]
+[10932.524039] pci 0000:03:00.0:   bridge window [io  0x5000-0x5fff]
+[10932.524062] pci 0000:03:00.0:   bridge window [mem 0x4810000000-0x4821ffffff 64bit pref]
+[10932.524291] pci 0000:03:00.0: supports D1 D2
+[10932.524294] pci 0000:03:00.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10932.524738] pci 0000:03:01.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[10932.524787] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[10932.524800] pci 0000:03:01.0:   bridge window [io  0x6000-0x6fff]
+[10932.524807] pci 0000:03:01.0:   bridge window [mem 0x88400000-0x885fffff]
+[10932.524827] pci 0000:03:01.0:   bridge window [mem 0x4822000000-0x4ac1ffffff 64bit pref]
+[10932.525021] pci 0000:03:01.0: supports D1 D2
+[10932.525024] pci 0000:03:01.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10932.525383] pci 0000:03:02.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[10932.525432] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[10932.525444] pci 0000:03:02.0:   bridge window [io  0x7000-0x7fff]
+[10932.525451] pci 0000:03:02.0:   bridge window [mem 0x88200000-0x883fffff]
+[10932.525469] pci 0000:03:02.0:   bridge window [mem 0x4ac2000000-0x4d61ffffff 64bit pref]
+[10932.525659] pci 0000:03:02.0: supports D1 D2
+[10932.525662] pci 0000:03:02.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10932.526024] pci 0000:03:03.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[10932.526072] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[10932.526083] pci 0000:03:03.0:   bridge window [io  0x8000-0x8fff]
+[10932.526090] pci 0000:03:03.0:   bridge window [mem 0x88000000-0x881fffff]
+[10932.526109] pci 0000:03:03.0:   bridge window [mem 0x4d62000000-0x5001ffffff 64bit pref]
+[10932.526299] pci 0000:03:03.0: supports D1 D2
+[10932.526302] pci 0000:03:03.0: PME# supported from D0 D1 D2 D3hot D3cold
+[10932.526642] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[10932.526826] pci 0000:04:00.0: [10de:2b85] type 00 class 0x030000 PCIe Legacy Endpoint
+[10932.526908] pci 0000:04:00.0: BAR 0 [mem 0x00000000-0x03ffffff]
+[10932.526916] pci 0000:04:00.0: BAR 1 [mem 0x4800000000-0x4fffffffff 64bit pref]
+[10932.526922] pci 0000:04:00.0: BAR 3 [mem 0x4820000000-0x4821ffffff 64bit pref]
+[10932.526926] pci 0000:04:00.0: BAR 5 [io  0x5000-0x507f]
+[10932.526930] pci 0000:04:00.0: ROM [mem 0x00000000-0x0007ffff pref]
+[10932.527014] pci 0000:04:00.0: Enabling HDA controller
+[10932.527191] pci 0000:04:00.0: PME# supported from D0 D3hot
+[10932.527300] pci 0000:04:00.0: VF BAR 0 [mem 0x00000000-0x0003ffff 64bit pref]
+[10932.527304] pci 0000:04:00.0: VF BAR 0 [mem 0x00000000-0x0003ffff 64bit pref]: contains BAR 0 for 1 VFs
+[10932.527310] pci 0000:04:00.0: VF BAR 2 [mem 0x00000000-0x0fffffff 64bit pref]
+[10932.527311] pci 0000:04:00.0: VF BAR 2 [mem 0x00000000-0x0fffffff 64bit pref]: contains BAR 2 for 1 VFs
+[10932.527316] pci 0000:04:00.0: VF BAR 4 [mem 0x00000000-0x01ffffff 64bit pref]
+[10932.527318] pci 0000:04:00.0: VF BAR 4 [mem 0x00000000-0x01ffffff 64bit pref]: contains BAR 4 for 1 VFs
+[10932.527680] pci 0000:04:00.0: 8.000 Gb/s available PCIe bandwidth, limited by 2.5 GT/s PCIe x4 link at 0000:00:07.0 (capable of 504.112 Gb/s with 32.0 GT/s PCIe x16 link)
+[10932.527865] pci 0000:04:00.0: vgaarb: bridge control possible
+[10932.527866] pci 0000:04:00.0: vgaarb: VGA device added: decodes=io+mem,owns=none,locks=none
+[10932.527872] i915 0000:00:02.0: vgaarb: VGA decodes changed: olddecodes=io+mem,decodes=none:owns=io+mem
+[10932.527995] pci 0000:04:00.1: [10de:22e8] type 00 class 0x040300 PCIe Endpoint
+[10932.528077] pci 0000:04:00.1: BAR 0 [mem 0x00000000-0x00003fff]
+[10932.528487] pci 0000:03:00.0: PCI bridge to [bus 04]
+[10932.528582] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[10932.528664] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[10932.528754] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[10932.528831] pci 0000:03:00.0: bridge window [mem size 0x802000000 64bit pref] to [bus 04] add_size 12100000 add_align 800000000
+[10932.528835] pci 0000:03:01.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 05-11] add_size 800000000 add_align 100000
+[10932.528836] pci 0000:03:01.0: bridge window [mem 0x00100000-0x000fffff] to [bus 05-11] add_size 200000 add_align 100000
+[10932.528838] pci 0000:03:02.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 12-1e] add_size 800000000 add_align 100000
+[10932.528839] pci 0000:03:02.0: bridge window [mem 0x00100000-0x000fffff] to [bus 12-1e] add_size 200000 add_align 100000
+[10932.528841] pci 0000:03:03.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 1f-2b] add_size 800000000 add_align 100000
+[10932.528842] pci 0000:03:03.0: bridge window [mem 0x00100000-0x000fffff] to [bus 1f-2b] add_size 200000 add_align 100000
+[10932.528843] pci 0000:02:00.0: bridge window [mem 0x800000000-0x1001ffffff 64bit pref] to [bus 03-2b] add_size 1812100000 add_align 800000000
+[10932.528846] pci 0000:02:00.0: bridge window [mem 0x04000000-0x080fffff] to [bus 03-2b] add_size 600000 add_align 4000000
+[10932.528852] pci 0000:02:00.0: bridge window [mem 0x5000000000-0x500fffffff 64bit pref]: assigned
+[10932.528855] pci 0000:02:00.0: bridge window [mem 0x88000000-0x8bffffff]: assigned
+[10932.528856] pci 0000:02:00.0: bridge window [io  0x5000-0x8fff]: assigned
+[10932.528859] pci 0000:03:00.0: bridge window [mem size 0x814100000 64bit pref]: can't assign; no space
+[10932.528861] pci 0000:03:00.0: bridge window [mem size 0x814100000 64bit pref]: failed to assign
+[10932.528862] pci 0000:03:00.0: bridge window [mem size 0x04100000]: can't assign; no space
+[10932.528864] pci 0000:03:00.0: bridge window [mem size 0x04100000]: failed to assign
+[10932.528865] pci 0000:03:01.0: bridge window [mem 0x88000000-0x881fffff]: assigned
+[10932.528866] pci 0000:03:01.0: bridge window [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.528868] pci 0000:03:01.0: bridge window [mem size 0x800000000 64bit pref]: failed to assign
+[10932.528869] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: assigned
+[10932.528870] pci 0000:03:02.0: bridge window [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.528871] pci 0000:03:02.0: bridge window [mem size 0x800000000 64bit pref]: failed to assign
+[10932.528873] pci 0000:03:03.0: bridge window [mem 0x88400000-0x885fffff]: assigned
+[10932.528874] pci 0000:03:03.0: bridge window [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.528875] pci 0000:03:03.0: bridge window [mem size 0x800000000 64bit pref]: failed to assign
+[10932.528876] pci 0000:03:00.0: bridge window [io  0x5000-0x5fff]: assigned
+[10932.528877] pci 0000:03:01.0: bridge window [io  0x6000-0x6fff]: assigned
+[10932.528879] pci 0000:03:02.0: bridge window [io  0x7000-0x7fff]: assigned
+[10932.528880] pci 0000:03:03.0: bridge window [io  0x8000-0x8fff]: assigned
+[10932.528882] pci 0000:03:01.0: bridge window [mem 0x88000000-0x881fffff]: releasing
+[10932.528884] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: releasing
+[10932.528885] pci 0000:03:03.0: bridge window [mem 0x88400000-0x885fffff]: releasing
+[10932.528886] pci 0000:03:00.0: bridge window [mem size 0x802000000 64bit pref]: can't assign; no space
+[10932.528888] pci 0000:03:00.0: bridge window [mem size 0x802000000 64bit pref]: failed to assign
+[10932.528890] pci 0000:03:00.0: bridge window [mem size 0x04100000]: can't assign; no space
+[10932.528891] pci 0000:03:00.0: bridge window [mem size 0x04100000]: failed to assign
+[10932.528893] pci 0000:03:03.0: bridge window [mem 0x88000000-0x881fffff]: assigned
+[10932.528894] pci 0000:03:03.0: bridge window [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.528895] pci 0000:03:03.0: bridge window [mem size 0x800000000 64bit pref]: failed to assign
+[10932.528897] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: assigned
+[10932.528898] pci 0000:03:02.0: bridge window [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.528899] pci 0000:03:02.0: bridge window [mem size 0x800000000 64bit pref]: failed to assign
+[10932.528900] pci 0000:03:01.0: bridge window [mem 0x88400000-0x885fffff]: assigned
+[10932.528901] pci 0000:03:01.0: bridge window [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.528903] pci 0000:03:01.0: bridge window [mem size 0x800000000 64bit pref]: failed to assign
+[10932.528906] pci 0000:04:00.0: BAR 1 [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.528909] pci 0000:04:00.0: BAR 1 [mem size 0x800000000 64bit pref]: failed to assign
+[10932.528910] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[10932.528911] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[10932.528912] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: can't assign; no space
+[10932.528915] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: failed to assign
+[10932.528916] pci 0000:04:00.0: BAR 3 [mem size 0x02000000 64bit pref]: can't assign; no space
+[10932.528917] pci 0000:04:00.0: BAR 3 [mem size 0x02000000 64bit pref]: failed to assign
+[10932.528918] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[10932.528919] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[10932.528920] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: can't assign; no space
+[10932.528921] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: failed to assign
+[10932.528922] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: can't assign; no space
+[10932.528924] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: failed to assign
+[10932.528926] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: can't assign; no space
+[10932.528927] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: failed to assign
+[10932.528929] pci 0000:04:00.0: BAR 5 [io  0x5000-0x507f]: assigned
+[10932.528936] pci 0000:04:00.0: BAR 1 [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.528938] pci 0000:04:00.0: BAR 1 [mem size 0x800000000 64bit pref]: failed to assign
+[10932.528939] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: can't assign; no space
+[10932.528940] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: failed to assign
+[10932.528941] pci 0000:04:00.0: BAR 3 [mem size 0x02000000 64bit pref]: can't assign; no space
+[10932.528946] pci 0000:04:00.0: BAR 3 [mem size 0x02000000 64bit pref]: failed to assign
+[10932.528947] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: can't assign; no space
+[10932.528948] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: failed to assign
+[10932.528949] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: can't assign; no space
+[10932.528950] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: failed to assign
+[10932.528951] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[10932.528952] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[10932.528953] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[10932.528954] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[10932.528955] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: can't assign; no space
+[10932.528955] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: failed to assign
+[10932.528957] pci 0000:03:00.0: PCI bridge to [bus 04]
+[10932.528960] pci 0000:03:00.0:   bridge window [io  0x5000-0x5fff]
+[10932.528978] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[10932.528983] pci 0000:03:01.0:   bridge window [io  0x6000-0x6fff]
+[10932.528991] pci 0000:03:01.0:   bridge window [mem 0x88400000-0x885fffff]
+[10932.529004] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[10932.529008] pci 0000:03:02.0:   bridge window [io  0x7000-0x7fff]
+[10932.529016] pci 0000:03:02.0:   bridge window [mem 0x88200000-0x883fffff]
+[10932.529030] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[10932.529035] pci 0000:03:03.0:   bridge window [io  0x8000-0x8fff]
+[10932.529042] pci 0000:03:03.0:   bridge window [mem 0x88000000-0x881fffff]
+[10932.529056] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[10932.529060] pci 0000:02:00.0:   bridge window [io  0x5000-0x8fff]
+[10932.529068] pci 0000:02:00.0:   bridge window [mem 0x88000000-0x8bffffff]
+[10932.529074] pci 0000:02:00.0:   bridge window [mem 0x5000000000-0x500fffffff 64bit pref]
+[10932.529084] pcieport 0000:00:07.0: PCI bridge to [bus 02-2b]
+[10932.529087] pcieport 0000:00:07.0:   bridge window [io  0x5000-0x8fff]
+[10932.529092] pcieport 0000:00:07.0:   bridge window [mem 0x86000000-0x8bffffff]
+[10932.529095] pcieport 0000:00:07.0:   bridge window [mem 0x4810000000-0x500fffffff 64bit pref]
+[10932.529101] PCI: No. 2 try to assign unassigned res
+[10932.529104] pci 0000:02:00.0: bridge window [mem 0x5000000000-0x500fffffff 64bit pref]: releasing
+[10932.529113] pci 0000:03:01.0: bridge window [mem 0x88400000-0x885fffff]: releasing
+[10932.529118] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: releasing
+[10932.529122] pci 0000:03:03.0: bridge window [mem 0x88000000-0x881fffff]: releasing
+[10932.529126] pci 0000:02:00.0: bridge window [mem 0x88000000-0x8bffffff]: releasing
+[10932.529131] pci 0000:03:00.0: bridge window [mem size 0x802000000 64bit pref] to [bus 04] add_size 12100000 add_align 800000000
+[10932.529134] pci 0000:03:01.0: bridge window [mem size 0x00000000 64bit pref] to [bus 05-11] add_size 800000000 add_align 100000
+[10932.529136] pci 0000:03:01.0: bridge window [mem size 0x00000000] to [bus 05-11] add_size 200000 add_align 100000
+[10932.529138] pci 0000:03:02.0: bridge window [mem size 0x00000000 64bit pref] to [bus 12-1e] add_size 800000000 add_align 100000
+[10932.529140] pci 0000:03:02.0: bridge window [mem size 0x00000000] to [bus 12-1e] add_size 200000 add_align 100000
+[10932.529141] pci 0000:03:03.0: bridge window [mem size 0x00000000 64bit pref] to [bus 1f-2b] add_size 800000000 add_align 100000
+[10932.529143] pci 0000:03:03.0: bridge window [mem size 0x00000000] to [bus 1f-2b] add_size 200000 add_align 100000
+[10932.529144] pci 0000:02:00.0: bridge window [mem size 0x802000000 64bit pref] to [bus 03-2b] add_size 1812100000 add_align 800000000
+[10932.529148] pci 0000:02:00.0: bridge window [mem size 0x04100000] to [bus 03-2b] add_size 600000 add_align 4000000
+[10932.529151] pci 0000:02:00.0: bridge window [mem 0x5000000000-0x500fffffff 64bit pref]: assigned
+[10932.529153] pci 0000:02:00.0: bridge window [mem 0x88000000-0x8bffffff]: assigned
+[10932.529155] pci 0000:03:00.0: bridge window [mem size 0x814100000 64bit pref]: can't assign; no space
+[10932.529157] pci 0000:03:00.0: bridge window [mem size 0x814100000 64bit pref]: failed to assign
+[10932.529158] pci 0000:03:00.0: bridge window [mem size 0x04100000]: can't assign; no space
+[10932.529160] pci 0000:03:00.0: bridge window [mem size 0x04100000]: failed to assign
+[10932.529161] pci 0000:03:01.0: bridge window [mem 0x88000000-0x881fffff]: assigned
+[10932.529162] pci 0000:03:01.0: bridge window [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.529164] pci 0000:03:01.0: bridge window [mem size 0x800000000 64bit pref]: failed to assign
+[10932.529165] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: assigned
+[10932.529166] pci 0000:03:02.0: bridge window [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.529167] pci 0000:03:02.0: bridge window [mem size 0x800000000 64bit pref]: failed to assign
+[10932.529168] pci 0000:03:03.0: bridge window [mem 0x88400000-0x885fffff]: assigned
+[10932.529169] pci 0000:03:03.0: bridge window [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.529171] pci 0000:03:03.0: bridge window [mem size 0x800000000 64bit pref]: failed to assign
+[10932.529172] pci 0000:03:01.0: bridge window [mem 0x88000000-0x881fffff]: releasing
+[10932.529173] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: releasing
+[10932.529174] pci 0000:03:03.0: bridge window [mem 0x88400000-0x885fffff]: releasing
+[10932.529176] pci 0000:03:00.0: bridge window [mem size 0x802000000 64bit pref]: can't assign; no space
+[10932.529177] pci 0000:03:00.0: bridge window [mem size 0x802000000 64bit pref]: failed to assign
+[10932.529178] pci 0000:03:00.0: bridge window [mem size 0x04100000]: can't assign; no space
+[10932.529179] pci 0000:03:00.0: bridge window [mem size 0x04100000]: failed to assign
+[10932.529180] pci 0000:03:03.0: bridge window [mem 0x88000000-0x881fffff]: assigned
+[10932.529182] pci 0000:03:03.0: bridge window [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.529183] pci 0000:03:03.0: bridge window [mem size 0x800000000 64bit pref]: failed to assign
+[10932.529185] pci 0000:03:02.0: bridge window [mem 0x88200000-0x883fffff]: assigned
+[10932.529186] pci 0000:03:02.0: bridge window [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.529186] pci 0000:03:02.0: bridge window [mem size 0x800000000 64bit pref]: failed to assign
+[10932.529187] pci 0000:03:01.0: bridge window [mem 0x88400000-0x885fffff]: assigned
+[10932.529188] pci 0000:03:01.0: bridge window [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.529189] pci 0000:03:01.0: bridge window [mem size 0x800000000 64bit pref]: failed to assign
+[10932.529191] pci 0000:04:00.0: BAR 1 [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.529192] pci 0000:04:00.0: BAR 1 [mem size 0x800000000 64bit pref]: failed to assign
+[10932.529193] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[10932.529194] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[10932.529195] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: can't assign; no space
+[10932.529196] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: failed to assign
+[10932.529197] pci 0000:04:00.0: BAR 3 [mem size 0x02000000 64bit pref]: can't assign; no space
+[10932.529198] pci 0000:04:00.0: BAR 3 [mem size 0x02000000 64bit pref]: failed to assign
+[10932.529199] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[10932.529200] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[10932.529201] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: can't assign; no space
+[10932.529202] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: failed to assign
+[10932.529203] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: can't assign; no space
+[10932.529204] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: failed to assign
+[10932.529205] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: can't assign; no space
+[10932.529206] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: failed to assign
+[10932.529207] pci 0000:04:00.0: BAR 1 [mem size 0x800000000 64bit pref]: can't assign; no space
+[10932.529208] pci 0000:04:00.0: BAR 1 [mem size 0x800000000 64bit pref]: failed to assign
+[10932.529209] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: can't assign; no space
+[10932.529210] pci 0000:04:00.0: BAR 0 [mem size 0x04000000]: failed to assign
+[10932.529211] pci 0000:04:00.0: BAR 3 [mem size 0x02000000 64bit pref]: can't assign; no space
+[10932.529212] pci 0000:04:00.0: BAR 3 [mem size 0x02000000 64bit pref]: failed to assign
+[10932.529213] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: can't assign; no space
+[10932.529214] pci 0000:04:00.1: BAR 0 [mem size 0x00004000]: failed to assign
+[10932.529215] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: can't assign; no space
+[10932.529216] pci 0000:04:00.0: ROM [mem size 0x00080000 pref]: failed to assign
+[10932.529217] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[10932.529219] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[10932.529220] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[10932.529221] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[10932.529222] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: can't assign; no space
+[10932.529223] pci 0000:04:00.0: VF BAR 0 [mem size 0x00040000 64bit pref]: failed to assign
+[10932.529224] pci 0000:03:00.0: PCI bridge to [bus 04]
+[10932.529227] pci 0000:03:00.0:   bridge window [io  0x5000-0x5fff]
+[10932.529245] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[10932.529247] pci 0000:03:01.0:   bridge window [io  0x6000-0x6fff]
+[10932.529254] pci 0000:03:01.0:   bridge window [mem 0x88400000-0x885fffff]
+[10932.529266] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[10932.529268] pci 0000:03:02.0:   bridge window [io  0x7000-0x7fff]
+[10932.529274] pci 0000:03:02.0:   bridge window [mem 0x88200000-0x883fffff]
+[10932.529286] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[10932.529291] pci 0000:03:03.0:   bridge window [io  0x8000-0x8fff]
+[10932.529298] pci 0000:03:03.0:   bridge window [mem 0x88000000-0x881fffff]
+[10932.529311] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[10932.529315] pci 0000:02:00.0:   bridge window [io  0x5000-0x8fff]
+[10932.529322] pci 0000:02:00.0:   bridge window [mem 0x88000000-0x8bffffff]
+[10932.529328] pci 0000:02:00.0:   bridge window [mem 0x5000000000-0x500fffffff 64bit pref]
+[10932.529337] pcieport 0000:00:07.0: PCI bridge to [bus 02-2b]
+[10932.529340] pcieport 0000:00:07.0:   bridge window [io  0x5000-0x8fff]
+[10932.529344] pcieport 0000:00:07.0:   bridge window [mem 0x86000000-0x8bffffff]
+[10932.529348] pcieport 0000:00:07.0:   bridge window [mem 0x4810000000-0x500fffffff 64bit pref]
+[10932.530384] pcieport 0000:03:01.0: pciehp: Slot #1 AttnBtn- PwrCtrl- MRL- AttnInd- PwrInd- HotPlug+ Surprise+ Interlock- NoCompl+ IbPresDis- LLActRep+
+[10932.530781] pcieport 0000:03:02.0: pciehp: Slot #2 AttnBtn- PwrCtrl- MRL- AttnInd- PwrInd- HotPlug+ Surprise+ Interlock- NoCompl+ IbPresDis- LLActRep+
+[10932.531187] pcieport 0000:03:03.0: pciehp: Slot #3 AttnBtn- PwrCtrl- MRL- AttnInd- PwrInd- HotPlug+ Surprise+ Interlock- NoCompl+ IbPresDis- LLActRep+
+[10932.531563] pci 0000:04:00.1: extending delay after power-on from D3hot to 20 msec
+[10932.531600] pci 0000:04:00.1: D0 power state depends on 0000:04:00.0
+[10937.624686] nvidia-nvlink: Nvlink Core is being initialized, major device number 510
+[10937.624698] 
+[10937.628706] nvidia 0000:04:00.0: AER: unmasked Uncorrectable Internal Error at probe
+[10937.628725] nvidia 0000:04:00.0: enabling device (0000 -> 0001)
+[10937.628776] NVRM: This PCI I/O region assigned to your NVIDIA device is invalid:
+[10937.628776] NVRM: BAR0 is 0M @ 0x0 (PCI:0000:04:00.0)
+[10937.628794] nvidia 0000:04:00.0: probe with driver nvidia failed with error -1
+[10937.628868] NVRM: The NVIDIA probe routine failed for 1 device(s).
+[10937.628871] NVRM: None of the NVIDIA devices were initialized.
+[10937.629516] nvidia-nvlink: Unregistered Nvlink Core, major device number 510
+[10937.711325] ===== RETEST-2: fix-bar1 RETURNED rc=1 2026-06-05T03:49:42Z =====
+[11358.141874] ===== RETEST-3: native ReBAR resize -> 32GiB (resource1_resize=15) 2026-06-05T03:56:43Z =====
+[11358.160903] ===== RETEST-3: resize attempt done 2026-06-05T03:56:43Z =====
+[11446.722372] ===== RETEST-3b: COMMAND=0 then native resize 2026-06-05T03:58:11Z =====
+[11608.613311] usb 3-1: USB disconnect, device number 15
+[11608.613320] usb 3-1.3: USB disconnect, device number 16
+[11608.615260] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot unplug event on 0:1
+[11608.615377] thunderbolt 0-0:1.1: retimer disconnected
+[11608.615448] thunderbolt:tb_handle_hotplug:2462: thunderbolt 0000:00:0d.2: 0:1: switch unplugged
+[11608.615455] thunderbolt:tb_tunnel_deactivate:2433: thunderbolt 0000:00:0d.2: 0:12 <-> 1:20 (USB3): deactivating
+[11608.615607] thunderbolt:tb_path_deactivate:485: thunderbolt 0000:00:0d.2: deactivating USB3 Down path from 0:12 to 1:20
+[11608.616108] thunderbolt:tb_path_deactivate:485: thunderbolt 0000:00:0d.2: deactivating USB3 Up path from 1:20 to 0:12
+[11608.616641] thunderbolt:tb_tunnel_deactivate:2433: thunderbolt 0000:00:0d.2: 0:8 <-> 1:9 (PCI): deactivating
+[11608.616785] thunderbolt:tb_path_deactivate:485: thunderbolt 0000:00:0d.2: deactivating PCIe Down path from 0:8 to 1:9
+[11608.617387] thunderbolt:tb_path_deactivate:485: thunderbolt 0000:00:0d.2: deactivating PCIe Up path from 1:9 to 0:8
+[11608.619363] thunderbolt 0-1: device disconnected
+[11608.619427] thunderbolt:tb_recalc_estimated_bandwidth:1520: thunderbolt 0000:00:0d.2: bandwidth consumption changed, re-calculating estimated bandwidth
+[11608.619431] thunderbolt:tb_recalc_estimated_bandwidth:1529: thunderbolt 0000:00:0d.2: bandwidth re-calculation done
+[11608.619432] thunderbolt:tb_tunnel_dp:2077: thunderbolt 0000:00:0d.2: looking for DP IN <-> DP OUT pairs:
+[11608.619633] thunderbolt:tb_tunnel_dp:2091: thunderbolt 0000:00:0d.2: 0:5: DP IN available
+[11608.619647] thunderbolt:tb_tunnel_dp:2097: thunderbolt 0000:00:0d.2: 0:5: no suitable DP OUT adapter available, not tunneling
+[11608.619786] thunderbolt:tb_tunnel_dp:2091: thunderbolt 0000:00:0d.2: 0:6: DP IN available
+[11608.619793] thunderbolt:tb_tunnel_dp:2097: thunderbolt 0000:00:0d.2: 0:6: no suitable DP OUT adapter available, not tunneling
+[11608.636299] pcieport 0000:00:07.0: pciehp: Slot(12): Link Down
+[11608.636308] pcieport 0000:00:07.0: pciehp: Slot(12): Card not present
+[11608.636664] usb 3-1.4: USB disconnect, device number 17
+[11608.637056] usb 3-1.5: USB disconnect, device number 18
+[11608.641285] i915 0000:00:02.0: vgaarb: VGA decodes changed: olddecodes=none,decodes=io+mem:owns=io+mem
+[11608.641658] pci_bus 0000:04: busn_res: [bus 04] is released
+[11608.641801] pci_bus 0000:05: busn_res: [bus 05-11] is released
+[11608.642030] pci_bus 0000:12: busn_res: [bus 12-1e] is released
+[11608.642191] pci_bus 0000:1f: busn_res: [bus 1f-2b] is released
+[11608.642347] pci_bus 0000:03: busn_res: [bus 03-2b] is released
+[11608.645410] usb 2-1: USB disconnect, device number 2
+[11608.645417] usb 2-1.4: USB disconnect, device number 3
+[11608.645418] r8152-cfgselector 2-1.4.4: USB disconnect, device number 4
+[11608.645571] r8152 2-1.4.4:1.0 enp0s13f0u1u4u4: Stop submitting intr, status -108
+[11611.768641] usb 3-3: USB disconnect, device number 20
+[11611.768651] r8152-cfgselector 3-3.4: USB disconnect, device number 21
+[11611.768795] r8152 3-3.4:1.0 enp0s20f0u3u4: Stop submitting intr, status -108
+[11611.800667] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.3: acking hot plug event on 0:5
+[11611.801097] thunderbolt:tb_dp_resource_available:2222: thunderbolt 0000:00:0d.3: 0:5: DP IN resource available after hotplug
+[11611.801103] thunderbolt:tb_tunnel_dp:2077: thunderbolt 0000:00:0d.3: looking for DP IN <-> DP OUT pairs:
+[11611.801320] thunderbolt:tb_tunnel_dp:2091: thunderbolt 0000:00:0d.3: 0:6: DP IN available
+[11611.801325] thunderbolt:tb_tunnel_dp:2097: thunderbolt 0000:00:0d.3: 0:6: no suitable DP OUT adapter available, not tunneling
+[11611.801508] thunderbolt:tb_tunnel_dp:2091: thunderbolt 0000:00:0d.3: 0:5: DP IN available
+[11611.801512] thunderbolt:tb_tunnel_dp:2097: thunderbolt 0000:00:0d.3: 0:5: no suitable DP OUT adapter available, not tunneling
+[14935.855387] usb 3-3: new high-speed USB device number 22 using xhci_hcd
+[14935.901306] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.3: acking hot unplug event on 0:5
+[14935.901816] thunderbolt:tb_dp_resource_unavailable:2185: thunderbolt 0000:00:0d.3: 0:5: DP IN resource unavailable: adapter unplug
+[14935.901822] thunderbolt:tb_recalc_estimated_bandwidth:1520: thunderbolt 0000:00:0d.3: bandwidth consumption changed, re-calculating estimated bandwidth
+[14935.901827] thunderbolt:tb_recalc_estimated_bandwidth:1529: thunderbolt 0000:00:0d.3: bandwidth re-calculation done
+[14935.901829] thunderbolt:tb_tunnel_dp:2077: thunderbolt 0000:00:0d.3: looking for DP IN <-> DP OUT pairs:
+[14935.902067] thunderbolt:tb_tunnel_dp:2091: thunderbolt 0000:00:0d.3: 0:6: DP IN available
+[14935.902070] thunderbolt:tb_tunnel_dp:2097: thunderbolt 0000:00:0d.3: 0:6: no suitable DP OUT adapter available, not tunneling
+[14936.246309] usb 3-3: New USB device found, idVendor=0451, idProduct=8242, bcdDevice= 1.00
+[14936.246320] usb 3-3: New USB device strings: Mfr=0, Product=0, SerialNumber=1
+[14936.246325] usb 3-3: SerialNumber: E6010071B0CE
+[14936.247360] hub 3-3:1.0: USB hub found
+[14936.247420] hub 3-3:1.0: 4 ports detected
+[14936.534209] usb 3-3.4: new high-speed USB device number 23 using xhci_hcd
+[14936.622808] usb 3-3.4: New USB device found, idVendor=0bda, idProduct=8153, bcdDevice=31.00
+[14936.622825] usb 3-3.4: New USB device strings: Mfr=1, Product=2, SerialNumber=6
+[14936.622833] usb 3-3.4: Product: USB 10/100/1000 LAN
+[14936.622836] usb 3-3.4: Manufacturer: Realtek
+[14936.622840] usb 3-3.4: SerialNumber: 001000001
+[14936.697583] r8152-cfgselector 3-3.4: reset high-speed USB device number 23 using xhci_hcd
+[14936.855825] r8152 3-3.4:1.0 enp0s20f0u3u4: renamed from eth0
+[14937.816036] usb 3-3: USB disconnect, device number 22
+[14937.816046] r8152-cfgselector 3-3.4: USB disconnect, device number 23
+[14937.816227] r8152 3-3.4:1.0 enp0s20f0u3u4: Stop submitting intr, status -108
+[14940.836032] usb 3-3: new high-speed USB device number 24 using xhci_hcd
+[14941.020827] usb 3-3: New USB device found, idVendor=0451, idProduct=8242, bcdDevice= 1.00
+[14941.020838] usb 3-3: New USB device strings: Mfr=0, Product=0, SerialNumber=1
+[14941.020843] usb 3-3: SerialNumber: E6010071B0CE
+[14941.021777] hub 3-3:1.0: USB hub found
+[14941.021799] hub 3-3:1.0: 4 ports detected
+[14942.109996] usb 3-3.4: new high-speed USB device number 25 using xhci_hcd
+[14942.196380] usb 3-3.4: New USB device found, idVendor=0bda, idProduct=8153, bcdDevice=31.00
+[14942.196386] usb 3-3.4: New USB device strings: Mfr=1, Product=2, SerialNumber=6
+[14942.196390] usb 3-3.4: Product: USB 10/100/1000 LAN
+[14942.196392] usb 3-3.4: Manufacturer: Realtek
+[14942.196393] usb 3-3.4: SerialNumber: 001000001
+[14942.260286] r8152-cfgselector 3-3.4: reset high-speed USB device number 25 using xhci_hcd
+[14942.418737] r8152 3-3.4:1.0 enp0s20f0u3u4: renamed from eth0
+[14942.713238] input: Surface Arc Mouse as /devices/virtual/misc/uhid/0005:045E:0932.000B/input/input35
+[14942.713373] input: Surface Arc Mouse Keyboard as /devices/virtual/misc/uhid/0005:045E:0932.000B/input/input36
+[14942.713417] input: Surface Arc Mouse as /devices/virtual/misc/uhid/0005:045E:0932.000B/input/input37
+[14942.713461] input: Surface Arc Mouse as /devices/virtual/misc/uhid/0005:045E:0932.000B/input/input39
+[14942.713536] hid-generic 0005:045E:0932.000B: input,hidraw5: BLUETOOTH HID v2.02 Mouse [Surface Arc Mouse] on 28:92:00:f7:c7:da
+[14953.257914] input: Surface Arc Mouse as /devices/virtual/misc/uhid/0005:045E:0932.000C/input/input41
+[14953.258426] input: Surface Arc Mouse Keyboard as /devices/virtual/misc/uhid/0005:045E:0932.000C/input/input42
+[14953.258495] input: Surface Arc Mouse as /devices/virtual/misc/uhid/0005:045E:0932.000C/input/input43
+[14953.258535] input: Surface Arc Mouse as /devices/virtual/misc/uhid/0005:045E:0932.000C/input/input45
+[14953.258614] hid-generic 0005:045E:0932.000C: input,hidraw5: BLUETOOTH HID v2.02 Mouse [Surface Arc Mouse] on 28:92:00:f7:c7:da
+[14975.046152] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot plug event on 0:1
+[14975.046278] thunderbolt:tb_handle_hotplug:2510: thunderbolt 0000:00:0d.2: 0:1: hotplug: scanning
+[14975.046490] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot plug event on 0:2
+[14975.046657] thunderbolt:tb_wait_for_port:538: thunderbolt 0000:00:0d.2: 0:1: is connected, link is up (state: 2)
+[14975.047666] thunderbolt:tb_switch_alloc:2489: thunderbolt 0000:00:0d.2: current switch config:
+[14975.047680] thunderbolt:tb_dump_switch:1571: thunderbolt 0000:00:0d.2:  USB4 Switch: 8087:5786 (Revision: 133, TB Version: 64)
+[14975.047691] thunderbolt:tb_dump_switch:1574: thunderbolt 0000:00:0d.2:   Max Port Number: 23
+[14975.047696] thunderbolt:tb_dump_switch:1575: thunderbolt 0000:00:0d.2:   Config:
+[14975.047700] thunderbolt:tb_dump_switch:1576: thunderbolt 0000:00:0d.2:    Upstream Port Number: 1 Depth: 0 Route String: 0x0 Enabled: 0, PlugEventsDelay: 10ms
+[14975.047707] thunderbolt:tb_dump_switch:1581: thunderbolt 0000:00:0d.2:    unknown1: 0x0 unknown4: 0x0
+[14975.053058] thunderbolt:tb_switch_configure:2618: thunderbolt 0000:00:0d.2: initializing Switch at 0x1 (depth: 1, up port: 1)
+[14975.053961] thunderbolt:usb4_switch_setup:260: thunderbolt 0000:00:0d.2: 1: link: USB4
+[14975.053966] thunderbolt:usb4_switch_setup:265: thunderbolt 0000:00:0d.2: 1: TBT3 support: yes, xHCI: yes
+[14975.057232] thunderbolt:usb4_switch_credits_init:780: thunderbolt 0000:00:0d.2: 1: credit allocation parameters:
+[14975.057244] thunderbolt:usb4_switch_credits_init:790: thunderbolt 0000:00:0d.2: 1:  USB3: 20
+[14975.057252] thunderbolt:usb4_switch_credits_init:794: thunderbolt 0000:00:0d.2: 1:  DP AUX: 1
+[14975.057256] thunderbolt:usb4_switch_credits_init:798: thunderbolt 0000:00:0d.2: 1:  DP main: 6
+[14975.057260] thunderbolt:usb4_switch_credits_init:802: thunderbolt 0000:00:0d.2: 1:  PCIe: 76
+[14975.057263] thunderbolt:usb4_switch_credits_init:810: thunderbolt 0000:00:0d.2: 1:  unknown credit allocation index 0x0, skipping
+[14975.058800] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot plug event on 1:13
+[14975.059090] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot plug event on 1:2
+[14975.059389] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot plug event on 1:14
+[14975.059701] thunderbolt:tb_cfg_ack_plug:851: thunderbolt 0000:00:0d.2: acking hot plug event on 1:16
+[14975.067591] thunderbolt:tb_drom_parse:640: thunderbolt 0000:00:0d.2: 1: DROM version: 1
+[14975.071507] thunderbolt:tb_switch_add:3321: thunderbolt 0000:00:0d.2: 1: uid: 0xe87ca900808714c4
+[14975.074004] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 1: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[14975.074011] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[14975.074016] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 4
+[14975.074020] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x4a000000
+[14975.074024] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[14975.076334] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 2: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[14975.076336] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[14975.076338] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 0
+[14975.076339] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0xca000000
+[14975.076340] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[14975.078925] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 3: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[14975.078927] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[14975.078929] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 4
+[14975.078930] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x8a000000
+[14975.078931] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[14975.081260] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 4: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[14975.081262] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[14975.081264] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 0
+[14975.081266] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x8a000000
+[14975.081267] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[14975.083773] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 5: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[14975.083777] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[14975.083783] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 4
+[14975.083787] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x8a000000
+[14975.083790] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[14975.086109] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 6: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[14975.086113] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[14975.086118] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 0
+[14975.086121] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x8a000000
+[14975.086124] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[14975.088615] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 7: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[14975.088619] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[14975.088625] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 4
+[14975.088628] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x8a000000
+[14975.088631] thunderbolt:tb_dump_port:459: thunderbolt 0000:00:0d.2:   Credits (total/control): 160/2
+[14975.090945] thunderbolt:tb_dump_port:450: thunderbolt 0000:00:0d.2:  Port 8: 0:5780 (Revision: 0, TB Version: 1, Type: Port (0x1))
+[14975.090947] thunderbolt:tb_dump_port:455: thunderbolt 0000:00:0d.2:   Max hop id (in/out): 31/31
+[14975.090950] thunderbolt:tb_dump_port:457: thunderbolt 0000:00:0d.2:   Max counters: 0
+[14975.090951] thunderbolt:tb_dump_port:458: thunderbolt 0000:00:0d.2:   NFC Credits: 0x8a000000
+[14975.382415] thunderbolt:tb_retimer_nvm_add:104: thunderbolt 0-0:1.1: NVM version 26.85
+[14975.382421] thunderbolt 0-0:1.1: new retimer found, vendor=0x8087 device=0xd9c
+[14975.382440] thunderbolt:tb_retimer_unset_inbound_sbtx:243: thunderbolt 0000:00:0d.2: 0:1: disabling sideband transactions
+[14975.484570] thunderbolt:tb_switch_tmu_configure:1066: thunderbolt 0000:00:0d.2: 1: TMU: mode change off -> bi-directional, HiFi requested
+[14975.484737] thunderbolt:tb_switch_tmu_post_time:473: thunderbolt 0000:00:0d.2: 0: TMU: local_time[0]=0xa4a80000
+[14975.484742] thunderbolt:tb_switch_tmu_post_time:473: thunderbolt 0000:00:0d.2: 0: TMU: local_time[1]=0x0da0da4e
+[14975.484743] thunderbolt:tb_switch_tmu_post_time:473: thunderbolt 0000:00:0d.2: 0: TMU: local_time[2]=0x03e80000
+[14975.485741] thunderbolt:tb_switch_tmu_post_time:533: thunderbolt 0000:00:0d.2: 1: TMU: updated local time to 0xda0da4ea4a8
+[14975.488069] thunderbolt:tb_switch_tmu_enable:1014: thunderbolt 0000:00:0d.2: 1: TMU: mode set to: bi-directional, HiFi
+[14975.490025] thunderbolt:tb_retimer_nvm_authenticate_status:201: thunderbolt 0000:00:0d.2: 1:1: reading NVM authentication status of retimers
+[14975.493450] usb 3-1: new high-speed USB device number 26 using xhci_hcd
+[14975.704940] thunderbolt:tb_retimer_unset_inbound_sbtx:243: thunderbolt 0000:00:0d.2: 1:1: disabling sideband transactions
+[14975.808719] thunderbolt:tb_maximum_bandwidth:790: thunderbolt 0000:00:0d.2: 0:1: link maximum bandwidth 36000/36000 Mb/s
+[14975.809303] thunderbolt:tb_maximum_bandwidth:790: thunderbolt 0000:00:0d.2: 1:1: link maximum bandwidth 36000/36000 Mb/s
+[14975.809683] thunderbolt:tb_tunnel_usb3:956: thunderbolt 0000:00:0d.2: 1:20: available bandwidth for new USB3 tunnel 36000/36000 Mb/s
+[14975.810305] thunderbolt:tb_tunnel_alloc_usb3:2300: thunderbolt 0000:00:0d.2: 1:20: maximum required bandwidth for USB3 tunnel 14738 Mb/s
+[14975.810314] thunderbolt:tb_tunnel_activate:2380: thunderbolt 0000:00:0d.2: 0:12 <-> 1:20 (USB3): activating
+[14975.810317] thunderbolt:tb_usb3_pre_activate:2017: thunderbolt 0000:00:0d.2: 0:12 <-> 1:20 (USB3): allocating initial bandwidth 14738/14738 Mb/s
+[14975.812295] thunderbolt:usb4_usb3_port_write_allocated_bandwidth:2390: thunderbolt 0000:00:0d.2: 0:12: scaled bandwidth 3599/3599, scale 0
+[14975.813892] thunderbolt:tb_path_activate:514: thunderbolt 0000:00:0d.2: activating USB3 Down path from 0:12 to 1:20
+[14975.814139] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 1:1: Writing hop 1
+[14975.814143] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 1:1:  In HopID: 8 => Out port: 20 Out HopID: 8
+[14975.814145] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 1:1:   Weight: 2 Priority: 3 Credits: 20 Drop: 0 PM: 0
+[14975.814146] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 1:1:    Counter enabled: 0 Counter index: 2047
+[14975.814148] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 1:1:   Flow Control (In/Eg): 1/0 Shared Buffer (In/Eg): 0/0
+[14975.814149] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 1:1:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[14975.814887] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 0:12: Writing hop 0
+[14975.814901] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 0:12:  In HopID: 8 => Out port: 1 Out HopID: 8
+[14975.814909] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 0:12:   Weight: 2 Priority: 3 Credits: 7 Drop: 0 PM: 0
+[14975.814914] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 0:12:    Counter enabled: 0 Counter index: 2047
+[14975.814918] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 0:12:   Flow Control (In/Eg): 1/1 Shared Buffer (In/Eg): 0/0
+[14975.814923] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 0:12:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[14975.815223] thunderbolt:tb_path_activate:586: thunderbolt 0000:00:0d.2: USB3 Down path activation complete
+[14975.815227] thunderbolt:tb_path_activate:514: thunderbolt 0000:00:0d.2: activating USB3 Up path from 1:20 to 0:12
+[14975.815481] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 0:1: Writing hop 1
+[14975.815482] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 0:1:  In HopID: 8 => Out port: 12 Out HopID: 8
+[14975.815485] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 0:1:   Weight: 2 Priority: 3 Credits: 32 Drop: 0 PM: 0
+[14975.815486] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 0:1:    Counter enabled: 0 Counter index: 2047
+[14975.815487] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 0:1:   Flow Control (In/Eg): 1/0 Shared Buffer (In/Eg): 0/0
+[14975.815489] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 0:1:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[14975.816146] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 1:20: Writing hop 0
+[14975.816165] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 1:20:  In HopID: 8 => Out port: 1 Out HopID: 8
+[14975.816173] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 1:20:   Weight: 2 Priority: 3 Credits: 7 Drop: 0 PM: 0
+[14975.816180] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 1:20:    Counter enabled: 0 Counter index: 2047
+[14975.816186] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 1:20:   Flow Control (In/Eg): 1/1 Shared Buffer (In/Eg): 0/0
+[14975.816191] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 1:20:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[14975.816604] thunderbolt:tb_path_activate:586: thunderbolt 0000:00:0d.2: USB3 Up path activation complete
+[14975.817695] thunderbolt:tb_wait_for_port:530: thunderbolt 0000:00:0d.2: 1:3: is unplugged (state: 7)
+[14975.818084] thunderbolt:tb_wait_for_port:530: thunderbolt 0000:00:0d.2: 1:5: is unplugged (state: 7)
+[14975.818406] thunderbolt:tb_wait_for_port:530: thunderbolt 0000:00:0d.2: 1:7: is unplugged (state: 7)
+[14975.819320] thunderbolt:tb_handle_hotplug:2504: thunderbolt 0000:00:0d.2: 0:2: got plug event for connected port, ignoring
+[14975.819330] thunderbolt:tb_handle_hotplug:2451: thunderbolt 0000:00:0d.2: hotplug event for upstream port 1:2 (unplug: 0)
+[14975.819334] thunderbolt:tb_handle_hotplug:2500: thunderbolt 0000:00:0d.2: 0:2: got unplug event for disconnected port, ignoring
+[14975.819336] thunderbolt:tb_handle_hotplug:2451: thunderbolt 0000:00:0d.2: hotplug event for upstream port 1:2 (unplug: 1)
+[14975.885083] usb 3-1: New USB device found, idVendor=1d5c, idProduct=5801, bcdDevice= 1.01
+[14975.885095] usb 3-1: New USB device strings: Mfr=1, Product=2, SerialNumber=0
+[14975.885099] usb 3-1: Product: USB2.0 Hub
+[14975.885101] usb 3-1: Manufacturer: Fresco Logic, Inc.
+[14975.886188] hub 3-1:1.0: USB hub found
+[14975.886205] hub 3-1:1.0: 6 ports detected
+[14976.125645] usb 2-1: new SuperSpeed Plus Gen 2x2 USB device number 5 using xhci_hcd
+[14976.137896] usb 2-1: New USB device found, idVendor=8087, idProduct=5787, bcdDevice= 0.00
+[14976.137908] usb 2-1: New USB device strings: Mfr=1, Product=2, SerialNumber=0
+[14976.137915] usb 2-1: Product: USB3 HUB
+[14976.137918] usb 2-1: Manufacturer: Intel Corporation
+[14976.138545] hub 2-1:1.0: USB hub found
+[14976.138583] hub 2-1:1.0: 4 ports detected
+[14976.410754] usb 2-1.4: new SuperSpeed Plus Gen 2x1 USB device number 6 using xhci_hcd
+[14976.421476] usb 3-1.3: new full-speed USB device number 27 using xhci_hcd
+[14976.425346] usb 2-1.4: New USB device found, idVendor=0bda, idProduct=0423, bcdDevice= 0.03
+[14976.425352] usb 2-1.4: New USB device strings: Mfr=1, Product=2, SerialNumber=0
+[14976.425355] usb 2-1.4: Product: 4-Port USB 3.0 Hub
+[14976.425356] usb 2-1.4: Manufacturer: Generic
+[14976.427953] hub 2-1.4:1.0: USB hub found
+[14976.428450] hub 2-1.4:1.0: 4 ports detected
+[14976.507179] usb 3-1.3: New USB device found, idVendor=0414, idProduct=7a61, bcdDevice= 1.00
+[14976.507188] usb 3-1.3: New USB device strings: Mfr=1, Product=2, SerialNumber=3
+[14976.507191] usb 3-1.3: Product: USB-HID Device
+[14976.507192] usb 3-1.3: Manufacturer: HOLTEK
+[14976.507193] usb 3-1.3: SerialNumber: 000000000000
+[14976.514993] usbhid 3-1.3:1.0: fixing wrong optional hid class descriptors count
+[14976.515864] hid-generic 0003:0414:7A61.000D: hiddev98,hidraw6: USB HID v1.11 Device [HOLTEK USB-HID Device] on usb-0000:00:14.0-1.3/input0
+[14976.515918] usbhid 3-1.3:1.1: couldn't find an input interrupt endpoint
+[14976.516829] input: HOLTEK USB-HID Device as /devices/pci0000:00/0000:00:14.0/usb3/3-1/3-1.3/3-1.3:1.2/0003:0414:7A61.000E/input/input47
+[14976.517033] hid-generic 0003:0414:7A61.000E: input,hidraw7: USB HID v1.11 Mouse [HOLTEK USB-HID Device] on usb-0000:00:14.0-1.3/input2
+[14976.590457] usb 3-1.4: new high-speed USB device number 28 using xhci_hcd
+[14976.678500] usb 3-1.4: New USB device found, idVendor=0bda, idProduct=5423, bcdDevice= 0.03
+[14976.678516] usb 3-1.4: New USB device strings: Mfr=1, Product=2, SerialNumber=0
+[14976.678520] usb 3-1.4: Product: 4-Port USB 2.0 Hub
+[14976.678522] usb 3-1.4: Manufacturer: Generic
+[14976.679675] hub 3-1.4:1.0: USB hub found
+[14976.679913] hub 3-1.4:1.0: 5 ports detected
+[14976.701464] usb 2-1.4.4: new SuperSpeed USB device number 7 using xhci_hcd
+[14976.714126] usb 2-1.4.4: New USB device found, idVendor=0bda, idProduct=8153, bcdDevice=31.00
+[14976.714131] usb 2-1.4.4: New USB device strings: Mfr=1, Product=2, SerialNumber=6
+[14976.714133] usb 2-1.4.4: Product: USB 10/100/1000 LAN
+[14976.714134] usb 2-1.4.4: Manufacturer: Realtek
+[14976.714134] usb 2-1.4.4: SerialNumber: 001000001
+[14976.753420] usb 3-1.5: new full-speed USB device number 29 using xhci_hcd
+[14976.776844] r8152-cfgselector 2-1.4.4: reset SuperSpeed USB device number 7 using xhci_hcd
+[14976.841457] usb 3-1.5: New USB device found, idVendor=0414, idProduct=7a62, bcdDevice=10.22
+[14976.841474] usb 3-1.5: New USB device strings: Mfr=1, Product=2, SerialNumber=3
+[14976.841479] usb 3-1.5: Product: DMC Device
+[14976.841482] usb 3-1.5: Manufacturer: Gigabyte
+[14976.841491] usb 3-1.5: SerialNumber: 1234
+[14976.881045] r8152 2-1.4.4:1.0 enp0s13f0u1u4u4: renamed from eth0
+[15081.899945] ===== RETEST-3c: assign-256M then native-resize-32G 2026-06-05T04:58:46Z =====
+[15081.901255] pcieport 0000:00:07.0: pciehp: Slot(12): Already disabled
+[15104.936582] ===== RETEST-3c done 2026-06-05T04:59:09Z =====
+[16035.126226] rfkill: input handler enabled
+[16035.992701] cni0: port 3(veth9ffc9579) entered disabled state
+[16035.993451] veth9ffc9579 (unregistering): left allmulticast mode
+[16035.993480] veth9ffc9579 (unregistering): left promiscuous mode
+[16035.993509] cni0: port 3(veth9ffc9579) entered disabled state
+[16036.162203] cni0: port 3(veth32bfd85f) entered blocking state
+[16036.162232] cni0: port 3(veth32bfd85f) entered disabled state
+[16036.162256] veth32bfd85f: entered allmulticast mode
+[16036.162526] veth32bfd85f: entered promiscuous mode
+[16036.171892] cni0: port 3(veth32bfd85f) entered blocking state
+[16036.171919] cni0: port 3(veth32bfd85f) entered forwarding state
+[16036.492381] cni0: port 11(vethd9eb8bd8) entered disabled state
+[16036.492955] vethd9eb8bd8 (unregistering): left allmulticast mode
+[16036.492974] vethd9eb8bd8 (unregistering): left promiscuous mode
+[16036.493006] cni0: port 11(vethd9eb8bd8) entered disabled state
+[16036.580405] cni0: port 15(vethbf79fbdf) entered disabled state
+[16036.580913] vethbf79fbdf (unregistering): left allmulticast mode
+[16036.580934] vethbf79fbdf (unregistering): left promiscuous mode
+[16036.580963] cni0: port 15(vethbf79fbdf) entered disabled state
+[16036.707950] cni0: port 3(veth32bfd85f) entered disabled state
+[16036.708510] veth32bfd85f (unregistering): left allmulticast mode
+[16036.708533] veth32bfd85f (unregistering): left promiscuous mode
+[16036.708556] cni0: port 3(veth32bfd85f) entered disabled state
+[16036.810265] cni0: port 3(veth71536da7) entered blocking state
+[16036.810292] cni0: port 3(veth71536da7) entered disabled state
+[16036.810312] veth71536da7: entered allmulticast mode
+[16036.810429] veth71536da7: entered promiscuous mode
+[16036.817136] cni0: port 3(veth71536da7) entered blocking state
+[16036.817155] cni0: port 3(veth71536da7) entered forwarding state
+[16036.840137] cni0: port 11(veth0a2886ee) entered blocking state
+[16036.840165] cni0: port 11(veth0a2886ee) entered disabled state
+[16036.840184] veth0a2886ee: entered allmulticast mode
+[16036.840313] veth0a2886ee: entered promiscuous mode
+[16036.846559] cni0: port 11(veth0a2886ee) entered blocking state
+[16036.846581] cni0: port 11(veth0a2886ee) entered forwarding state
+[16037.615397] kauditd_printk_skb: 25 callbacks suppressed
+[16037.615436] audit: type=1305 audit(1780636482.568:1249): op=set audit_pid=0 old=1142 auid=4294967295 ses=4294967295 subj=system_u:system_r:auditd_t:s0 res=1
+[16037.617502] audit: type=1131 audit(1780636482.570:1250): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=system_u:system_r:init_t:s0 msg='unit=auditd comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'
+[16037.617954] audit: type=1131 audit(1780636482.571:1251): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=system_u:system_r:init_t:s0 msg='unit=systemd-tmpfiles-setup comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'
+[16037.668736] cni0: port 1(vethf91055b1) entered disabled state
+[16037.669712] vethf91055b1 (unregistering): left allmulticast mode
+[16037.669723] vethf91055b1 (unregistering): left promiscuous mode
+[16037.669741] cni0: port 1(vethf91055b1) entered disabled state
+[16037.669756] audit: type=1700 audit(1780636482.623:1252): dev=vethf91055b1 prom=0 old_prom=256 auid=4294967295 uid=0 gid=0 ses=4294967295
+[16037.708342] cni0: port 12(veth91706088) entered disabled state
+[16037.708494] cni0: port 9(veth81565fa5) entered disabled state
+[16037.709139] cni0: port 16(veth8b190096) entered disabled state
+[16037.709277] cni0: port 7(veth4383f32c) entered disabled state
+[16037.709390] cni0: port 2(veth3e7151b8) entered disabled state
+[16037.709506] cni0: port 13(veth99afb012) entered disabled state
+[16037.709631] cni0: port 5(veth6b00b6f5) entered disabled state
+[16037.709738] cni0: port 10(veth430e930a) entered disabled state
+[16037.709846] cni0: port 8(vethae2952e3) entered disabled state
+[16037.709954] cni0: port 4(veth87d6f4a8) entered disabled state
+[16037.710055] cni0: port 6(veth39bced50) entered disabled state
+[16037.710159] cni0: port 14(veth9596baee) entered disabled state
+[16037.713016] veth91706088 (unregistering): left allmulticast mode
+[16037.713030] veth91706088 (unregistering): left promiscuous mode
+[16037.713044] cni0: port 12(veth91706088) entered disabled state
+[16037.713060] audit: type=1700 audit(1780636482.666:1253): dev=veth91706088 prom=0 old_prom=256 auid=4294967295 uid=0 gid=0 ses=4294967295
+[16037.713599] veth81565fa5 (unregistering): left allmulticast mode
+[16037.713610] veth81565fa5 (unregistering): left promiscuous mode
+[16037.713618] cni0: port 9(veth81565fa5) entered disabled state
+[16037.713694] audit: type=1700 audit(1780636482.666:1254): dev=veth81565fa5 prom=0 old_prom=256 auid=4294967295 uid=0 gid=0 ses=4294967295
+[16037.714046] veth8b190096 (unregistering): left allmulticast mode
+[16037.714056] veth8b190096 (unregistering): left promiscuous mode
+[16037.714062] cni0: port 16(veth8b190096) entered disabled state
+[16037.714072] audit: type=1700 audit(1780636482.667:1255): dev=veth8b190096 prom=0 old_prom=256 auid=4294967295 uid=0 gid=0 ses=4294967295
+[16037.714494] veth4383f32c (unregistering): left allmulticast mode
+[16037.714504] veth4383f32c (unregistering): left promiscuous mode
+[16037.714509] cni0: port 7(veth4383f32c) entered disabled state
+[16037.714513] audit: type=1700 audit(1780636482.667:1256): dev=veth4383f32c prom=0 old_prom=256 auid=4294967295 uid=0 gid=0 ses=4294967295
+[16037.714986] veth3e7151b8 (unregistering): left allmulticast mode
+[16037.714992] veth3e7151b8 (unregistering): left promiscuous mode
+[16037.715000] cni0: port 2(veth3e7151b8) entered disabled state
+[16037.715005] audit: type=1700 audit(1780636482.668:1257): dev=veth3e7151b8 prom=0 old_prom=256 auid=4294967295 uid=0 gid=0 ses=4294967295
+[16037.715458] veth99afb012 (unregistering): left allmulticast mode
+[16037.715467] veth99afb012 (unregistering): left promiscuous mode
+[16037.715471] cni0: port 13(veth99afb012) entered disabled state
+[16037.715475] audit: type=1700 audit(1780636482.668:1258): dev=veth99afb012 prom=0 old_prom=256 auid=4294967295 uid=0 gid=0 ses=4294967295
+[16037.716065] veth6b00b6f5 (unregistering): left allmulticast mode
+[16037.716071] veth6b00b6f5 (unregistering): left promiscuous mode
+[16037.716079] cni0: port 5(veth6b00b6f5) entered disabled state
+[16037.716477] veth430e930a (unregistering): left allmulticast mode
+[16037.716486] veth430e930a (unregistering): left promiscuous mode
+[16037.716493] cni0: port 10(veth430e930a) entered disabled state
+[16037.716919] vethae2952e3 (unregistering): left allmulticast mode
+[16037.716925] vethae2952e3 (unregistering): left promiscuous mode
+[16037.716932] cni0: port 8(vethae2952e3) entered disabled state
+[16037.717337] veth87d6f4a8 (unregistering): left allmulticast mode
+[16037.717346] veth87d6f4a8 (unregistering): left promiscuous mode
+[16037.717352] cni0: port 4(veth87d6f4a8) entered disabled state
+[16037.717703] veth39bced50 (unregistering): left allmulticast mode
+[16037.717710] veth39bced50 (unregistering): left promiscuous mode
+[16037.717717] cni0: port 6(veth39bced50) entered disabled state
+[16037.718077] veth9596baee (unregistering): left allmulticast mode
+[16037.718086] veth9596baee (unregistering): left promiscuous mode
+[16037.718091] cni0: port 14(veth9596baee) entered disabled state
+[16037.777941] EXT4-fs (nvme0n1p5): unmounting filesystem 4f4f2b07-3901-49ac-9aed-085b94bd2b3a.
+[16037.798077] zram0: detected capacity change from 16777216 to 0
+[16037.923191] systemd-shutdown[1]: Syncing filesystems and block devices.
+[16037.947362] systemd-shutdown[1]: Sending SIGTERM to remaining processes...
+[16037.962515] systemd-journald[891]: Received SIGTERM from PID 1 (systemd-shutdow).
+[16037.994793] systemd-shutdown[1]: Sending SIGKILL to remaining processes...
+[16038.001803] systemd-shutdown[1]: Process 392652 (plymouthd-fd-es) has been marked to be excluded from killing. It is running from the root file system, and thus likely to block re-mounting of the root file system to read-only. Please consider moving it into an initrd file system instead.
+[16038.002889] systemd-shutdown[1]: Unmounting file systems.
+[16038.004798] (sd-remount)[392653]: Remounting '/run/netns/cni-0b1aa5fc-04fb-eb9a-a0cd-e0b89e5cb790' read-only with options ''.
+[16038.005777] (sd-umount)[392654]: Unmounting '/run/netns/cni-0b1aa5fc-04fb-eb9a-a0cd-e0b89e5cb790'.
+[16038.006228] cni0: port 11(veth0a2886ee) entered disabled state
+[16038.006662] (sd-remount)[392655]: Remounting '/run/netns/cni-bafe19f1-90c3-9c8f-cccc-d6e75abc2b51' read-only with options ''.
+[16038.006859] veth0a2886ee (unregistering): left allmulticast mode
+[16038.006869] veth0a2886ee (unregistering): left promiscuous mode
+[16038.006882] cni0: port 11(veth0a2886ee) entered disabled state
+[16038.007397] (sd-umount)[392656]: Unmounting '/run/netns/cni-bafe19f1-90c3-9c8f-cccc-d6e75abc2b51'.
+[16038.008227] (sd-umount)[392657]: Unmounting '/run/credentials/systemd-journald.service'.
+[16038.008936] (sd-remount)[392658]: Remounting '/' read-only with options 'seclabel,compress=zstd:1,ssd,discard=async,space_cache=v2,subvolid=256,subvol=/root'.
+[16038.066928] cni0: port 3(veth71536da7) entered disabled state
+[16038.067387] veth71536da7 (unregistering): left allmulticast mode
+[16038.067401] veth71536da7 (unregistering): left promiscuous mode
+[16038.067417] cni0: port 3(veth71536da7) entered disabled state
+[16038.290825] systemd-shutdown[1]: All filesystems unmounted.
+[16038.290847] systemd-shutdown[1]: Deactivating swaps.
+[16038.290872] systemd-shutdown[1]: All swaps deactivated.
+[16038.290875] systemd-shutdown[1]: Detaching loop devices.
+[16038.291789] systemd-shutdown[1]: All loop devices detached.
+[16038.291795] systemd-shutdown[1]: Stopping MD devices.
+[16038.291867] systemd-shutdown[1]: All MD devices stopped.
+[16038.291870] systemd-shutdown[1]: Detaching DM devices.
+[16038.291923] systemd-shutdown[1]: All DM devices detached.
+[16038.291930] systemd-shutdown[1]: All filesystems, swaps, loop devices, MD devices and DM devices detached.
+[16038.334643] systemd-shutdown[1]: Syncing filesystems and block devices.
+[16038.335085] systemd-shutdown[1]: Powering off.
