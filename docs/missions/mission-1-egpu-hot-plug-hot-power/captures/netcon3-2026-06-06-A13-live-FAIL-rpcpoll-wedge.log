@@ -1,0 +1,844 @@
+[  517.541737] WEDGE-CAPTURE TEST 2026-06-05T22:18:01Z — visible on the receiver ⇒ netconsole works
+[  517.543333] WEDGE-CAPTURE TEST 2026-06-05T22:18:01Z — visible on the receiver ⇒ netconsole works
+[  517.544854] WEDGE-CAPTURE TEST 2026-06-05T22:18:01Z — visible on the receiver ⇒ netconsole works
+[ 1157.902476] ===== #292 A13 LIVE TEST START 2026-06-05T22:28:41Z — apnex.31, deauth->fix-bar1->pm0->roll =====
+[ 1158.393621] cni0: port 9(veth7821804c) entered disabled state
+[ 1158.393906] veth7821804c (unregistering): left allmulticast mode
+[ 1158.393913] veth7821804c (unregistering): left promiscuous mode
+[ 1158.393919] cni0: port 9(veth7821804c) entered disabled state
+[ 1159.416686] cni0: port 9(veth7dd55460) entered blocking state
+[ 1159.416696] cni0: port 9(veth7dd55460) entered disabled state
+[ 1159.416706] veth7dd55460: entered allmulticast mode
+[ 1159.416766] veth7dd55460: entered promiscuous mode
+[ 1159.419901] cni0: port 9(veth7dd55460) entered blocking state
+[ 1159.419916] cni0: port 9(veth7dd55460) entered forwarding state
+[ 1192.601621] NVRM: tb_egpu [F40b/A12]: open scheduled to bounded worker (timeout=3000 ms)
+[ 1192.601645] NVRM: tb_egpu [F40b/A12]: open completed within budget rc=0
+[ 1192.601849] tb_egpu UVM [CLOSE]: site=uvm-open-entry     fd_count=1 (LAST-CLOSE)
+[ 1192.602057] tb_egpu [CLOSE]: site=uvm-open-entry  pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.602065] tb_egpu UVM [CLOSE]: site=uvm-open-entry     fd_count=2
+[ 1192.617466] tb_egpu UVM [CLOSE]: site=uvm-release-entry  fd_count=2
+[ 1192.617472] tb_egpu UVM [CLOSE]: site=uvm-release-exit   fd_count=1
+[ 1192.617474] tb_egpu UVM [CLOSE]: site=uvm-release-entry  fd_count=1 (LAST-CLOSE)
+[ 1192.617504] tb_egpu [CLOSE]: site=uvm-release-entry pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.617507] tb_egpu UVM [CLOSE]: site=uvm-pre-destroy    fd_count=1 (LAST-CLOSE)
+[ 1192.617525] tb_egpu [CLOSE]: site=uvm-pre-destroy pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.617550] tb_egpu UVM [CLOSE]: site=uvm-post-destroy   fd_count=1 (LAST-CLOSE)
+[ 1192.617571] tb_egpu [CLOSE]: site=uvm-post-destroy pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.617573] tb_egpu UVM [CLOSE]: site=uvm-release-exit   fd_count=0 (LAST-CLOSE)
+[ 1192.617594] tb_egpu [CLOSE]: site=uvm-release-exit pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.619535] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=3
+[ 1192.619541] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=3
+[ 1192.619543] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=2
+[ 1192.620885] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=2
+[ 1192.620893] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=2
+[ 1192.620894] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=1
+[ 1192.620901] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=1 (LAST-CLOSE)
+[ 1192.620923] tb_egpu [CLOSE]: site=close-entry     pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.620927] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=1 (LAST-CLOSE)
+[ 1192.620945] tb_egpu [CLOSE]: site=pre-stop        pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.620964] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=post-shutdown   usage_count=0 (LAST-CLOSE)
+[ 1192.620986] tb_egpu [CLOSE]: site=post-shutdown   pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.620988] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=0 (LAST-CLOSE)
+[ 1192.621007] tb_egpu [CLOSE]: site=close-exit      pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.628403] NVRM: tb_egpu [F40b/A12]: open scheduled to bounded worker (timeout=3000 ms)
+[ 1192.628416] NVRM: tb_egpu [F40b/A12]: open completed within budget rc=0
+[ 1192.628602] tb_egpu UVM [CLOSE]: site=uvm-open-entry     fd_count=1 (LAST-CLOSE)
+[ 1192.628803] tb_egpu [CLOSE]: site=uvm-open-entry  pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.628811] tb_egpu UVM [CLOSE]: site=uvm-open-entry     fd_count=2
+[ 1192.636354] tb_egpu UVM [CLOSE]: site=uvm-release-entry  fd_count=2
+[ 1192.636363] tb_egpu UVM [CLOSE]: site=uvm-release-exit   fd_count=1
+[ 1192.636368] tb_egpu UVM [CLOSE]: site=uvm-release-entry  fd_count=1 (LAST-CLOSE)
+[ 1192.636542] tb_egpu [CLOSE]: site=uvm-release-entry pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.636551] tb_egpu UVM [CLOSE]: site=uvm-pre-destroy    fd_count=1 (LAST-CLOSE)
+[ 1192.636573] tb_egpu [CLOSE]: site=uvm-pre-destroy pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.636605] tb_egpu UVM [CLOSE]: site=uvm-post-destroy   fd_count=1 (LAST-CLOSE)
+[ 1192.636628] tb_egpu [CLOSE]: site=uvm-post-destroy pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.636633] tb_egpu UVM [CLOSE]: site=uvm-release-exit   fd_count=0 (LAST-CLOSE)
+[ 1192.636656] tb_egpu [CLOSE]: site=uvm-release-exit pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.637293] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=3
+[ 1192.637301] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=3
+[ 1192.637303] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=2
+[ 1192.638644] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=2
+[ 1192.638653] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=2
+[ 1192.638654] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=1
+[ 1192.638661] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=1 (LAST-CLOSE)
+[ 1192.638683] tb_egpu [CLOSE]: site=close-entry     pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.638685] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=1 (LAST-CLOSE)
+[ 1192.638705] tb_egpu [CLOSE]: site=pre-stop        pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.638723] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=post-shutdown   usage_count=0 (LAST-CLOSE)
+[ 1192.638747] tb_egpu [CLOSE]: site=post-shutdown   pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.638750] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=0 (LAST-CLOSE)
+[ 1192.638772] tb_egpu [CLOSE]: site=close-exit      pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.645693] NVRM: tb_egpu [F40b/A12]: open scheduled to bounded worker (timeout=3000 ms)
+[ 1192.645708] NVRM: tb_egpu [F40b/A12]: open completed within budget rc=0
+[ 1192.645885] tb_egpu UVM [CLOSE]: site=uvm-open-entry     fd_count=1 (LAST-CLOSE)
+[ 1192.646082] tb_egpu [CLOSE]: site=uvm-open-entry  pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.646088] tb_egpu UVM [CLOSE]: site=uvm-open-entry     fd_count=2
+[ 1192.661393] tb_egpu UVM [CLOSE]: site=uvm-release-entry  fd_count=2
+[ 1192.661399] tb_egpu UVM [CLOSE]: site=uvm-release-exit   fd_count=1
+[ 1192.661403] tb_egpu UVM [CLOSE]: site=uvm-release-entry  fd_count=1 (LAST-CLOSE)
+[ 1192.661428] tb_egpu [CLOSE]: site=uvm-release-entry pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.661430] tb_egpu UVM [CLOSE]: site=uvm-pre-destroy    fd_count=1 (LAST-CLOSE)
+[ 1192.661449] tb_egpu [CLOSE]: site=uvm-pre-destroy pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.661476] tb_egpu UVM [CLOSE]: site=uvm-post-destroy   fd_count=1 (LAST-CLOSE)
+[ 1192.661499] tb_egpu [CLOSE]: site=uvm-post-destroy pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.661503] tb_egpu UVM [CLOSE]: site=uvm-release-exit   fd_count=0 (LAST-CLOSE)
+[ 1192.661525] tb_egpu [CLOSE]: site=uvm-release-exit pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.663450] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=3
+[ 1192.663456] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=3
+[ 1192.663457] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=2
+[ 1192.664793] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=2
+[ 1192.664798] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=2
+[ 1192.664799] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=1
+[ 1192.664804] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=1 (LAST-CLOSE)
+[ 1192.664828] tb_egpu [CLOSE]: site=close-entry     pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.664831] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=1 (LAST-CLOSE)
+[ 1192.664850] tb_egpu [CLOSE]: site=pre-stop        pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.664865] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=post-shutdown   usage_count=0 (LAST-CLOSE)
+[ 1192.664888] tb_egpu [CLOSE]: site=post-shutdown   pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1192.664891] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=0 (LAST-CLOSE)
+[ 1192.664913] tb_egpu [CLOSE]: site=close-exit      pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1244.591081] cni0: port 9(veth7dd55460) entered disabled state
+[ 1244.591652] veth7dd55460 (unregistering): left allmulticast mode
+[ 1244.591658] veth7dd55460 (unregistering): left promiscuous mode
+[ 1244.591665] cni0: port 9(veth7dd55460) entered disabled state
+[ 1250.096870] NVRM: tb_egpu [F40b]: rm_disable_adapter scheduled to bounded worker (timeout=1200 ms)
+[ 1250.126055] NVRM: tb_egpu [F40b]: rm_disable_adapter completed within budget
+[ 1250.126402] NVRM: tb_egpu [F40b]: rm_shutdown_adapter scheduled to bounded worker (timeout=1200 ms)
+[ 1250.773774] NVRM: tb_egpu [F40b]: rm_shutdown_adapter completed within budget
+[ 1250.775189] nvidia-nvlink: Unregistered Nvlink Core, major device number 510
+[ 1273.359605] ===== #292 A13 TEST Stage2: TB deauth/reauth 2026-06-05T22:30:37Z =====
+[ 1273.359657] thunderbolt:tb_tunnel_deactivate:2433: thunderbolt 0000:00:0d.2: 0:8 <-> 1:9 (PCI): deactivating
+[ 1273.360072] thunderbolt:tb_path_deactivate:485: thunderbolt 0000:00:0d.2: deactivating PCIe Down path from 1:9 to 0:8
+[ 1273.361050] thunderbolt:tb_path_deactivate:485: thunderbolt 0000:00:0d.2: deactivating PCIe Up path from 0:8 to 1:9
+[ 1273.384045] pcieport 0000:00:07.0: pciehp: Slot(12): Link Down
+[ 1273.384052] pcieport 0000:00:07.0: pciehp: Slot(12): Card not present
+[ 1273.384602] i915 0000:00:02.0: vgaarb: VGA decodes changed: olddecodes=none,decodes=io+mem:owns=io+mem
+[ 1273.384685] pci_bus 0000:04: busn_res: [bus 04] is released
+[ 1273.384731] pci_bus 0000:05: busn_res: [bus 05-11] is released
+[ 1273.384761] pci_bus 0000:12: busn_res: [bus 12-1e] is released
+[ 1273.384788] pci_bus 0000:1f: busn_res: [bus 1f-2b] is released
+[ 1273.384817] pci_bus 0000:03: busn_res: [bus 03-2b] is released
+[ 1277.365594] thunderbolt:tb_tunnel_activate:2380: thunderbolt 0000:00:0d.2: 0:8 <-> 1:9 (PCI): activating
+[ 1277.365605] thunderbolt:tb_path_activate:514: thunderbolt 0000:00:0d.2: activating PCIe Down path from 0:8 to 1:9
+[ 1277.365867] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 1:1: Writing hop 1
+[ 1277.365873] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 1:1:  In HopID: 8 => Out port: 9 Out HopID: 8
+[ 1277.365875] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 1:1:   Weight: 1 Priority: 3 Credits: 76 Drop: 0 PM: 0
+[ 1277.365877] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 1:1:    Counter enabled: 0 Counter index: 2047
+[ 1277.365879] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 1:1:   Flow Control (In/Eg): 1/0 Shared Buffer (In/Eg): 0/0
+[ 1277.365880] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 1:1:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[ 1277.366348] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 0:8: Writing hop 0
+[ 1277.366353] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 0:8:  In HopID: 8 => Out port: 1 Out HopID: 8
+[ 1277.366355] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 0:8:   Weight: 1 Priority: 3 Credits: 7 Drop: 0 PM: 0
+[ 1277.366357] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 0:8:    Counter enabled: 0 Counter index: 2047
+[ 1277.366358] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 0:8:   Flow Control (In/Eg): 1/1 Shared Buffer (In/Eg): 0/0
+[ 1277.366360] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 0:8:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[ 1277.366514] thunderbolt:tb_path_activate:586: thunderbolt 0000:00:0d.2: PCIe Down path activation complete
+[ 1277.366516] thunderbolt:tb_path_activate:514: thunderbolt 0000:00:0d.2: activating PCIe Up path from 1:9 to 0:8
+[ 1277.366682] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 0:1: Writing hop 1
+[ 1277.366684] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 0:1:  In HopID: 8 => Out port: 8 Out HopID: 8
+[ 1277.366686] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 0:1:   Weight: 1 Priority: 3 Credits: 64 Drop: 0 PM: 0
+[ 1277.366688] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 0:1:    Counter enabled: 0 Counter index: 2047
+[ 1277.366690] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 0:1:   Flow Control (In/Eg): 1/0 Shared Buffer (In/Eg): 0/0
+[ 1277.366691] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 0:1:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[ 1277.367018] thunderbolt:tb_path_activate:575: thunderbolt 0000:00:0d.2: 1:9: Writing hop 0
+[ 1277.367020] thunderbolt:tb_dump_hop:20: thunderbolt 0000:00:0d.2: 1:9:  In HopID: 8 => Out port: 1 Out HopID: 8
+[ 1277.367021] thunderbolt:tb_dump_hop:22: thunderbolt 0000:00:0d.2: 1:9:   Weight: 1 Priority: 3 Credits: 7 Drop: 0 PM: 0
+[ 1277.367023] thunderbolt:tb_dump_hop:25: thunderbolt 0000:00:0d.2: 1:9:    Counter enabled: 0 Counter index: 2047
+[ 1277.367025] thunderbolt:tb_dump_hop:27: thunderbolt 0000:00:0d.2: 1:9:   Flow Control (In/Eg): 1/1 Shared Buffer (In/Eg): 0/0
+[ 1277.367026] thunderbolt:tb_dump_hop:30: thunderbolt 0000:00:0d.2: 1:9:   Unknown1: 0x0 Unknown2: 0x0 Unknown3: 0x0
+[ 1277.367192] thunderbolt:tb_path_activate:586: thunderbolt 0000:00:0d.2: PCIe Up path activation complete
+[ 1277.367537] pcieport 0000:00:07.0: pciehp: Slot(12): Card present
+[ 1277.367542] pcieport 0000:00:07.0: pciehp: Slot(12): Link Up
+[ 1277.493997] pci 0000:02:00.0: [8086:5786] type 01 class 0x060400 PCIe Switch Upstream Port
+[ 1277.494049] pci 0000:02:00.0: PCI bridge to [bus 00]
+[ 1277.494064] pci 0000:02:00.0:   bridge window [io  0x0000-0x0fff]
+[ 1277.494069] pci 0000:02:00.0:   bridge window [mem 0x00000000-0x000fffff]
+[ 1277.494086] pci 0000:02:00.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[ 1277.494106] pci 0000:02:00.0: enabling Extended Tags
+[ 1277.494297] pci 0000:02:00.0: supports D1 D2
+[ 1277.494299] pci 0000:02:00.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 1277.494438] pci 0000:02:00.0: PTM enabled, 4ns granularity
+[ 1277.494701] pcieport 0000:00:07.0: ASPM: current common clock configuration is inconsistent, reconfiguring
+[ 1277.495813] pci 0000:02:00.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[ 1277.496025] pci 0000:03:00.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[ 1277.496072] pci 0000:03:00.0: PCI bridge to [bus 00]
+[ 1277.496083] pci 0000:03:00.0:   bridge window [io  0x0000-0x0fff]
+[ 1277.496088] pci 0000:03:00.0:   bridge window [mem 0x00000000-0x000fffff]
+[ 1277.496105] pci 0000:03:00.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[ 1277.496128] pci 0000:03:00.0: enabling Extended Tags
+[ 1277.496350] pci 0000:03:00.0: supports D1 D2
+[ 1277.496352] pci 0000:03:00.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 1277.496802] pci 0000:03:01.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[ 1277.496845] pci 0000:03:01.0: PCI bridge to [bus 00]
+[ 1277.496856] pci 0000:03:01.0:   bridge window [io  0x0000-0x0fff]
+[ 1277.496861] pci 0000:03:01.0:   bridge window [mem 0x00000000-0x000fffff]
+[ 1277.496878] pci 0000:03:01.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[ 1277.496901] pci 0000:03:01.0: enabling Extended Tags
+[ 1277.497075] pci 0000:03:01.0: supports D1 D2
+[ 1277.497077] pci 0000:03:01.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 1277.497436] pci 0000:03:02.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[ 1277.497480] pci 0000:03:02.0: PCI bridge to [bus 00]
+[ 1277.497491] pci 0000:03:02.0:   bridge window [io  0x0000-0x0fff]
+[ 1277.497496] pci 0000:03:02.0:   bridge window [mem 0x00000000-0x000fffff]
+[ 1277.497514] pci 0000:03:02.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[ 1277.497537] pci 0000:03:02.0: enabling Extended Tags
+[ 1277.497710] pci 0000:03:02.0: supports D1 D2
+[ 1277.497712] pci 0000:03:02.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 1277.498074] pci 0000:03:03.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[ 1277.498117] pci 0000:03:03.0: PCI bridge to [bus 00]
+[ 1277.498128] pci 0000:03:03.0:   bridge window [io  0x0000-0x0fff]
+[ 1277.498134] pci 0000:03:03.0:   bridge window [mem 0x00000000-0x000fffff]
+[ 1277.498153] pci 0000:03:03.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[ 1277.498177] pci 0000:03:03.0: enabling Extended Tags
+[ 1277.498348] pci 0000:03:03.0: supports D1 D2
+[ 1277.498350] pci 0000:03:03.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 1277.498680] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[ 1277.498703] pci 0000:03:00.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[ 1277.498716] pci 0000:03:01.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[ 1277.498729] pci 0000:03:02.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[ 1277.498744] pci 0000:03:03.0: bridge configuration invalid ([bus 00-00]), reconfiguring
+[ 1277.498989] pci 0000:04:00.0: [10de:2b85] type 00 class 0x030000 PCIe Legacy Endpoint
+[ 1277.499135] pci 0000:04:00.0: BAR 0 [mem 0x00000000-0x03ffffff]
+[ 1277.499146] pci 0000:04:00.0: BAR 1 [mem 0x00000000-0x0fffffff 64bit pref]
+[ 1277.499156] pci 0000:04:00.0: BAR 3 [mem 0x00000000-0x01ffffff 64bit pref]
+[ 1277.499162] pci 0000:04:00.0: BAR 5 [io  0x0000-0x007f]
+[ 1277.499167] pci 0000:04:00.0: ROM [mem 0x00000000-0x0007ffff pref]
+[ 1277.499321] pci 0000:04:00.0: Enabling HDA controller
+[ 1277.499654] pci 0000:04:00.0: PME# supported from D0 D3hot
+[ 1277.499860] pci 0000:04:00.0: VF BAR 0 [mem 0x00000000-0x0003ffff 64bit pref]
+[ 1277.499861] pci 0000:04:00.0: VF BAR 0 [mem 0x00000000-0x0003ffff 64bit pref]: contains BAR 0 for 1 VFs
+[ 1277.499870] pci 0000:04:00.0: VF BAR 2 [mem 0x00000000-0x0fffffff 64bit pref]
+[ 1277.499872] pci 0000:04:00.0: VF BAR 2 [mem 0x00000000-0x0fffffff 64bit pref]: contains BAR 2 for 1 VFs
+[ 1277.499881] pci 0000:04:00.0: VF BAR 4 [mem 0x00000000-0x01ffffff 64bit pref]
+[ 1277.499883] pci 0000:04:00.0: VF BAR 4 [mem 0x00000000-0x01ffffff 64bit pref]: contains BAR 4 for 1 VFs
+[ 1277.500587] pci 0000:04:00.0: 8.000 Gb/s available PCIe bandwidth, limited by 2.5 GT/s PCIe x4 link at 0000:00:07.0 (capable of 504.112 Gb/s with 32.0 GT/s PCIe x16 link)
+[ 1277.500801] pci 0000:04:00.0: vgaarb: bridge control possible
+[ 1277.500802] pci 0000:04:00.0: vgaarb: VGA device added: decodes=io+mem,owns=none,locks=none
+[ 1277.500807] i915 0000:00:02.0: vgaarb: VGA decodes changed: olddecodes=io+mem,decodes=none:owns=io+mem
+[ 1277.500986] pci 0000:04:00.1: [10de:22e8] type 00 class 0x040300 PCIe Endpoint
+[ 1277.501132] pci 0000:04:00.1: BAR 0 [mem 0x00000000-0x00003fff]
+[ 1277.503787] pci 0000:03:00.0: PCI bridge to [bus 04-2b]
+[ 1277.503810] pci_bus 0000:04: busn_res: [bus 04-2b] end is updated to 04
+[ 1277.503903] pci 0000:03:01.0: PCI bridge to [bus 05-2b]
+[ 1277.503925] pci_bus 0000:05: busn_res: [bus 05-2b] end is updated to 11
+[ 1277.504012] pci 0000:03:02.0: PCI bridge to [bus 12-2b]
+[ 1277.504033] pci_bus 0000:12: busn_res: [bus 12-2b] end is updated to 1e
+[ 1277.504117] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[ 1277.504138] pci_bus 0000:1f: busn_res: [bus 1f-2b] end is updated to 2b
+[ 1277.504146] pci_bus 0000:03: busn_res: [bus 03-2b] end is updated to 2b
+[ 1277.504155] pci 0000:03:00.0: bridge window [mem size 0x12000000 64bit pref] to [bus 04] add_size 12100000 add_align 10000000
+[ 1277.504160] pci 0000:03:01.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 05-11] add_size 800000000 add_align 100000
+[ 1277.504163] pci 0000:03:01.0: bridge window [mem 0x00100000-0x000fffff] to [bus 05-11] add_size 200000 add_align 100000
+[ 1277.504165] pci 0000:03:02.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 12-1e] add_size 800000000 add_align 100000
+[ 1277.504166] pci 0000:03:02.0: bridge window [mem 0x00100000-0x000fffff] to [bus 12-1e] add_size 200000 add_align 100000
+[ 1277.504167] pci 0000:03:03.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 1f-2b] add_size 800000000 add_align 100000
+[ 1277.504168] pci 0000:03:03.0: bridge window [mem 0x00100000-0x000fffff] to [bus 1f-2b] add_size 200000 add_align 100000
+[ 1277.504170] pci 0000:02:00.0: bridge window [mem 0x10000000-0x21ffffff 64bit pref] to [bus 03-2b] add_size 1812100000 add_align 10000000
+[ 1277.504171] pci 0000:02:00.0: bridge window [mem 0x04000000-0x080fffff] to [bus 03-2b] add_size 600000 add_align 4000000
+[ 1277.504177] pci 0000:02:00.0: bridge window [mem 0x4000000000-0x5011ffffff 64bit pref]: assigned
+[ 1277.504178] pci 0000:02:00.0: bridge window [mem 0x80000000-0x880fffff]: assigned
+[ 1277.504179] pci 0000:02:00.0: bridge window [io  0x5000-0x8fff]: assigned
+[ 1277.504181] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x40240fffff 64bit pref]: assigned
+[ 1277.504182] pci 0000:03:00.0: bridge window [mem 0x80000000-0x840fffff]: assigned
+[ 1277.504184] pci 0000:03:01.0: bridge window [mem 0x84100000-0x855fffff]: assigned
+[ 1277.504184] pci 0000:03:01.0: bridge window [mem 0x4024100000-0x45795fffff 64bit pref]: assigned
+[ 1277.504185] pci 0000:03:02.0: bridge window [mem 0x85600000-0x86afffff]: assigned
+[ 1277.504186] pci 0000:03:02.0: bridge window [mem 0x4579600000-0x4aceafffff 64bit pref]: assigned
+[ 1277.504186] pci 0000:03:03.0: bridge window [mem 0x86b00000-0x87ffffff]: assigned
+[ 1277.504187] pci 0000:03:03.0: bridge window [mem size 0x555500000 64bit pref]: can't assign; no space
+[ 1277.504189] pci 0000:03:03.0: bridge window [mem size 0x555500000 64bit pref]: failed to assign
+[ 1277.504189] pci 0000:03:00.0: bridge window [io  0x5000-0x5fff]: assigned
+[ 1277.504190] pci 0000:03:01.0: bridge window [io  0x6000-0x6fff]: assigned
+[ 1277.504191] pci 0000:03:02.0: bridge window [io  0x7000-0x7fff]: assigned
+[ 1277.504191] pci 0000:03:03.0: bridge window [io  0x8000-0x8fff]: assigned
+[ 1277.504193] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x40240fffff 64bit pref]: releasing
+[ 1277.504193] pci 0000:03:00.0: bridge window [mem 0x80000000-0x840fffff]: releasing
+[ 1277.504194] pci 0000:03:01.0: bridge window [mem 0x84100000-0x855fffff]: releasing
+[ 1277.504195] pci 0000:03:01.0: bridge window [mem 0x4024100000-0x45795fffff 64bit pref]: releasing
+[ 1277.504195] pci 0000:03:02.0: bridge window [mem 0x85600000-0x86afffff]: releasing
+[ 1277.504196] pci 0000:03:02.0: bridge window [mem 0x4579600000-0x4aceafffff 64bit pref]: releasing
+[ 1277.504197] pci 0000:03:03.0: bridge window [mem 0x86b00000-0x87ffffff]: releasing
+[ 1277.504197] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4011ffffff 64bit pref]: assigned
+[ 1277.504198] pci 0000:03:00.0: bridge window [mem 0x80000000-0x840fffff]: assigned
+[ 1277.504199] pci 0000:03:01.0: bridge window [mem 0x84100000-0x855fffff]: assigned
+[ 1277.504199] pci 0000:03:01.0: bridge window [mem 0x4012000000-0x45674fffff 64bit pref]: assigned
+[ 1277.504200] pci 0000:03:02.0: bridge window [mem 0x85600000-0x86afffff]: assigned
+[ 1277.504201] pci 0000:03:02.0: bridge window [mem 0x4567500000-0x4abc9fffff 64bit pref]: assigned
+[ 1277.504202] pci 0000:03:03.0: bridge window [mem 0x86b00000-0x87ffffff]: assigned
+[ 1277.504202] pci 0000:03:03.0: bridge window [mem 0x4abca00000-0x5011efffff 64bit pref]: assigned
+[ 1277.504204] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4011ffffff 64bit pref]: failed to expand by 0x12100000
+[ 1277.504205] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4011ffffff 64bit pref]: failed to add optional 12100000
+[ 1277.504207] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x400fffffff 64bit pref]: assigned
+[ 1277.504237] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[ 1277.504238] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[ 1277.504239] pci 0000:04:00.0: BAR 0 [mem 0x80000000-0x83ffffff]: assigned
+[ 1277.504249] pci 0000:04:00.0: BAR 3 [mem 0x4010000000-0x4011ffffff 64bit pref]: assigned
+[ 1277.504278] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[ 1277.504279] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[ 1277.504280] pci 0000:04:00.0: ROM [mem 0x84000000-0x8407ffff pref]: assigned
+[ 1277.504282] pci 0000:04:00.0: VF BAR 0 [mem 0x84080000-0x840bffff 64bit pref]: assigned
+[ 1277.504294] pci 0000:04:00.1: BAR 0 [mem 0x840c0000-0x840c3fff]: assigned
+[ 1277.504303] pci 0000:04:00.0: BAR 5 [io  0x5000-0x507f]: assigned
+[ 1277.504312] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x400fffffff 64bit pref]: releasing
+[ 1277.504313] pci 0000:04:00.0: BAR 0 [mem 0x80000000-0x83ffffff]: releasing
+[ 1277.504314] pci 0000:04:00.0: BAR 3 [mem 0x4010000000-0x4011ffffff 64bit pref]: releasing
+[ 1277.504315] pci 0000:04:00.0: ROM [mem 0x84000000-0x8407ffff pref]: releasing
+[ 1277.504316] pci 0000:04:00.0: VF BAR 0 [mem 0x84080000-0x840bffff 64bit pref]: releasing
+[ 1277.504316] pci 0000:04:00.1: BAR 0 [mem 0x840c0000-0x840c3fff]: releasing
+[ 1277.504317] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x400fffffff 64bit pref]: assigned
+[ 1277.504346] pci 0000:04:00.0: BAR 0 [mem 0x80000000-0x83ffffff]: assigned
+[ 1277.504355] pci 0000:04:00.0: BAR 3 [mem 0x4010000000-0x4011ffffff 64bit pref]: assigned
+[ 1277.504384] pci 0000:04:00.1: BAR 0 [mem 0x84000000-0x84003fff]: assigned
+[ 1277.504393] pci 0000:04:00.0: ROM [mem 0x84080000-0x840fffff pref]: assigned
+[ 1277.504394] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[ 1277.504395] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[ 1277.504395] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[ 1277.504396] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[ 1277.504397] pci 0000:04:00.0: VF BAR 0 [mem 0x84040000-0x8407ffff 64bit pref]: assigned
+[ 1277.504409] pci 0000:03:00.0: PCI bridge to [bus 04]
+[ 1277.504412] pci 0000:03:00.0:   bridge window [io  0x5000-0x5fff]
+[ 1277.504418] pci 0000:03:00.0:   bridge window [mem 0x80000000-0x840fffff]
+[ 1277.504422] pci 0000:03:00.0:   bridge window [mem 0x4000000000-0x4011ffffff 64bit pref]
+[ 1277.504430] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[ 1277.504433] pci 0000:03:01.0:   bridge window [io  0x6000-0x6fff]
+[ 1277.504439] pci 0000:03:01.0:   bridge window [mem 0x84100000-0x855fffff]
+[ 1277.504443] pci 0000:03:01.0:   bridge window [mem 0x4012000000-0x45674fffff 64bit pref]
+[ 1277.504451] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[ 1277.504453] pci 0000:03:02.0:   bridge window [io  0x7000-0x7fff]
+[ 1277.504460] pci 0000:03:02.0:   bridge window [mem 0x85600000-0x86afffff]
+[ 1277.504464] pci 0000:03:02.0:   bridge window [mem 0x4567500000-0x4abc9fffff 64bit pref]
+[ 1277.504472] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[ 1277.504474] pci 0000:03:03.0:   bridge window [io  0x8000-0x8fff]
+[ 1277.504480] pci 0000:03:03.0:   bridge window [mem 0x86b00000-0x87ffffff]
+[ 1277.504484] pci 0000:03:03.0:   bridge window [mem 0x4abca00000-0x5011efffff 64bit pref]
+[ 1277.504492] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[ 1277.504495] pci 0000:02:00.0:   bridge window [io  0x5000-0x8fff]
+[ 1277.504501] pci 0000:02:00.0:   bridge window [mem 0x80000000-0x880fffff]
+[ 1277.504505] pci 0000:02:00.0:   bridge window [mem 0x4000000000-0x5011ffffff 64bit pref]
+[ 1277.504513] pcieport 0000:00:07.0: PCI bridge to [bus 02-2b]
+[ 1277.504514] pcieport 0000:00:07.0:   bridge window [io  0x5000-0x8fff]
+[ 1277.504517] pcieport 0000:00:07.0:   bridge window [mem 0x80000000-0x89efffff]
+[ 1277.504520] pcieport 0000:00:07.0:   bridge window [mem 0x4000000000-0x5013ffffff 64bit pref]
+[ 1277.504524] PCI: No. 2 try to assign unassigned res
+[ 1277.504525] release child resource [mem 0x4000000000-0x400fffffff 64bit pref]
+[ 1277.504526] release child resource [mem 0x4010000000-0x4011ffffff 64bit pref]
+[ 1277.504526] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4011ffffff 64bit pref]: releasing
+[ 1277.504535] pci 0000:03:00.0: bridge window [mem size 0x12000000 64bit pref] to [bus 04] add_size 12000000 add_align 10000000
+[ 1277.504538] pci 0000:03:00.0: bridge window [mem size 0x24000000 64bit pref]: can't assign; no space
+[ 1277.504538] pci 0000:03:00.0: bridge window [mem size 0x24000000 64bit pref]: failed to assign
+[ 1277.504539] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4011ffffff 64bit pref]: assigned
+[ 1277.504540] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4011ffffff 64bit pref]: failed to expand by 0x12000000
+[ 1277.504541] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4011ffffff 64bit pref]: failed to add optional 12000000
+[ 1277.504542] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x400fffffff 64bit pref]: assigned
+[ 1277.504571] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[ 1277.504572] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[ 1277.504573] pci 0000:04:00.0: BAR 3 [mem 0x4010000000-0x4011ffffff 64bit pref]: assigned
+[ 1277.504602] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[ 1277.504603] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[ 1277.504604] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x400fffffff 64bit pref]: releasing
+[ 1277.504604] pci 0000:04:00.0: BAR 3 [mem 0x4010000000-0x4011ffffff 64bit pref]: releasing
+[ 1277.504605] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x400fffffff 64bit pref]: assigned
+[ 1277.504634] pci 0000:04:00.0: BAR 3 [mem 0x4010000000-0x4011ffffff 64bit pref]: assigned
+[ 1277.504665] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[ 1277.504667] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[ 1277.504668] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[ 1277.504669] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[ 1277.504670] pci 0000:03:00.0: PCI bridge to [bus 04]
+[ 1277.504673] pci 0000:03:00.0:   bridge window [io  0x5000-0x5fff]
+[ 1277.504680] pci 0000:03:00.0:   bridge window [mem 0x80000000-0x840fffff]
+[ 1277.504685] pci 0000:03:00.0:   bridge window [mem 0x4000000000-0x4011ffffff 64bit pref]
+[ 1277.504694] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[ 1277.504698] pci 0000:03:01.0:   bridge window [io  0x6000-0x6fff]
+[ 1277.504705] pci 0000:03:01.0:   bridge window [mem 0x84100000-0x855fffff]
+[ 1277.504712] pci 0000:03:01.0:   bridge window [mem 0x4012000000-0x45674fffff 64bit pref]
+[ 1277.504722] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[ 1277.504726] pci 0000:03:02.0:   bridge window [io  0x7000-0x7fff]
+[ 1277.504736] pci 0000:03:02.0:   bridge window [mem 0x85600000-0x86afffff]
+[ 1277.504741] pci 0000:03:02.0:   bridge window [mem 0x4567500000-0x4abc9fffff 64bit pref]
+[ 1277.504750] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[ 1277.504754] pci 0000:03:03.0:   bridge window [io  0x8000-0x8fff]
+[ 1277.504761] pci 0000:03:03.0:   bridge window [mem 0x86b00000-0x87ffffff]
+[ 1277.504766] pci 0000:03:03.0:   bridge window [mem 0x4abca00000-0x5011efffff 64bit pref]
+[ 1277.504775] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[ 1277.504783] pci 0000:02:00.0:   bridge window [io  0x5000-0x8fff]
+[ 1277.504792] pci 0000:02:00.0:   bridge window [mem 0x80000000-0x880fffff]
+[ 1277.504798] pci 0000:02:00.0:   bridge window [mem 0x4000000000-0x5011ffffff 64bit pref]
+[ 1277.504807] pcieport 0000:00:07.0: PCI bridge to [bus 02-2b]
+[ 1277.504810] pcieport 0000:00:07.0:   bridge window [io  0x5000-0x8fff]
+[ 1277.504814] pcieport 0000:00:07.0:   bridge window [mem 0x80000000-0x89efffff]
+[ 1277.504817] pcieport 0000:00:07.0:   bridge window [mem 0x4000000000-0x5013ffffff 64bit pref]
+[ 1277.504951] pcieport 0000:02:00.0: enabling device (0000 -> 0003)
+[ 1277.505259] pcieport 0000:03:00.0: enabling device (0000 -> 0003)
+[ 1277.505666] pcieport 0000:03:01.0: enabling device (0000 -> 0003)
+[ 1277.505757] pcieport 0000:03:01.0: pciehp: Slot #1 AttnBtn- PwrCtrl- MRL- AttnInd- PwrInd- HotPlug+ Surprise+ Interlock- NoCompl+ IbPresDis- LLActRep+
+[ 1277.506126] pcieport 0000:03:02.0: enabling device (0000 -> 0003)
+[ 1277.506218] pcieport 0000:03:02.0: pciehp: Slot #2 AttnBtn- PwrCtrl- MRL- AttnInd- PwrInd- HotPlug+ Surprise+ Interlock- NoCompl+ IbPresDis- LLActRep+
+[ 1277.506500] pcieport 0000:03:03.0: enabling device (0000 -> 0003)
+[ 1277.506591] pcieport 0000:03:03.0: pciehp: Slot #3 AttnBtn- PwrCtrl- MRL- AttnInd- PwrInd- HotPlug+ Surprise+ Interlock- NoCompl+ IbPresDis- LLActRep+
+[ 1277.507122] pci 0000:04:00.1: extending delay after power-on from D3hot to 20 msec
+[ 1277.507183] pci 0000:04:00.1: D0 power state depends on 0000:04:00.0
+[ 1277.507369] snd_hda_intel 0000:04:00.1: enabling device (0000 -> 0002)
+[ 1277.507389] snd_hda_intel 0000:04:00.1: Disabling MSI
+[ 1277.507393] snd_hda_intel 0000:04:00.1: Handle vga_switcheroo audio client
+[ 1277.539176] input: HDA NVidia HDMI/DP,pcm=3 as /devices/pci0000:00/0000:00:07.0/0000:02:00.0/0000:03:00.0/0000:04:00.1/sound/card1/input23
+[ 1277.539232] input: HDA NVidia HDMI/DP,pcm=7 as /devices/pci0000:00/0000:00:07.0/0000:02:00.0/0000:03:00.0/0000:04:00.1/sound/card1/input24
+[ 1277.539264] input: HDA NVidia HDMI/DP,pcm=8 as /devices/pci0000:00/0000:00:07.0/0000:02:00.0/0000:03:00.0/0000:04:00.1/sound/card1/input25
+[ 1277.539316] input: HDA NVidia HDMI/DP,pcm=9 as /devices/pci0000:00/0000:00:07.0/0000:02:00.0/0000:03:00.0/0000:04:00.1/sound/card1/input26
+[ 1277.585141] snd_hda_intel 0000:04:00.1: GPU sound probed, but not operational: please add a quirk to driver_denylist
+[ 1303.716666] ===== #292 A13 TEST Stage3: fix-bar1 --bind 2026-06-05T22:31:07Z =====
+[ 1303.782709] i915 0000:00:02.0: vgaarb: VGA decodes changed: olddecodes=none,decodes=io+mem:owns=io+mem
+[ 1303.782959] pci_bus 0000:04: busn_res: [bus 04] is released
+[ 1303.783063] pci_bus 0000:05: busn_res: [bus 05-11] is released
+[ 1303.783201] pci_bus 0000:12: busn_res: [bus 12-1e] is released
+[ 1303.783329] pci_bus 0000:1f: busn_res: [bus 1f-2b] is released
+[ 1303.783413] pci_bus 0000:03: busn_res: [bus 03-2b] is released
+[ 1306.785019] pcieport 0000:00:07.0: pciehp: Slot(12): Card present
+[ 1306.785037] pcieport 0000:00:07.0: pciehp: Slot(12): Link Up
+[ 1306.909374] pci 0000:02:00.0: [8086:5786] type 01 class 0x060400 PCIe Switch Upstream Port
+[ 1306.909437] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[ 1306.909456] pci 0000:02:00.0:   bridge window [io  0x5000-0x8fff]
+[ 1306.909464] pci 0000:02:00.0:   bridge window [mem 0x80000000-0x880fffff]
+[ 1306.909482] pci 0000:02:00.0:   bridge window [mem 0x4000000000-0x5011ffffff 64bit pref]
+[ 1306.909707] pci 0000:02:00.0: supports D1 D2
+[ 1306.909712] pci 0000:02:00.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 1306.909854] pci 0000:02:00.0: PTM enabled, 4ns granularity
+[ 1306.910437] pci 0000:03:00.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[ 1306.910489] pci 0000:03:00.0: PCI bridge to [bus 04]
+[ 1306.910504] pci 0000:03:00.0:   bridge window [io  0x5000-0x5fff]
+[ 1306.910510] pci 0000:03:00.0:   bridge window [mem 0x80000000-0x840fffff]
+[ 1306.910528] pci 0000:03:00.0:   bridge window [mem 0x4000000000-0x4011ffffff 64bit pref]
+[ 1306.910779] pci 0000:03:00.0: supports D1 D2
+[ 1306.910786] pci 0000:03:00.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 1306.911311] pci 0000:03:01.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[ 1306.911361] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[ 1306.911375] pci 0000:03:01.0:   bridge window [io  0x6000-0x6fff]
+[ 1306.911382] pci 0000:03:01.0:   bridge window [mem 0x84100000-0x855fffff]
+[ 1306.911400] pci 0000:03:01.0:   bridge window [mem 0x4012000000-0x45674fffff 64bit pref]
+[ 1306.911610] pci 0000:03:01.0: supports D1 D2
+[ 1306.911616] pci 0000:03:01.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 1306.912041] pci 0000:03:02.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[ 1306.912094] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[ 1306.912110] pci 0000:03:02.0:   bridge window [io  0x7000-0x7fff]
+[ 1306.912118] pci 0000:03:02.0:   bridge window [mem 0x85600000-0x86afffff]
+[ 1306.912140] pci 0000:03:02.0:   bridge window [mem 0x4567500000-0x4abc9fffff 64bit pref]
+[ 1306.912353] pci 0000:03:02.0: supports D1 D2
+[ 1306.912360] pci 0000:03:02.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 1306.912782] pci 0000:03:03.0: [8086:5786] type 01 class 0x060400 PCIe Switch Downstream Port
+[ 1306.912836] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[ 1306.912850] pci 0000:03:03.0:   bridge window [io  0x8000-0x8fff]
+[ 1306.912859] pci 0000:03:03.0:   bridge window [mem 0x86b00000-0x87ffffff]
+[ 1306.912878] pci 0000:03:03.0:   bridge window [mem 0x4abca00000-0x5011efffff 64bit pref]
+[ 1306.913089] pci 0000:03:03.0: supports D1 D2
+[ 1306.913095] pci 0000:03:03.0: PME# supported from D0 D1 D2 D3hot D3cold
+[ 1306.913497] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[ 1306.913773] pci 0000:04:00.0: [10de:2b85] type 00 class 0x030000 PCIe Legacy Endpoint
+[ 1306.913926] pci 0000:04:00.0: BAR 0 [mem 0x80000000-0x83ffffff]
+[ 1306.913940] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x47ffffffff 64bit pref]
+[ 1306.913954] pci 0000:04:00.0: BAR 3 [mem 0x4010000000-0x4011ffffff 64bit pref]
+[ 1306.913963] pci 0000:04:00.0: BAR 5 [io  0x5000-0x507f]
+[ 1306.913972] pci 0000:04:00.0: ROM [mem 0x00000000-0x0007ffff pref]
+[ 1306.914143] pci 0000:04:00.0: Enabling HDA controller
+[ 1306.914493] pci 0000:04:00.0: PME# supported from D0 D3hot
+[ 1306.914706] pci 0000:04:00.0: VF BAR 0 [mem 0x84040000-0x8407ffff 64bit pref]
+[ 1306.914716] pci 0000:04:00.0: VF BAR 0 [mem 0x84040000-0x8407ffff 64bit pref]: contains BAR 0 for 1 VFs
+[ 1306.914729] pci 0000:04:00.0: VF BAR 2 [mem 0x00000000-0x0fffffff 64bit pref]
+[ 1306.914733] pci 0000:04:00.0: VF BAR 2 [mem 0x00000000-0x0fffffff 64bit pref]: contains BAR 2 for 1 VFs
+[ 1306.914746] pci 0000:04:00.0: VF BAR 4 [mem 0x00000000-0x01ffffff 64bit pref]
+[ 1306.914750] pci 0000:04:00.0: VF BAR 4 [mem 0x00000000-0x01ffffff 64bit pref]: contains BAR 4 for 1 VFs
+[ 1306.915485] pci 0000:04:00.0: 8.000 Gb/s available PCIe bandwidth, limited by 2.5 GT/s PCIe x4 link at 0000:00:07.0 (capable of 504.112 Gb/s with 32.0 GT/s PCIe x16 link)
+[ 1306.915847] pci 0000:04:00.0: vgaarb: bridge control possible
+[ 1306.915853] pci 0000:04:00.0: vgaarb: VGA device added: decodes=io+mem,owns=none,locks=none
+[ 1306.915865] i915 0000:00:02.0: vgaarb: VGA decodes changed: olddecodes=io+mem,decodes=none:owns=io+mem
+[ 1306.916097] pci 0000:04:00.1: [10de:22e8] type 00 class 0x040300 PCIe Endpoint
+[ 1306.916264] pci 0000:04:00.1: BAR 0 [mem 0x84000000-0x84003fff]
+[ 1306.917235] pci 0000:03:00.0: PCI bridge to [bus 04]
+[ 1306.917360] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[ 1306.918147] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[ 1306.918295] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[ 1306.918372] pci 0000:03:00.0: bridge window [mem size 0x802000000 64bit pref] to [bus 04] add_size 12100000 add_align 800000000
+[ 1306.918382] pci 0000:03:01.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 05-11] add_size 800000000 add_align 100000
+[ 1306.918389] pci 0000:03:01.0: bridge window [mem 0x00100000-0x000fffff] to [bus 05-11] add_size 200000 add_align 100000
+[ 1306.918394] pci 0000:03:02.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 12-1e] add_size 800000000 add_align 100000
+[ 1306.918399] pci 0000:03:02.0: bridge window [mem 0x00100000-0x000fffff] to [bus 12-1e] add_size 200000 add_align 100000
+[ 1306.918402] pci 0000:03:03.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 1f-2b] add_size 800000000 add_align 100000
+[ 1306.918406] pci 0000:03:03.0: bridge window [mem 0x00100000-0x000fffff] to [bus 1f-2b] add_size 200000 add_align 100000
+[ 1306.918414] pci 0000:02:00.0: bridge window [mem 0x800000000-0x1001ffffff 64bit pref] to [bus 03-2b] add_size 1812100000 add_align 800000000
+[ 1306.918419] pci 0000:02:00.0: bridge window [mem 0x04000000-0x080fffff] to [bus 03-2b] add_size 600000 add_align 4000000
+[ 1306.918431] pci 0000:02:00.0: bridge window [mem 0x4000000000-0x5001ffffff 64bit pref]: assigned
+[ 1306.918434] pci 0000:02:00.0: bridge window [mem 0x80000000-0x880fffff]: assigned
+[ 1306.918436] pci 0000:02:00.0: bridge window [io  0x5000-0x8fff]: assigned
+[ 1306.918443] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x48140fffff 64bit pref]: assigned
+[ 1306.918444] pci 0000:03:00.0: bridge window [mem 0x80000000-0x840fffff]: assigned
+[ 1306.918446] pci 0000:03:01.0: bridge window [mem 0x84100000-0x855fffff]: assigned
+[ 1306.918448] pci 0000:03:01.0: bridge window [mem 0x4814100000-0x4abeafffff 64bit pref]: assigned
+[ 1306.918450] pci 0000:03:02.0: bridge window [mem 0x85600000-0x86afffff]: assigned
+[ 1306.918451] pci 0000:03:02.0: bridge window [mem 0x4abeb00000-0x4d694fffff 64bit pref]: assigned
+[ 1306.918453] pci 0000:03:03.0: bridge window [mem 0x86b00000-0x87ffffff]: assigned
+[ 1306.918455] pci 0000:03:03.0: bridge window [mem size 0x2aaa00000 64bit pref]: can't assign; no space
+[ 1306.918458] pci 0000:03:03.0: bridge window [mem size 0x2aaa00000 64bit pref]: failed to assign
+[ 1306.918459] pci 0000:03:00.0: bridge window [io  0x5000-0x5fff]: assigned
+[ 1306.918461] pci 0000:03:01.0: bridge window [io  0x6000-0x6fff]: assigned
+[ 1306.918462] pci 0000:03:02.0: bridge window [io  0x7000-0x7fff]: assigned
+[ 1306.918464] pci 0000:03:03.0: bridge window [io  0x8000-0x8fff]: assigned
+[ 1306.918467] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x48140fffff 64bit pref]: releasing
+[ 1306.918469] pci 0000:03:00.0: bridge window [mem 0x80000000-0x840fffff]: releasing
+[ 1306.918472] pci 0000:03:01.0: bridge window [mem 0x84100000-0x855fffff]: releasing
+[ 1306.918474] pci 0000:03:01.0: bridge window [mem 0x4814100000-0x4abeafffff 64bit pref]: releasing
+[ 1306.918476] pci 0000:03:02.0: bridge window [mem 0x85600000-0x86afffff]: releasing
+[ 1306.918478] pci 0000:03:02.0: bridge window [mem 0x4abeb00000-0x4d694fffff 64bit pref]: releasing
+[ 1306.918479] pci 0000:03:03.0: bridge window [mem 0x86b00000-0x87ffffff]: releasing
+[ 1306.918481] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4801ffffff 64bit pref]: assigned
+[ 1306.918483] pci 0000:03:00.0: bridge window [mem 0x80000000-0x840fffff]: assigned
+[ 1306.918484] pci 0000:03:01.0: bridge window [mem 0x84100000-0x855fffff]: assigned
+[ 1306.918487] pci 0000:03:01.0: bridge window [mem 0x4802000000-0x4aac9fffff 64bit pref]: assigned
+[ 1306.918489] pci 0000:03:02.0: bridge window [mem 0x85600000-0x86afffff]: assigned
+[ 1306.918490] pci 0000:03:02.0: bridge window [mem 0x4aaca00000-0x4d573fffff 64bit pref]: assigned
+[ 1306.918492] pci 0000:03:03.0: bridge window [mem 0x86b00000-0x87ffffff]: assigned
+[ 1306.918493] pci 0000:03:03.0: bridge window [mem 0x4d57400000-0x5001dfffff 64bit pref]: assigned
+[ 1306.918496] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4801ffffff 64bit pref]: failed to expand by 0x12100000
+[ 1306.918498] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4801ffffff 64bit pref]: failed to add optional 12100000
+[ 1306.918503] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x47ffffffff 64bit pref]: assigned
+[ 1306.918534] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[ 1306.918536] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[ 1306.918537] pci 0000:04:00.0: BAR 0 [mem 0x80000000-0x83ffffff]: assigned
+[ 1306.918547] pci 0000:04:00.0: BAR 3 [mem 0x4800000000-0x4801ffffff 64bit pref]: assigned
+[ 1306.918577] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[ 1306.918578] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[ 1306.918580] pci 0000:04:00.0: ROM [mem 0x84000000-0x8407ffff pref]: assigned
+[ 1306.918583] pci 0000:04:00.0: VF BAR 0 [mem 0x84080000-0x840bffff 64bit pref]: assigned
+[ 1306.918597] pci 0000:04:00.1: BAR 0 [mem 0x840c0000-0x840c3fff]: assigned
+[ 1306.918607] pci 0000:04:00.0: BAR 5 [io  0x5000-0x507f]: assigned
+[ 1306.918617] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x47ffffffff 64bit pref]: releasing
+[ 1306.918618] pci 0000:04:00.0: BAR 0 [mem 0x80000000-0x83ffffff]: releasing
+[ 1306.918620] pci 0000:04:00.0: BAR 3 [mem 0x4800000000-0x4801ffffff 64bit pref]: releasing
+[ 1306.918621] pci 0000:04:00.0: ROM [mem 0x84000000-0x8407ffff pref]: releasing
+[ 1306.918623] pci 0000:04:00.0: VF BAR 0 [mem 0x84080000-0x840bffff 64bit pref]: releasing
+[ 1306.918624] pci 0000:04:00.1: BAR 0 [mem 0x840c0000-0x840c3fff]: releasing
+[ 1306.918626] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x47ffffffff 64bit pref]: assigned
+[ 1306.918655] pci 0000:04:00.0: BAR 0 [mem 0x80000000-0x83ffffff]: assigned
+[ 1306.918665] pci 0000:04:00.0: BAR 3 [mem 0x4800000000-0x4801ffffff 64bit pref]: assigned
+[ 1306.918695] pci 0000:04:00.1: BAR 0 [mem 0x84000000-0x84003fff]: assigned
+[ 1306.918704] pci 0000:04:00.0: ROM [mem 0x84080000-0x840fffff pref]: assigned
+[ 1306.918708] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[ 1306.918710] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[ 1306.918713] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[ 1306.918716] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[ 1306.918719] pci 0000:04:00.0: VF BAR 0 [mem 0x84040000-0x8407ffff 64bit pref]: assigned
+[ 1306.918733] pci 0000:03:00.0: PCI bridge to [bus 04]
+[ 1306.918741] pci 0000:03:00.0:   bridge window [io  0x5000-0x5fff]
+[ 1306.918751] pci 0000:03:00.0:   bridge window [mem 0x80000000-0x840fffff]
+[ 1306.918758] pci 0000:03:00.0:   bridge window [mem 0x4000000000-0x4801ffffff 64bit pref]
+[ 1306.918769] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[ 1306.918774] pci 0000:03:01.0:   bridge window [io  0x6000-0x6fff]
+[ 1306.918783] pci 0000:03:01.0:   bridge window [mem 0x84100000-0x855fffff]
+[ 1306.918789] pci 0000:03:01.0:   bridge window [mem 0x4802000000-0x4aac9fffff 64bit pref]
+[ 1306.918800] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[ 1306.918806] pci 0000:03:02.0:   bridge window [io  0x7000-0x7fff]
+[ 1306.918815] pci 0000:03:02.0:   bridge window [mem 0x85600000-0x86afffff]
+[ 1306.918823] pci 0000:03:02.0:   bridge window [mem 0x4aaca00000-0x4d573fffff 64bit pref]
+[ 1306.918836] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[ 1306.918842] pci 0000:03:03.0:   bridge window [io  0x8000-0x8fff]
+[ 1306.918851] pci 0000:03:03.0:   bridge window [mem 0x86b00000-0x87ffffff]
+[ 1306.918858] pci 0000:03:03.0:   bridge window [mem 0x4d57400000-0x5001dfffff 64bit pref]
+[ 1306.918870] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[ 1306.918875] pci 0000:02:00.0:   bridge window [io  0x5000-0x8fff]
+[ 1306.918886] pci 0000:02:00.0:   bridge window [mem 0x80000000-0x880fffff]
+[ 1306.918894] pci 0000:02:00.0:   bridge window [mem 0x4000000000-0x5001ffffff 64bit pref]
+[ 1306.918906] pcieport 0000:00:07.0: PCI bridge to [bus 02-2b]
+[ 1306.918911] pcieport 0000:00:07.0:   bridge window [io  0x5000-0x8fff]
+[ 1306.918917] pcieport 0000:00:07.0:   bridge window [mem 0x80000000-0x89efffff]
+[ 1306.918924] pcieport 0000:00:07.0:   bridge window [mem 0x4000000000-0x5013ffffff 64bit pref]
+[ 1306.918931] PCI: No. 2 try to assign unassigned res
+[ 1306.918936] release child resource [mem 0x4000000000-0x47ffffffff 64bit pref]
+[ 1306.918940] release child resource [mem 0x4800000000-0x4801ffffff 64bit pref]
+[ 1306.918945] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4801ffffff 64bit pref]: releasing
+[ 1306.918957] pci 0000:03:00.0: bridge window [mem size 0x802000000 64bit pref] to [bus 04] add_size 12000000 add_align 800000000
+[ 1306.918966] pci 0000:03:00.0: bridge window [mem size 0x814000000 64bit pref]: can't assign; no space
+[ 1306.918970] pci 0000:03:00.0: bridge window [mem size 0x814000000 64bit pref]: failed to assign
+[ 1306.918974] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4801ffffff 64bit pref]: assigned
+[ 1306.918979] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4801ffffff 64bit pref]: failed to expand by 0x12000000
+[ 1306.918982] pci 0000:03:00.0: bridge window [mem 0x4000000000-0x4801ffffff 64bit pref]: failed to add optional 12000000
+[ 1306.918986] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x47ffffffff 64bit pref]: assigned
+[ 1306.919019] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[ 1306.919024] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[ 1306.919029] pci 0000:04:00.0: BAR 3 [mem 0x4800000000-0x4801ffffff 64bit pref]: assigned
+[ 1306.919060] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[ 1306.919065] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[ 1306.919069] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x47ffffffff 64bit pref]: releasing
+[ 1306.919074] pci 0000:04:00.0: BAR 3 [mem 0x4800000000-0x4801ffffff 64bit pref]: releasing
+[ 1306.919079] pci 0000:04:00.0: BAR 1 [mem 0x4000000000-0x47ffffffff 64bit pref]: assigned
+[ 1306.919112] pci 0000:04:00.0: BAR 3 [mem 0x4800000000-0x4801ffffff 64bit pref]: assigned
+[ 1306.919145] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: can't assign; no space
+[ 1306.919150] pci 0000:04:00.0: VF BAR 4 [mem size 0x02000000 64bit pref]: failed to assign
+[ 1306.919153] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: can't assign; no space
+[ 1306.919157] pci 0000:04:00.0: VF BAR 2 [mem size 0x10000000 64bit pref]: failed to assign
+[ 1306.919163] pci 0000:03:00.0: PCI bridge to [bus 04]
+[ 1306.919169] pci 0000:03:00.0:   bridge window [io  0x5000-0x5fff]
+[ 1306.919178] pci 0000:03:00.0:   bridge window [mem 0x80000000-0x840fffff]
+[ 1306.919186] pci 0000:03:00.0:   bridge window [mem 0x4000000000-0x4801ffffff 64bit pref]
+[ 1306.919197] pci 0000:03:01.0: PCI bridge to [bus 05-11]
+[ 1306.919202] pci 0000:03:01.0:   bridge window [io  0x6000-0x6fff]
+[ 1306.919211] pci 0000:03:01.0:   bridge window [mem 0x84100000-0x855fffff]
+[ 1306.919224] pci 0000:03:01.0:   bridge window [mem 0x4802000000-0x4aac9fffff 64bit pref]
+[ 1306.919234] pci 0000:03:02.0: PCI bridge to [bus 12-1e]
+[ 1306.919239] pci 0000:03:02.0:   bridge window [io  0x7000-0x7fff]
+[ 1306.919248] pci 0000:03:02.0:   bridge window [mem 0x85600000-0x86afffff]
+[ 1306.919255] pci 0000:03:02.0:   bridge window [mem 0x4aaca00000-0x4d573fffff 64bit pref]
+[ 1306.919266] pci 0000:03:03.0: PCI bridge to [bus 1f-2b]
+[ 1306.919272] pci 0000:03:03.0:   bridge window [io  0x8000-0x8fff]
+[ 1306.919281] pci 0000:03:03.0:   bridge window [mem 0x86b00000-0x87ffffff]
+[ 1306.919288] pci 0000:03:03.0:   bridge window [mem 0x4d57400000-0x5001dfffff 64bit pref]
+[ 1306.919298] pci 0000:02:00.0: PCI bridge to [bus 03-2b]
+[ 1306.919304] pci 0000:02:00.0:   bridge window [io  0x5000-0x8fff]
+[ 1306.919313] pci 0000:02:00.0:   bridge window [mem 0x80000000-0x880fffff]
+[ 1306.919320] pci 0000:02:00.0:   bridge window [mem 0x4000000000-0x5001ffffff 64bit pref]
+[ 1306.919332] pcieport 0000:00:07.0: PCI bridge to [bus 02-2b]
+[ 1306.919337] pcieport 0000:00:07.0:   bridge window [io  0x5000-0x8fff]
+[ 1306.919342] pcieport 0000:00:07.0:   bridge window [mem 0x80000000-0x89efffff]
+[ 1306.919348] pcieport 0000:00:07.0:   bridge window [mem 0x4000000000-0x5013ffffff 64bit pref]
+[ 1306.919870] pcieport 0000:03:00.0: enabling device (0001 -> 0003)
+[ 1306.920691] pcieport 0000:03:01.0: pciehp: Slot #1 AttnBtn- PwrCtrl- MRL- AttnInd- PwrInd- HotPlug+ Surprise+ Interlock- NoCompl+ IbPresDis- LLActRep+
+[ 1306.921255] pcieport 0000:03:02.0: pciehp: Slot #2 AttnBtn- PwrCtrl- MRL- AttnInd- PwrInd- HotPlug+ Surprise+ Interlock- NoCompl+ IbPresDis- LLActRep+
+[ 1306.922020] pcieport 0000:03:03.0: pciehp: Slot #3 AttnBtn- PwrCtrl- MRL- AttnInd- PwrInd- HotPlug+ Surprise+ Interlock- NoCompl+ IbPresDis- LLActRep+
+[ 1306.922761] pci 0000:04:00.1: extending delay after power-on from D3hot to 20 msec
+[ 1306.922903] pci 0000:04:00.1: D0 power state depends on 0000:04:00.0
+[ 1312.010627] nvidia-nvlink: Nvlink Core is being initialized, major device number 510
+[ 1312.010639] 
+[ 1312.014782] nvidia 0000:04:00.0: AER: unmasked Uncorrectable Internal Error at probe
+[ 1312.014808] nvidia 0000:04:00.0: enabling device (0000 -> 0003)
+[ 1312.014915] nvidia 0000:04:00.0: external GPU detected (thunderbolt-attached=yes, external/untrusted=yes)
+[ 1312.015000] nvidia 0000:04:00.0: vgaarb: VGA decodes changed: olddecodes=io+mem,decodes=none:owns=none
+[ 1312.024913] NVRM: loading NVIDIA UNIX Open Kernel Module for x86_64  595.71.05  Release Build  (root@nvidia-driver-injector-t9phx)  Fri Jun  5 22:10:14 UTC 2026
+[ 1314.035502] NVRM: tb_egpu [F40b/A12]: open scheduled to bounded worker (timeout=3000 ms)
+[ 1315.030507] nvidia 0000:04:00.0: external GPU detected (thunderbolt-attached=yes, external/untrusted=yes)
+[ 1315.347138] NVRM: tb_egpu [F40b/A12]: open completed within budget rc=0
+[ 1315.358187] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=3
+[ 1315.358197] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=3
+[ 1315.358198] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=2
+[ 1315.358691] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=2
+[ 1315.358697] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=2
+[ 1315.358699] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=1
+[ 1315.358707] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=1 (LAST-CLOSE)
+[ 1315.358737] tb_egpu [CLOSE]: site=close-entry     pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1315.358739] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=1 (LAST-CLOSE)
+[ 1315.358755] tb_egpu [CLOSE]: site=pre-stop        pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1315.358887] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=post-shutdown   usage_count=0 (LAST-CLOSE)
+[ 1315.358901] tb_egpu [CLOSE]: site=post-shutdown   pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1315.358904] NVRM: Persistence mode is deprecated and will be removed in a future release. Please use nvidia-persistenced instead.
+[ 1315.358906] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=0 (LAST-CLOSE)
+[ 1315.358920] tb_egpu [CLOSE]: site=close-exit      pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1315.374659] NVRM: tb_egpu [F40b/A12]: open scheduled to bounded worker (timeout=3000 ms)
+[ 1315.374675] NVRM: tb_egpu [F40b/A12]: open completed within budget rc=0
+[ 1315.384226] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=3
+[ 1315.384234] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=3
+[ 1315.384236] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=2
+[ 1315.384730] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=2
+[ 1315.384733] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=2
+[ 1315.384734] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=1
+[ 1315.384739] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=1 (LAST-CLOSE)
+[ 1315.384767] tb_egpu [CLOSE]: site=close-entry     pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1315.384771] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=1 (LAST-CLOSE)
+[ 1315.384787] tb_egpu [CLOSE]: site=pre-stop        pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1315.384932] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=post-shutdown   usage_count=0 (LAST-CLOSE)
+[ 1315.384947] tb_egpu [CLOSE]: site=post-shutdown   pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1315.384950] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=0 (LAST-CLOSE)
+[ 1315.384964] tb_egpu [CLOSE]: site=close-exit      pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1315.402500] NVRM: tb_egpu [F40b/A12]: open scheduled to bounded worker (timeout=3000 ms)
+[ 1315.402516] NVRM: tb_egpu [F40b/A12]: open completed within budget rc=0
+[ 1315.415914] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=3
+[ 1315.415921] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=3
+[ 1315.415923] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=2
+[ 1315.416412] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=2
+[ 1315.416415] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=2
+[ 1315.416416] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=1
+[ 1315.416421] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=1 (LAST-CLOSE)
+[ 1315.416448] tb_egpu [CLOSE]: site=close-entry     pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1315.416451] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=1 (LAST-CLOSE)
+[ 1315.416469] tb_egpu [CLOSE]: site=pre-stop        pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1315.416587] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=post-shutdown   usage_count=0 (LAST-CLOSE)
+[ 1315.416601] tb_egpu [CLOSE]: site=post-shutdown   pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1315.416602] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=0 (LAST-CLOSE)
+[ 1315.416613] tb_egpu [CLOSE]: site=close-exit      pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1356.098552] ===== #292 A13 TEST Stage4: nvidia-smi -pm 0 (diverging LAST-CLOSE) 2026-06-05T22:31:59Z =====
+[ 1356.105928] NVRM: tb_egpu [F40b/A12]: open scheduled to bounded worker (timeout=3000 ms)
+[ 1356.105944] NVRM: tb_egpu [F40b/A12]: open completed within budget rc=0
+[ 1356.117594] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=3
+[ 1356.117603] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=3
+[ 1356.117605] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=2
+[ 1356.118954] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=2
+[ 1356.118958] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=2
+[ 1356.118959] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=1
+[ 1356.118964] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-entry     usage_count=1 (LAST-CLOSE)
+[ 1356.118999] tb_egpu [CLOSE]: site=close-entry     pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1356.119002] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=pre-stop        usage_count=1 (LAST-CLOSE)
+[ 1356.119023] tb_egpu [CLOSE]: site=pre-stop        pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x07f4a000 wpr2_up:YES
+[ 1356.119026] NVRM: tb_egpu [F40b]: rm_disable_adapter scheduled to bounded worker (timeout=1200 ms)
+[ 1356.148683] NVRM: tb_egpu [F40b]: rm_disable_adapter completed within budget
+[ 1356.149935] NVRM: tb_egpu [F40b]: rm_shutdown_adapter scheduled to bounded worker (timeout=1200 ms)
+[ 1356.792417] NVRM: tb_egpu [F40b]: rm_shutdown_adapter completed within budget
+[ 1356.792432] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=post-shutdown   usage_count=0 (LAST-CLOSE)
+[ 1356.792467] tb_egpu [CLOSE]: site=post-shutdown   pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x00000000 wpr2_up:no
+[ 1356.792474] NVRM: GPU 0000:04:00.0: tb_egpu [CLOSE]: site=close-exit      usage_count=0 (LAST-CLOSE)
+[ 1356.792492] tb_egpu [CLOSE]: site=close-exit      pdev=0000:04:00.0 bar0=0x80000000 PMC_BOOT_0=0x1b2000a1 WPR2=0x00000000 wpr2_up:no
+[ 1396.565204] ===== #292 A13 TEST Stage5 THE ROLL (nvidia-smi -L re-open) 2026-06-05T22:32:40Z — apnex.31 SHOULD SURVIVE =====
+[ 1396.572395] NVRM: tb_egpu [F40b/A12]: open scheduled to bounded worker (timeout=3000 ms)
+[ 1397.590320] pcieport 0000:00:07.0: AER: Uncorrectable (Non-Fatal) error message received from 0000:04:00.0
+[ 1397.590434] nvidia 0000:04:00.0: PCIe Bus Error: severity=Uncorrectable (Non-Fatal), type=Transaction Layer, (Requester ID)
+[ 1397.590445] nvidia 0000:04:00.0:   device [10de:2b85] error status/mask=00004000/00000000
+[ 1397.590449] nvidia 0000:04:00.0:    [14] CmpltTO                (First)
+[ 1397.592528] tb_egpu recover: AER error_detected fired on 0000:04:00.0 (channel state=1)
+[ 1397.593871] tb_egpu trigger [event=error-handler]:
+[ 1397.593871]   GPU(0000:04:00.0)    LnkSta=0x1041 DevSta=0x0003  AER UESta=0x00004000 UEMsk=0x00000000 UESvrt=0x00462030 CESta=0x00002000 CEMsk=0x0000a000
+[ 1397.593871]              AER HdrLog=ffffffff_ffffffff_ffffffff_ffffffff
+[ 1397.593871]   Bridge(0000:03:00.0) LnkSta=0x7041 DevSta=0x0010  AER UESta=0x00000000 UEMsk=0x00000000 UESvrt=0x00462010 CESta=0x00000001 CEMsk=0x00002000
+[ 1397.593871]   Root(0000:00:07.0)   LnkSta=0x3041 DevSta=0x0010  AER UESta=0x00000000 UEMsk=0x00000000 CESta=0x00000000 CEMsk=0x00002000
+[ 1397.593871]              RootCmd=0x00000007 RootSta=0x00000000 ErrorSrc=0x04000000
+[ 1397.593871]   DPC: absent
+[ 1397.593882] tb_egpu recover: AER during in-flight bootstrap -> early dead-bus marker to free stuck open worker (#292)
+[ 1397.593944] tb_egpu recover: error_detected -> DISCONNECT (sink-set: GPU already declared lost (C5 sink); attempts=0/3)
+[ 1397.593969] pci 0000:04:00.1: AER: can't recover (no error_detected callback)
+[ 1397.593978] tb_egpu recover: AER during in-flight bootstrap -> early dead-bus marker to free stuck open worker (#292)
+[ 1397.593999] tb_egpu recover: error_detected -> DISCONNECT (sink-set: GPU already declared lost (C5 sink); attempts=0/3)
+[ 1397.594042] pcieport 0000:03:00.0: AER: device recovery failed
+[ 1397.628161] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.628171] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.628173] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.628200] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.628201] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.628203] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.630528] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.630531] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.630532] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.630557] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.630558] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.630559] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.631944] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.631948] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.631950] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.632027] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.632030] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.632031] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.632351] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.632357] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.632358] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.632431] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.632433] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.632434] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.632840] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.632845] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.632847] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.632919] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.632923] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.632925] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.633794] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.633797] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.633798] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.633914] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.633917] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.633918] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.634358] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.634362] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.634363] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.634478] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.634482] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.634483] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.634924] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.634927] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.634929] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.635046] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.635049] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.635051] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.636042] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.636046] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.636047] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.636162] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.636165] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.636166] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.636684] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.636688] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.636689] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.636805] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.636809] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.636811] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.637272] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.637278] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.637279] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.637393] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.637396] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.637397] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.637839] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.637842] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.637843] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.637960] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.637963] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.637964] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.638401] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.638404] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.638405] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.638521] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.638529] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.638532] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.638574] nvidia 0000:04:00.0: external GPU detected (thunderbolt-attached=yes, external/untrusted=yes)
+[ 1397.638997] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.639001] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.639002] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.639117] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.639122] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.639124] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.639581] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.639585] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.639586] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.639723] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.639725] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.639726] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.640188] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.640191] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.640192] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.640309] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.640313] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.640314] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.640896] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.640900] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.640901] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.641018] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.641022] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.641023] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.644113] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.644116] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.644118] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.644171] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.644174] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.644175] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.644489] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.644492] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.644494] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.644610] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.644613] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.644614] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.645171] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.645175] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.645176] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.645292] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.645296] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.645297] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.645779] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.645782] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.645783] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.645900] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.645903] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.645904] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.646365] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.646367] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.646369] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.646487] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.646490] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.646491] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.646953] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.646956] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.646957] NVRM: GPU0 _kgspRpcRecvPoll: GSP RM heartbeat timed out
+[ 1397.647073] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
+[ 1397.647078] NVRM: GPU0 _kgspIsHeartbeatTimedOut: Heartbeat timed out, currentTimeMs 0 heartbeat 4294967295 heartbeatWithOffsetMs 2580888198 diff 1714079098 timeout 5200
+[ 1397.647079] NVRM: GPU0 _kgspRpcRecvPoll: LibOS heartbeat timed out
+[ 1397.647496] NVRM: GPU0 tmrGetTimeEx_GH100: NVRM-RC: Consistently Bad TimeLo value ffffffff
