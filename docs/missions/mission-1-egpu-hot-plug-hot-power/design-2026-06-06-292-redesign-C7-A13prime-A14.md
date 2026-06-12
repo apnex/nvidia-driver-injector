@@ -137,6 +137,32 @@ Both sequences close at the **same structural property** (lock-free marker honor
 
 ## 3. PATCH PLAN (file:line → patch ID; minimal L1)
 
+> ⮕ **AMENDED 2026-06-06 by the GAP-6/7 pre-build audit** (`audit-2026-06-06-GAP67-prebuild-verdict.md`,
+> 6-auditor sweep of all **25** `gpuTimeoutCondWait` callers + the engine + all PDB readers; **GATE: GO**).
+> Build with these deltas folded in:
+> - **C7-e2 amended (wording):** insert as `if ((pGpu != NULL) && osIsGpuBusLost(pGpu)) { status =
+>   NV_ERR_TIMEOUT; break; }` at the top of the `while` body (gpu_timeout.c:~593, before `osSpinLoop()`).
+>   Engine confirmed: `gpuTimeoutCondWait` is a plain macro → `timeoutCondWait` is the ONLY cond-wait body
+>   (no TMR variant) → **one edit intercepts all 25 callers**. The loop-body placement is correct by design —
+>   4 reachable accidental-true sites (kern_fsp_gh100.c:1158, kernel_gsp_gb100.c:83, kern_fsp.c:364,
+>   kernel_gsp_tu102.c:1155) return NV_OK before e2 fires (identical to today, bounded by the next covered
+>   poll); the live test must NOT read missing TIMEOUT lines from those 4 sites as e2 failure.
+> - **C7-e7 NEW, REQUIRED:** the fork's C5-v4 guard layer keys on **PDB alone** and is bypassed wholesale by
+>   the os_pci-set/PDB-unset end-state. Widen 5 guards to `osIsGpuBusLost(pGpu)` (one token each, read-only):
+>   `rpc.c:1854` (G2), `rpc.c:2097` (G3, also kills the per-chunk bare `NV_ASSERT(0)` at 2116/2153),
+>   **`rpc.c:11530` (`rpcRmApiFree_GSP`) — load-bearing:** without it, a post-init-loss teardown emits one
+>   LEVEL_ERROR + one NV_ASSERT **per freed object** — the exact netconsole print-storm class that wedged
+>   apnex.31; `journal.c:2934`; `nv_debug_dump.c:282` (keep the `|| PDB_PROP_GPU_INACCESSIBLE` term).
+> - **C7-e8 recommended:** `kern_fsp_gh100.c:637-638` G9 guard → `osIsGpuBusLost` (clean `NV_ERR_GPU_IS_LOST`
+>   instead of the `:672` assert-noise path).
+> - **GAP-7 verdict:** **C7 ships WITHOUT a PDB write** — full teardown/re-open trace shows no correctness
+>   dependency on `PDB==TRUE` (unwind skips state-unload via `NV_INIT_FLAG_*`, OBJGPU destroyed in the unwind,
+>   re-open builds a fresh OBJGPU; only `pci_dev->error_state` persists, honored by every MMIO read).
+> - **Test-plan deltas:** dead-bus shutdown + cold-init become near-instant (expect the faster bounds);
+>   expect the new `gpuMarkDeviceForReset` line from kern_fsp_gb202.c:84 on a dead-bus re-open.
+> - GAP-6 hazards (a)/(b): **empty** — the only TIMEOUT-specific consumers (5 ICD gates,
+>   kernel_falcon_tu102.c:606-785) bail out safely on TIMEOUT; zero non-MMIO-completing conds among all 25.
+
 ### C7 — base/L1 GSP-core dead-bus poll-reader (upstream-bound, carve as `C7` on fork)
 
 > Justified L1 (sovereign-modules policy): the abort predicate lives **intrinsically** inside NVIDIA's poll loops; there is no L4-L6 way to make those loops honor a disconnect marker. Blast radius concentrated to **one** new predicate (a thin wrapper over the existing `osIsGpuBusDead`, no new semantics) at **exactly 6 call-sites across 4 files**. Upstream-aligned: GSP polls *should* honor `pci_dev_is_disconnected` for any surprise-removed GPU. Declared in the **project-owned** `nv-gpu-lost.h`, NOT generated `g_os_nvoc.h` (no NVOC-gen edits).

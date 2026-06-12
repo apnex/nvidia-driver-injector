@@ -51,10 +51,12 @@
   blocking `COND_ACQUIRE` (re-opens F44); C′-alone (divergence-blind).
 
 ## NEXT STEPS (the build — gated on operator go)
-1. **Pre-build source checks** (cheap, do first): **GAP-6** — audit every `timeoutCondWait` /
-   `gpuTimeoutCondWait` caller for an `NV_ERR_TIMEOUT`-specific branch (it's a driver-wide primitive);
-   **GAP-7** — confirm the close/teardown + re-open paths don't depend on `PDB_PROP_GPU_IS_LOST==TRUE` (C7
-   may leave PDB unset).
+1. ✅ **Pre-build source checks DONE 2026-06-06** — **GATE: GO** (`audit-2026-06-06-GAP67-prebuild-verdict.md`
+   + RAW appendix). GAP-6: all **25** callers safe; one `timeoutCondWait` edit intercepts everything (plain
+   macro, no TMR variant); hazards (a)/(b) empty. GAP-7: **no PDB write needed** — but the C5-v4 guard layer
+   keys on PDB alone ⇒ **NEW REQUIRED C7-e7** (widen 5 guards to `osIsGpuBusLost`; `rpc.c:11530` is
+   load-bearing — prevents a per-freed-object print-storm of the apnex.31 wedge class) + recommended C7-e8.
+   DoR §3 amended in place with all deltas.
 2. **Build apnex.32:** carve `C7` on the fork (base, after C6), extend `A13` in place (A13′), add `A14`
    addon; add patch-intent + review files (intents drafted this session — see below); manifest + version
    bump (A5-branch commit, no cascade — see the apnex.31 build for the procedure). **Real `make modules`**
