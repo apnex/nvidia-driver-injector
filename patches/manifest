@@ -30,3 +30,5 @@
   A10-f40b-lockfree-sink    addon  -              fork:a10-f40b-lockfree-sink
   A12-init-funnel            addon  -              fork:a12-init-funnel
   A13-292-inflight-aer-earlyfree addon -           fork:a13-292-inflight-aer-earlyfree
+  C7-292-inflight-deadbus-poll-coverage base -     fork:c7-292-inflight-deadbus-poll-coverage
+  A14-292-reopen-failfast-gate addon -             fork:a14-292-reopen-failfast-gate

@@ -4,7 +4,7 @@ layer: addon
 source-branch: a13-292-inflight-aer-earlyfree
 upstream-candidacy: n/a
 telemetry-tier: mandatory
-status: deployed-insufficient-superseded
+status: deployed-insufficient-extended-by-a13prime
 related-patches: [C7-292-inflight-deadbus-poll-coverage, A14-292-reopen-failfast-gate, A10-f40b-lockfree-sink, A12-init-funnel, A3-recovery]
 ---
 

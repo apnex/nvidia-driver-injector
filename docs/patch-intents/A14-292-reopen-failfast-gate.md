@@ -4,7 +4,7 @@ layer: addon
 source-branch: a14-292-reopen-failfast-gate
 upstream-candidacy: n/a
 telemetry-tier: mandatory
-status: designed
+status: v1-implemented-compiled-validated
 related-patches: [C7-292-inflight-deadbus-poll-coverage, A13-292-inflight-aer-earlyfree, A3-recovery]
 ---
 

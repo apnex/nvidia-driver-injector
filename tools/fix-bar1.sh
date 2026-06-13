@@ -484,6 +484,21 @@ if [[ $DO_BIND -eq 1 ]]; then
 
     snapshot "E-after-bind-persist-on"
 
+    # A14 (#292): declare this chip diverged-recovered so the in-driver
+    # re-open fail-fast gate can arm. A userspace BAR1 recovery leaves the
+    # chip EQ-diverged (#979) in a way the driver cannot see; this sysfs
+    # assertion is the gate's primary signal. The gate then refuses a
+    # wedge-prone re-open (persistence-OFF LAST-CLOSE -> re-open) with -EIO
+    # instead of entering the GSP bring-up polls. Best-effort: the attr
+    # exists only on apnex.32+ (always-on, independent of
+    # NVreg_TbEgpuRecoverEnable). Recovery from a gate -EIO = re-run this
+    # script (slot-cycle => fresh nvl => bits clear) or cold-plug.
+    if echo 1 > "/sys/bus/pci/devices/$GPU/tb_egpu_diverged_recovered" 2>/dev/null; then
+        log "A14 ✓ — declared diverged-recovered (re-open gate armable)"
+    else
+        warn "A14 diverged-recovered attr not present (driver < apnex.32?) — gate not asserted"
+    fi
+
     if command -v nvidia-smi >/dev/null; then
         log "nvidia-smi -L (now safe — persistence engaged):"
         timeout 10 nvidia-smi -L 2>&1 | sed 's/^/  /' || warn "nvidia-smi -L timed out or failed"

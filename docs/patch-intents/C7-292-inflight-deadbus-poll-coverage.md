@@ -4,7 +4,7 @@ layer: base
 source-branch: c7-292-inflight-deadbus-poll-coverage
 upstream-candidacy: high
 telemetry-tier: none
-status: designed
+status: v1-implemented-compiled-validated
 related-patches: [A13-292-inflight-aer-earlyfree, A14-292-reopen-failfast-gate, A10-f40b-lockfree-sink, A12-init-funnel, C5-crash-safety, C6-cond-acquire-rwlock-fix]
 ---
 
