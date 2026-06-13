@@ -43,6 +43,7 @@
 #include <linux/pci.h>
 #include <linux/ioport.h>
 #include <linux/sizes.h>
+#include <linux/delay.h>
 
 #define TAG "tbegpu-rearm: "
 
@@ -61,6 +62,10 @@ MODULE_PARM_DESC(dry_run, "survey + plan only, perform NO writes (default Y)");
 static bool flr = true;
 module_param(flr, bool, 0444);
 MODULE_PARM_DESC(flr, "after a successful resize, FLR the device (pci_reset_function) so it re-fences its internal aperture to the new BAR — fixes the device-state desync that wedged a moved live BAR (default Y; set N to test resize-only)");
+
+static unsigned int settle_ms = 2000;
+module_param(settle_ms, uint, 0444);
+MODULE_PARM_DESC(settle_ms, "post-FLR settle delay (ms) for the chip to re-fence its aperture before bind — the relatch appears non-deterministic without it (cycle-1 had seconds, cycle-2 had ms and failed). Default 2000.");
 
 /* A resource is genuinely assigned iff it is inserted in the tree, not marked
  * UNSET, and has a non-zero size. pci_release_resource() leaves flags +size
@@ -273,6 +278,15 @@ static int __init rearm_init(void)
 
 		pr_info(TAG "pci_reset_function (FLR) -> rc=%d%s\n", frc,
 			frc ? " (reset failed — device may be unusable)" : "");
+		/* Settle: the Blackwell appears to re-fence its internal aperture
+		 * to the new ReBAR size only some ms after the FLR. cycle-1 (PASS)
+		 * had ~seconds between FLR and bind; cycle-2 (FAIL) bound within ms.
+		 * Give the chip time before nvidia touches the 32 G aperture. */
+		if (frc == 0 && settle_ms > 0) {
+			pr_info(TAG "settling %u ms for the chip to re-fence its aperture\n",
+				settle_ms);
+			msleep(settle_ms);
+		}
 	}
 
 	log_chain("POST", gpu_dev);

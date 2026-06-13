@@ -286,3 +286,43 @@ ReBAR CTRL=0xf21) → `modprobe --ignore-install nvidia` (recover=0) → **`RmIn
   DEMOTED to the fallback if n≥3 shows non-determinism. **Lesson: don't over-conclude failure from
   source inference — the contained live check flipped a medium-confidence "doomed" to a working PASS
   ([[feedback-dont-give-up-pursue-creative-solutions]]).**
+
+## E2 CYCLE-2 + SHUTDOWN FORENSICS — 2026-06-13 (n=1 PASS didn't replicate; likely a SETTLE-TIME variable, NOT proof FLR is dead)
+**FLR-without-settle/verify is unreliable — but there is a strong untested, CONTROLLABLE variable
+(post-reset settle time), so this is NOT "FLR is dead."** Evidence (prior-boot `journalctl -b -1`):
+- **Cycle 2 FAILED** — same `flr=1` (module: resize + `pci_reset_function` rc=0, RESULT=OK, BAR1 32 G),
+  but `modprobe` init **failed** at `kbusVerifyBar2_GB202` garbage `0xffffffff` → `RmInitAdapter
+  0x24:0x72:1307` (contained, recover=0, rc=-5). So with identical kernel-side steps, the chip relatched
+  in cycle 1 and did NOT in cycle 2 ⇒ **the FLR ReBAR-size relatch is NON-DETERMINISTIC** (cycle-1 PASS
+  was a lucky draw, not viability). FLR (no link-down) is physically borderline for a size re-sample.
+- **A failed relatch escalates:** the desynced chip stayed accessible + the driver loaded; **11 open
+  attempts** hit it (my retry `nvidia-smi` re-triggered a 2nd open → a WORSE state: `_kgspBootGspRm:
+  unexpected WPR2 already up` + GSP **crashcat** crash → `RmInitAdapter 0x62:0x40:2131`). Cumulative MMIO
+  to the desynced aperture produced a **fatal uncorrectable HARDWARE error → firmware/platform RAS RESET**
+  — NOT a kernel panic (no kdump vmcore; panics were armed) and NOT a software shutdown (journal ends
+  abruptly at 19:07:41; next boot's `BERT: Total records found: 1 / Skipped 1 error records` = the
+  firmware-logged hardware error). `recover=0` contained each init-fail but did NOT prevent the
+  degrade-to-platform-reset.
+
+**CONCLUSIONS ([[feedback-dont-give-up-pursue-creative-solutions]] — NOT a surrender; the next move
+attacks the controllable variable):**
+1. **The cycle-1-vs-cycle-2 difference was TIMING (settle), not pure randomness.** Cycle-1 (PASS) had
+   ~seconds between the FLR and `modprobe` (separate commands); cycle-2 (FAIL) had ~ms (one back-to-back
+   command). fix-bar1's slot-cycle has explicit settle `sleep`s precisely because the chip needs time to
+   re-fence its aperture after a reset. So "resize+FLR is non-deterministic" really means
+   "resize+FLR-**without a post-reset settle + verify** is non-deterministic." Don't retract the n=1
+   PASS — re-scope it.
+2. **NEXT (creative, evidence-based — the actual fix to try):** add to the module, after
+   `pci_reset_function`, (a) a **settle delay** (poll a sentinel / msleep), then (b) a **relatch
+   VERIFICATION** — read the chip's decoded aperture (ReBAR current size + a BAR2 sentinel) and only
+   report success if it shows 32 G. This (i) tests the settle-time hypothesis and (ii) is **fail-safe**:
+   on a non-relatch it reports FAIL and we DON'T bind → no degrade-to-platform-reset. Re-test n≥3.
+3. **The platform reset was AGGRAVATED by experiment methodology, not purely inherent:** the failed-init
+   chip stayed accessible + I retried `nvidia-smi` (11 opens → WPR2/crashcat → fatal HW error → firmware
+   RAS reset; no kdump panic, next-boot `BERT: 1 record`). A verify-before-bind + fail-safe quiesce (never
+   bind/retry-MMIO an unrelatched chip) removes that escalation — needed regardless, and it makes further
+   FLR testing SAFE.
+4. **fix-bar1's slot-cycle/PERST remains the proven FALLBACK** (deterministic, n≥5) if settle+verify
+   still can't make FLR reliable — but it is NOT the foregone conclusion. **This SUPERSEDES the E2 LIVE
+   PASS "VIABLE" banner above (re-scoped to "viable WITH settle+verify, pending n≥3"), not the
+   mechanism.**
