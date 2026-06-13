@@ -74,10 +74,11 @@ open failed — check dmesg `rc=`, not the CLI string.
 - **Patch-intents:** `docs/patch-intents/{C7,A13,A14,C8}-*.md` (statuses current). **Register:**
   `experiment-register.md` #292 entry (full ledger). **Failure modes:** fake-5090 `F47` (live-validated),
   `F48` (open→fixed-in-apnex.33; update row when the control passes).
-- **Git:** injector branch `a13-292-inflight-aer-earlyfree` @ `ee8a3cb` (apnex.33) — all session work
-  committed (`75c5784`→`ee8a3cb`); fork branches (local): a13 `690b336f` → c7 `147285e6` → a14 `a705623e`
-  → c8 `ec178e5d`; a5 `…apnex.33`. fake-5090 main @ `8f3777b`+. **NOT pushed** (standing posture).
-  Injector branch is OFF main — merge decision pending soak.
+- **Git: ALL PUSHED 2026-06-13** (user: "push now"; remote tips verified == local). Injector branch
+  `a13-292-inflight-aer-earlyfree` (new on origin) @ `c228016`+ — all session work committed
+  (`75c5784`→`ee8a3cb`→handover+housekeeping); fork branches (pushed): a13 `690b336f` → c7 `147285e6` →
+  a14 `a705623e` → c8 `ec178e5d`; a5 `83d1308e` (apnex.33). fake-5090 main @ `8f3777b`, pushed.
+  No PRs opened (gate holds). Injector branch is OFF main — merge decision pending soak.
 - **Images:** apnex.32 `edbdb8ebc8e3`, apnex.33 `af7e15794672` — both in docker + k3s containerd.
 
 ## Standing constraints (persist)
