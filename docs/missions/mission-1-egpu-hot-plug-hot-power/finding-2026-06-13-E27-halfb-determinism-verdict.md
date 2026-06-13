@@ -23,8 +23,13 @@
 > secondary-bus-reset, not a full pciehp slot-cycle). **Pivotal open question: is the `RmInitAdapter`
 > failure caused by the ADDRESS MOVE or by DEVICE STATE after the resize?** Under active investigation —
 > the "slot-cycle is load-bearing" conclusion is an unverified inference, not established.
+>
+> **⮕ RESOLVED 2026-06-13 (high confidence): DEVICE STATE, not address — mechanism VIABLE with a 1-line
+> fix (`pci_reset_function`/FLR after resize, now implemented as `flr=Y`). The address is exonerated (the
+> GPU is healthy at `0x6000000000` right now). See the INVESTIGATION RESULT section at the bottom. Pending
+> live re-test on the REAL broken-256 M substrate — the slot-cycle is likely NOT required.**
 
-## Verdict (⛔ naive single-call REFUTED; mechanism viability RE-OPENED — see banner above)
+## Verdict (naive no-reset single-call REFUTED; mechanism VIABLE w/ FLR fix — see banners + INVESTIGATION RESULT)
 **E27's broken-BAR1 recovery can be made fully deterministic from an out-of-tree kernel module — no
 kernel rebuild, no cmdline — and a SINGLE module sequence retires `fix-bar1` entirely (both halves).
 Confidence: high. Status: conditional, pending one live n≥3 aged-tree experiment.** Resolved against the
@@ -165,3 +170,31 @@ in-kernel version is "automate fix-bar1," not "replace its slot-cycle with `pci_
 or keep `fix-bar1` and just automate it via a TB-attach udev/boltd trigger. The window-placement
 non-determinism (Stage 2's original question) is now moot for this approach — it failed for a more basic
 reason.
+
+## INVESTIGATION RESULT — 2026-06-13 (workflow `e27-resize-salvage`, high confidence) — MECHANISM VIABLE WITH A 1-LINE FIX
+**The Stage-1 failure was DEVICE STATE, not the address move — and the mechanism is salvageable.**
+- **Address exonerated (decisive live ground truth):** the GPU is bound + healthy RIGHT NOW at BAR1
+  `0x6000000000` (the exact "failing" address). The recovery (deauth/reauth + `fix-bar1 --bind`) KEPT that
+  base and only *reset/re-enumerated*. The failing address hosts a working GPU ⇒ the address is not the
+  cause; the reset is the load-bearing step.
+- **Root cause:** `gpuSanityCheck 0x1` = a live BAR0 BOOT_0 read returned garbage while config/decode/BAR0
+  all checked out (the other 3 sanity bits passed) — a wedged register interface. We moved BAR1 of an
+  *already-RM-initialized* chip (GSP up, internal aperture latched at `0x4000000000`); the reload's
+  probe-time `nv_resize_pcie_bars` early-returned no-op (BAR1 already 32 G) so **nothing reset the chip** →
+  internal-aperture-vs-config desync → dead MMIO. The MSI-X (BAR0-resident) + conf_compute failures are
+  downstream red herrings. NVIDIA's own probe does the identical resize with NO reset and works *on a
+  fresh chip* — confirming the missing ingredient is a reset, not the destination.
+- **THE FIX (implemented):** keep `pci_resize_resource`, drop the "land at `0x4000000000`" idea, add one
+  `pci_reset_function(gpu_dev)` (FLR; `EXPORT_SYMBOL_GPL`, GPU advertises FLReset+) after the resize,
+  outside the rescan lock, only on `resize_rc==0`. It PRESERVES the resized BAR (save_state captures the
+  new base + ReBAR CTRL; `pci_restore_rebar_state` re-latches 32 G/0xF). Shipped as the `flr=Y` module
+  param (`flr=N` isolates resize-only).
+- **NEXT (live, n≥3, on the REAL broken-256 M substrate — reproducible via deauth/reauth):** (E1) run the
+  module `flr=0` on broken-256 M — predicted likely PASS *without* a reset (a never-RM-init'd chip matches
+  nvidia's fresh-device precondition; Stage-1 used the WRONG healthy substrate); (E2) `flr=1` if E1 fails —
+  predicted PASS at any address. **Honest residual (adversarial):** the real fix changes BAR1 *size*
+  (256 M→32 G), not just base; if Blackwell only re-samples its ReBAR aperture at a true link-down/PERST,
+  FLR (and even secondary-bus-reset) could be insufficient and fix-bar1's slot power-cycle irreplaceable
+  for the *size* re-latch — the one path back to "automate fix-bar1, not replace its slot-cycle." Source
+  counter-evidence (nvidia resizes size with no reset on fresh chips; ReBAR spec forbids a link reset for
+  size change) makes this unlikely, but **validate live — source already mispredicted the placement once.**

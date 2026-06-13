@@ -58,6 +58,10 @@ static bool dry_run = true;
 module_param(dry_run, bool, 0444);
 MODULE_PARM_DESC(dry_run, "survey + plan only, perform NO writes (default Y)");
 
+static bool flr = true;
+module_param(flr, bool, 0444);
+MODULE_PARM_DESC(flr, "after a successful resize, FLR the device (pci_reset_function) so it re-fences its internal aperture to the new BAR — fixes the device-state desync that wedged a moved live BAR (default Y; set N to test resize-only)");
+
 /* A resource is genuinely assigned iff it is inserted in the tree, not marked
  * UNSET, and has a non-zero size. pci_release_resource() leaves flags +size
  * intact but sets IORESOURCE_UNSET and start=0, so the naive
@@ -251,6 +255,25 @@ static int __init rearm_init(void)
 	}
 
 	pci_unlock_rescan_remove();
+
+	/* Post-resize device reset (OUTSIDE the rescan lock — pci_reset_function
+	 * sleeps + takes device/bridge locks). The Stage-1 wedge was device-state:
+	 * moving the BAR of an already-RM-initialized chip left its internal aperture
+	 * desynced from config (BOOT_0 MMIO read garbage). FLR resets internal state
+	 * while PRESERVING the resized BAR — pci_dev_save_and_disable captures the new
+	 * base + ReBAR CTRL, FLR resets, pci_restore_state -> pci_restore_rebar_state
+	 * re-derives 32 GiB and rewrites CTRL=0xF, then restores the base. On a fresh
+	 * broken-256 M chip this is defense-in-depth (nvidia's own probe resizes with
+	 * no reset). flr=N skips it to isolate whether the reset is needed. */
+	if (dry_run) {
+		if (flr)
+			pr_info(TAG "[dry] would FLR (pci_reset_function) after resize\n");
+	} else if (flr && resize_rc == 0) {
+		int frc = pci_reset_function(gpu_dev);
+
+		pr_info(TAG "pci_reset_function (FLR) -> rc=%d%s\n", frc,
+			frc ? " (reset failed — device may be unusable)" : "");
+	}
 
 	log_chain("POST", gpu_dev);
 
