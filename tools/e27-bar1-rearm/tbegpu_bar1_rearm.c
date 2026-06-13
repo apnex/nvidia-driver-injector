@@ -22,9 +22,19 @@
  *      GPU->root, re-sizes the root hotplug port WITH the hpmmioprefsize
  *      reserve, re-places it bottom-up first-fit at the firmware-constant base,
  *      and calls pci_rebar_set_size() = chip CTRL 0x8 -> 0xF restore.
+ *   4. pci_reset_function() [FLR]: the resize only re-fences the chip's internal
+ *      aperture across a reset; FLR's save/restore rewrites ReBAR CTRL=0xF for the
+ *      resized size. (Pin reset_method=flr first so this cannot escalate to a
+ *      link-down slot/bus reset.)
+ *   5. verify-before-bind (verify=Y): poll the chip's MMIO (PMC_BOOT_0 gate +
+ *      BAR2[0] diagnostic) until it re-fences, up to settle_ms, and gate RESULT=OK
+ *      on that -- not on the resource struct (which is a confirmed false-positive).
+ *      verify=N reverts to a blind msleep(settle_ms) control arm.
  *
  * Params: gpu=<BDF> (default 0000:04:00.0), size=<rebar enc> (default 15=32G),
- *         dry_run=<bool> (default Y -- survey + plan only, NO writes).
+ *         dry_run=<bool> (default Y -- survey + plan only, NO writes),
+ *         flr=<bool> (default Y), verify=<bool> (default Y),
+ *         settle_ms=<uint> (default 2000 -- verify poll budget / blind sleep).
  *
  * SAFETY: live PCI resource surgery. Run ONLY with nvidia fully rmmod'd (not
  * merely sysfs-unbound -- closes the bind TOCTOU), GPU quiesced, operator at
@@ -44,8 +54,18 @@
 #include <linux/ioport.h>
 #include <linux/sizes.h>
 #include <linux/delay.h>
+#include <linux/io.h>
 
 #define TAG "tbegpu-rearm: "
+
+/* NV_PMC_BOOT_0 lives at BAR0 offset 0 and reads the chip's
+ * arch/impl/revision id — the cheap liveness/decode probe fix-bar1 + A3 use.
+ * BAR1 is the 64-bit framebuffer aperture (resource[1]+resource[2]); BAR2's low
+ * half is therefore resource[3] (the 32 MiB aperture whose MMU readback is what
+ * RM's kbusVerifyBar2 exercises). */
+#define NV_PMC_BOOT_0   0x00000000u
+#define GPU_BAR0_INDEX  0
+#define GPU_BAR2_INDEX  3
 
 static char *gpu = "0000:04:00.0";
 module_param(gpu, charp, 0444);
@@ -65,7 +85,11 @@ MODULE_PARM_DESC(flr, "after a successful resize, FLR the device (pci_reset_func
 
 static unsigned int settle_ms = 2000;
 module_param(settle_ms, uint, 0444);
-MODULE_PARM_DESC(settle_ms, "post-FLR settle delay (ms) for the chip to re-fence its aperture before bind — the relatch appears non-deterministic without it (cycle-1 had seconds, cycle-2 had ms and failed). Default 2000.");
+MODULE_PARM_DESC(settle_ms, "post-FLR budget (ms): with verify=Y it bounds the verify-before-bind poll (stops at first sane read); with verify=N it is a blind msleep. The relatch is non-deterministic on wall-clock alone (cycle-1 had seconds, cycle-2 had ms and failed). Default 2000.");
+
+static bool verify = true;
+module_param(verify, bool, 0444);
+MODULE_PARM_DESC(verify, "after FLR, poll the chip's MMIO (PMC_BOOT_0 + BAR2[0]) until it re-fences its aperture, and gate RESULT=OK on a sane readback rather than a blind sleep — turns the settle gamble into a deterministic readiness gate and refuses to bless a still-desynced chip. verify=N reverts to a blind msleep(settle_ms) control arm. Default Y.");
 
 /* A resource is genuinely assigned iff it is inserted in the tree, not marked
  * UNSET, and has a non-zero size. pci_release_resource() leaves flags +size
@@ -172,16 +196,126 @@ static int release_empty_siblings(struct pci_dev *gpu_dev, int *failed)
 	return released;
 }
 
+static bool reg_sane(u32 v)
+{
+	return v != 0xffffffffu && v != 0;
+}
+
+/*
+ * verify_aperture_refenced -- after the FLR, poll the chip's MMIO until its
+ * internal aperture is re-fenced to the resized BAR, instead of blindly sleeping.
+ *
+ * Why MMIO and not a config read: the desync that wedged E1/cycle-2 is
+ * config-says-32G / chip-aperture-stale. A ReBAR-CTRL config readback is useless
+ * here -- pci_resize_resource + pci_restore_rebar_state already wrote CTRL=0xF, so
+ * it reads 0xF whether or not the chip re-fenced. The desync is visible ONLY via
+ * MMIO.
+ *
+ * Decode: memory decode is OFF on entry (pci_reset_function restored the module's
+ * decode-off PCI_COMMAND), so we MUST set PCI_COMMAND_MEMORY before any read or
+ * every readl() returns 0xffffffff because the BAR does not decode. We restore the
+ * saved (decode-off) COMMAND on exit to preserve the module's audited
+ * "leaves decode off" invariant; nvidia re-enables decode at bind.
+ *
+ * Signals:
+ *  - PMC_BOOT_0 (BAR0[0]) sane = the GATE. BAR0 is the register aperture (distinct
+ *    from the framebuffer BAR1 / BAR2), so this reliably catches the Stage-1-class
+ *    "BOOT_0 garbage" desync and a dead/decode-failed chip. NOTE it does NOT by
+ *    itself discriminate the cycle-2 BAR2-MMU desync (BAR0 can read sane while BAR2
+ *    is stale) -- the true oracle for that remains RmInitAdapter/kbusVerifyBar2 at
+ *    bind, backstopped by the runbook fail-safe (immediate rmmod, no retry).
+ *  - BAR2[0] raw is read + LOGGED as a diagnostic. A raw read without RM's MMU
+ *    setup is only a proxy for kbusVerifyBar2, so we do not hard-gate on it yet; we
+ *    collect it to learn empirically whether 0xffffffff here predicts the bind FAIL.
+ *
+ * Returns true iff PMC_BOOT_0 read sane within budget_ms; *t_sane_ms = elapsed ms
+ * to first sane read (budget_ms on failure); *bar2_at_sane = BAR2[0] at that point.
+ */
+static bool verify_aperture_refenced(struct pci_dev *gpu_dev, unsigned int budget_ms,
+				     unsigned int *t_sane_ms, u32 *bar2_at_sane)
+{
+	resource_size_t b0 = pci_resource_start(gpu_dev, GPU_BAR0_INDEX);
+	resource_size_t b2 = pci_resource_start(gpu_dev, GPU_BAR2_INDEX);
+	const unsigned int step_ms = 150;
+	unsigned int elapsed = 0;
+	void __iomem *bar0, *bar2 = NULL;
+	u16 saved_cmd;
+	bool sane = false;
+	u32 boot0, bar2_0 = 0xffffffffu;
+
+	/* clamp so `elapsed += step_ms` cannot wrap a pathological near-UINT_MAX budget */
+	if (budget_ms > 600000u)
+		budget_ms = 600000u;
+	*t_sane_ms = budget_ms;
+	*bar2_at_sane = 0xffffffffu;
+
+	if (!b0) {
+		pr_warn(TAG "verify: GPU BAR0 has no base; cannot MMIO-verify\n");
+		return false;
+	}
+
+	/* decode ON for the reads (restored to the saved value on exit) */
+	pci_read_config_word(gpu_dev, PCI_COMMAND, &saved_cmd);
+	pci_write_config_word(gpu_dev, PCI_COMMAND, saved_cmd | PCI_COMMAND_MEMORY);
+
+	bar0 = ioremap(b0, 0x1000);
+	if (!bar0) {
+		pr_warn(TAG "verify: ioremap BAR0 @%pa failed\n", &b0);
+		pci_write_config_word(gpu_dev, PCI_COMMAND, saved_cmd);
+		return false;
+	}
+	if (b2) {
+		bar2 = ioremap(b2, 0x1000);
+		if (!bar2)
+			pr_warn(TAG "verify: ioremap BAR2 @%pa failed; bar2[0] diagnostic unavailable\n", &b2);
+	}
+
+	for (;;) {
+		boot0  = readl(bar0 + NV_PMC_BOOT_0);
+		bar2_0 = bar2 ? readl(bar2) : 0xffffffffu;
+		pr_info(TAG "verify: t=%ums boot0=0x%08x bar2[0]=0x%08x%s\n",
+			elapsed, boot0, bar2_0,
+			reg_sane(boot0) ? " (boot0 SANE)" : "");
+		if (reg_sane(boot0)) {
+			sane = true;
+			*t_sane_ms = elapsed;
+			*bar2_at_sane = bar2_0;
+			break;
+		}
+		if (elapsed >= budget_ms)
+			break;
+		msleep(step_ms);
+		elapsed += step_ms;
+	}
+
+	iounmap(bar0);
+	if (bar2)
+		iounmap(bar2);
+	pci_write_config_word(gpu_dev, PCI_COMMAND, saved_cmd); /* decode back off */
+
+	if (sane)
+		pr_info(TAG "verify: boot0 re-fenced at t=%ums, bar2[0]=0x%08x%s\n",
+			*t_sane_ms, *bar2_at_sane,
+			reg_sane(*bar2_at_sane) ? "" :
+			" — BAR2 raw still 0xffffffff (boot0 gate only; expect kbusVerifyBar2 risk at bind)");
+	else
+		pr_warn(TAG "verify: boot0 NOT sane within %ums — chip aperture not re-fenced; do NOT bind\n",
+			budget_ms);
+	return sane;
+}
+
 static int __init rearm_init(void)
 {
-	int domain, rc, freed, failed = 0, resize_rc = 0;
-	unsigned int busn, devfn;
+	int domain, rc, freed, failed = 0, resize_rc = 0, frc = -1;
+	unsigned int busn, devfn, t_sane = 0;
 	struct pci_dev *gpu_dev;
 	struct resource *r1;
+	u32 bar2_at_sane = 0xffffffffu;
 	u16 cmd;
-	bool ok;
+	bool ok, refenced = false, flr_ok;
 
-	pr_info(TAG "load: gpu=%s size=%d dry_run=%d\n", gpu, size, dry_run);
+	pr_info(TAG "load: gpu=%s size=%d dry_run=%d flr=%d verify=%d settle_ms=%u\n",
+		gpu, size, dry_run, flr, verify, settle_ms);
 
 	rc = parse_bdf(gpu, &domain, &busn, &devfn);
 	if (rc) {
@@ -272,18 +406,25 @@ static int __init rearm_init(void)
 	 * no reset). flr=N skips it to isolate whether the reset is needed. */
 	if (dry_run) {
 		if (flr)
-			pr_info(TAG "[dry] would FLR (pci_reset_function) after resize\n");
+			pr_info(TAG "[dry] would FLR (pci_reset_function), then %s\n",
+				verify ? "poll MMIO until the aperture re-fences (verify-before-bind gate)"
+				       : "blind-settle (verify=N control arm)");
 	} else if (flr && resize_rc == 0) {
-		int frc = pci_reset_function(gpu_dev);
-
+		frc = pci_reset_function(gpu_dev);
 		pr_info(TAG "pci_reset_function (FLR) -> rc=%d%s\n", frc,
 			frc ? " (reset failed — device may be unusable)" : "");
-		/* Settle: the Blackwell appears to re-fence its internal aperture
-		 * to the new ReBAR size only some ms after the FLR. cycle-1 (PASS)
-		 * had ~seconds between FLR and bind; cycle-2 (FAIL) bound within ms.
-		 * Give the chip time before nvidia touches the 32 G aperture. */
-		if (frc == 0 && settle_ms > 0) {
-			pr_info(TAG "settling %u ms for the chip to re-fence its aperture\n",
+
+		/* The Blackwell re-fences its internal aperture to the new ReBAR size
+		 * only some time after the FLR; cycle-1 (PASS) had ~seconds before bind,
+		 * cycle-2 (FAIL) bound within ms. verify=Y polls the chip's MMIO and
+		 * gates RESULT on an observed re-fence (deterministic readiness gate);
+		 * verify=N is the blind-settle control arm. Both run OUTSIDE the rescan
+		 * lock, which pci_reset_function already dropped. */
+		if (frc == 0 && verify) {
+			refenced = verify_aperture_refenced(gpu_dev, settle_ms,
+							    &t_sane, &bar2_at_sane);
+		} else if (frc == 0 && settle_ms > 0) {
+			pr_info(TAG "blind settle %u ms (verify=N control arm; RESULT not chip-verified)\n",
 				settle_ms);
 			msleep(settle_ms);
 		}
@@ -291,15 +432,32 @@ static int __init rearm_init(void)
 
 	log_chain("POST", gpu_dev);
 
-	/* PASS criterion: BAR1 assigned, exactly 32 GiB, 32G-aligned, non-zero
-	 * base. Exit code is always 0 (stay-loaded) -- harness keys on RESULT=. */
+	/* PASS criterion: the resource is 32 GiB/32G-aligned AND (when an FLR was
+	 * requested) it succeeded AND (when verify was requested) the chip's MMIO
+	 * re-fenced. The resource test alone is a CONFIRMED false-positive: it read
+	 * 32G/aligned in both the cycle-1 PASS and the cycle-2 FAIL. Exit code is
+	 * always 0 (stay-loaded) -- harness keys on RESULT=. */
 	r1 = &gpu_dev->resource[1];
-	ok = res_is_assigned(r1) && resource_size(r1) == SZ_32G &&
-	     r1->start != 0 && IS_ALIGNED((u64)r1->start, SZ_32G);
+	flr_ok = (!flr || frc == 0);
+	ok = flr_ok &&
+	     res_is_assigned(r1) && resource_size(r1) == SZ_32G &&
+	     r1->start != 0 && IS_ALIGNED((u64)r1->start, SZ_32G) &&
+	     (!(flr && verify) || refenced);
 	if (dry_run)
 		pr_info(TAG "RESULT=DRYRUN (no writes performed)\n");
+	else if (ok && flr && verify)
+		pr_info(TAG "RESULT=OK BAR1=32G@%pa aligned, boot0-verified (sane @t=%ums, bar2[0]=0x%08x)%s\n",
+			&r1->start, t_sane, bar2_at_sane,
+			reg_sane(bar2_at_sane) ? "" :
+			" [CAVEAT: BAR2 raw still 0xffffffff — boot0 gate only, expect kbusVerifyBar2 risk at bind]");
 	else if (ok)
-		pr_info(TAG "RESULT=OK BAR1=32G@%pa aligned\n", &r1->start);
+		pr_info(TAG "RESULT=OK BAR1=32G@%pa aligned (NOT chip-verified — verify=N/flr=N; the bind verdict is RmInitAdapter)\n",
+			&r1->start);
+	else if (flr && resize_rc == 0 && frc != 0)
+		pr_info(TAG "RESULT=FAIL frc=%d (FLR ran and did not succeed; do NOT bind)\n", frc);
+	else if (flr && verify && resize_rc == 0 && !refenced)
+		pr_info(TAG "RESULT=FAIL aperture not re-fenced within %ums (boot0 never sane; do NOT bind)\n",
+			settle_ms);
 	else
 		pr_info(TAG "RESULT=FAIL resize_rc=%d (BAR1 not 32G/32G-aligned)\n",
 			resize_rc);

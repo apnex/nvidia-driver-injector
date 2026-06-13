@@ -326,3 +326,69 @@ attacks the controllable variable):**
    still can't make FLR reliable — but it is NOT the foregone conclusion. **This SUPERSEDES the E2 LIVE
    PASS "VIABLE" banner above (re-scoped to "viable WITH settle+verify, pending n≥3"), not the
    mechanism.**
+
+## 2026-06-14 — PRE-FLIGHT REVIEW → E2-VERIFY REDESIGN (verify-before-bind gate; BUILT + RE-REVIEWED, wet run pending)
+Before committing the operator to the "E2-with-settle" wet run, two adversarial review rounds (opus
+workflows) pressure-tested the module + procedure. They **reshaped the test** — the as-specified
+settle-then-blind-bind was inconclusive *by construction* and repeated reset-risk footguns.
+
+**Central discovery (3 of 4 pre-flight lenses, independently): `RESULT=OK` is a CONFIRMED false-positive.**
+The module's old pass criterion read only the in-kernel `struct resource` (BAR1==32 G, aligned), which
+`pci_resize_resource`+FLR make true *regardless* of whether the chip re-fenced its internal aperture — it
+literally printed `RESULT=OK` in **both** the cycle-1 PASS and the cycle-2 FAIL. A fixed `settle_ms=2000 ×
+n≥3` also cannot attribute a PASS to settle (vs "FLR-alone now works" / luck at the ~50% prior).
+
+**The redesign — an in-module verify-before-bind gate** (`tbegpu_bar1_rearm.c`, param `verify=Y`): after
+the FLR, re-enable memory decode, `ioremap` BAR0+BAR2, **poll `PMC_BOOT_0` (gate) + `BAR2[0]` (logged
+diagnostic)** up to `settle_ms`, log time-to-sane, and gate `RESULT=OK` on a sane readback (+ `frc==0`).
+This turns the wall-clock gamble into a readiness gate, makes `RESULT` honest, measures the relatch latency
+directly, and mechanizes the fail-safe (only ever bless a verified chip). `verify=N` reverts to the blind
+`msleep` control arm.
+
+> **HONESTY CAVEAT (carried in-code + README):** `PMC_BOOT_0` lives in BAR0 (the register aperture), but the
+> cycle-2 desync is in the **BAR2 MMU path** — so boot0 can read sane while BAR2 is stale. The gate
+> therefore reliably catches the Stage-1 *dead-chip / BOOT_0-garbage* class but does **not** by itself
+> discriminate the cycle-2 BAR2 desync. `BAR2[0]` raw is logged (not hard-gated — a raw read without RM's
+> MMU setup is only a proxy) to learn empirically whether `0xffffffff` predicts the bind FAIL. **The true
+> verdict stays `RmInitAdapter rc=0`**, backstopped by the runbook's atomic single-open + immediate-rmmod
+> fail-safe (a boot0-false-pass costs one rc=-5-contained bind, never a reset).
+
+**The hardened runbook `tools/e27-bar1-rearm/e2-verify.sh`** (NOT `run-experiment.sh` stage 2 — that
+predates the 256 M root cause and stops at the false-positive `RESULT=OK`). Operator-gated verbs
+(`preflight`/`status`/`substrate`/`rearm`/`bind`/`cycle`/`restore`/`teardown`), encoding every must-fix:
+- **`recover=0` proven** by a resolved-arg dry-run (`modprobe -n -v --ignore-install nvidia | grep
+  TbEgpuRecoverEnable | tail -1` ends in `=0`) **and** the loaded-module param (`cat .../NVreg_…==0`) — not
+  `modprobe -c | grep` (which shows both `=1`/`=0` lines). A recover-fire tripwire discards + flags host-suspect.
+- **`reset_method=flr` pinned** (preflight + re-pinned each cycle after reauth + asserted in `rearm`) so
+  `pci_reset_function` can't escalate to a link-down slot/bus reset during the lock-dropped settle.
+- **Per-cycle substrate assertion**: BAR1==256 MiB *exactly* AND chip ReBAR nibble==8 (reject off-bus/healthy/other).
+- **Capture hard-gated** (netconsole enabled AND `hardlockup_panic==1`) at every wet verb, fatal — the
+  on-host session's only net; `nvidia-persistenced` masked + injector drained so no auto-consumer opens
+  the device in the fail window.
+- **Atomic bind**: a single device open (`nvidia-smi -pm 1`, persistence-first per fix-bar1's close-path
+  hazard); on FAIL it `rmmod`s immediately and **never re-opens** (the 11-retry hammering is what escalated
+  cycle-2 to a platform reset); scores ONLY by `RmInitAdapter` and classifies the rc-triplet.
+
+**Pre-registered decision rule:** one `0x24:0x72:1307` settle-FAIL at the adopted `settle_ms` REFUTES
+determinism (do NOT retire fix-bar1) — the runbook declares it loudly and STOPs. A determinism claim needs
+**≥10–12 consecutive clean binds** on independently re-deauth/reauth'd substrates; n≥3 is "promising". A
+REARM-FAIL on a *valid* substrate is a recorded NEGATIVE (the light reset failed to reach a bindable state),
+not a discard. NOTE: `verify=Y` adds post-FLR MMIO that `verify=N` lacks, so `verify=N` is a blind baseline,
+not a strict A/B twin.
+
+**Reviews:** pre-flight (4 lenses) + code re-review (3 lenses), opus. Module MMIO path cleared
+`ship_ready` (BAR indices right, no ioremap leak/double-unmap, decode handling correct, the single readl
+bounded by the PCIe completion timeout — categorically unlike the 11 GSP-bringup opens; fix-bar1/A3 read
+`PMC_BOOT_0` routinely). **Must-fixes applied:** the `do_bind` rc-triplet regex (`[0-9a-f:]` excluded `x`
+→ could never match `0x24:0x72:1307` → the decision rule couldn't be scored); the wet-verb capture
+hard-gate (was preflight-only WARN). Plus should-fixes (fatal flr re-pin, `rearm` flr assert, settle-FAIL
+STOP, REARM-FAIL-as-negative) and module nits (BAR2-stale caveat on the OK line, `frc=-1` skip-vs-fail
+distinction, BAR2 ioremap pr_warn, settle clamp). Module builds clean (vermagic match); script `bash -n`
++ shellcheck clean; the triplet regex verified to match live.
+
+**Fallback reality (determinism lens):** earliest-hook ReBAR-write and "in-kernel fix-bar1" both reduce to
+needing the **slot-cycle/PERST, which has no exported symbol** (and A3 proved an SBR does NOT re-latch the
+256 M→32 G size). So if FLR+verify stays flaky, the real fallback is a **udev/boltd-triggered
+`fix-bar1.sh`**, not an in-kernel SBR.
+
+**STATUS: BUILT + RE-REVIEWED + READY. Wet run (E2-verify, operator-at-console, capture armed) PENDING.**
