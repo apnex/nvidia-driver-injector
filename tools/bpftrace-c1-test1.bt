@@ -95,6 +95,221 @@ kretprobe:device_release_driver_internal {
            nsecs, comm, pid, cpu);
 }
 
+/* === VFS open path — BEFORE nvidia.ko's nvidia_open is called === */
+
+kprobe:do_dentry_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d do_dentry_open ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:do_dentry_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d do_dentry_open RETURN retval=%d\n",
+           nsecs, comm, pid, cpu, retval);
+}
+
+kprobe:chrdev_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d chrdev_open ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:chrdev_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d chrdev_open RETURN retval=%d\n",
+           nsecs, comm, pid, cpu, retval);
+}
+
+/* nvidia.ko file_operations callback — wraps nv_alloc_file_private etc.
+ * before our PINPOINT-3 markers (which are after the variable declarations).
+ * If nvidia_open is reached but markers don't fire, the wedge is between
+ * function entry and the first nv_printf call. */
+kprobe:nvidia_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d nvidia_open ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:nvidia_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d nvidia_open RETURN retval=%d\n",
+           nsecs, comm, pid, cpu, retval);
+}
+
+/* === Kernel VFS-open candidates (added after DIFF-3 narrowed wedge to
+ *     pre-do_dentry_open layer for open("/dev/nvidia0")) ===
+ *
+ * Order of call (when userspace open() is invoked):
+ *   __do_sys_openat → do_sys_openat2 → do_filp_open
+ *     → path_openat
+ *         → path_init / link_path_walk     (name resolution)
+ *         → may_open                        (permission check)
+ *         → vfs_open                        (file dispatch)
+ *             → do_dentry_open              (already probed above)
+ *                 → fops_get + fops->open   (= nvidia_open)
+ *
+ * The wedge is somewhere in this chain BEFORE do_dentry_open.
+ */
+
+kprobe:do_filp_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d do_filp_open ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:do_filp_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d do_filp_open RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+kprobe:path_openat {
+    printf("[c1-t1] %llu %s[%d] CPU%d path_openat ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:path_openat {
+    printf("[c1-t1] %llu %s[%d] CPU%d path_openat RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+kprobe:vfs_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d vfs_open ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:vfs_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d vfs_open RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+kprobe:may_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d may_open ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:may_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d may_open RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+/* === PM / device-link candidates ===
+ *
+ * When userspace opens a chrdev backed by a PCI device, the kernel may
+ * trigger a runtime-PM resume chain. The specific functions:
+ *   __pm_runtime_resume → rpm_resume → pci_pm_runtime_resume (already probed)
+ * OR an upstream-chained device_link runtime-PM resume that bypasses
+ * pci_pm_runtime_resume entirely.
+ */
+
+kprobe:__pm_runtime_resume {
+    printf("[c1-t1] %llu %s[%d] CPU%d __pm_runtime_resume ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:__pm_runtime_resume {
+    printf("[c1-t1] %llu %s[%d] CPU%d __pm_runtime_resume RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+kprobe:rpm_resume {
+    printf("[c1-t1] %llu %s[%d] CPU%d rpm_resume ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:rpm_resume {
+    printf("[c1-t1] %llu %s[%d] CPU%d rpm_resume RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+kprobe:pm_runtime_get_sync {
+    printf("[c1-t1] %llu %s[%d] CPU%d pm_runtime_get_sync ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:pm_runtime_get_sync {
+    printf("[c1-t1] %llu %s[%d] CPU%d pm_runtime_get_sync RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+/* LSM hook fired from vfs_open — selinux/apparmor could iterate device_link. */
+kprobe:security_file_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d security_file_open ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:security_file_open {
+    printf("[c1-t1] %llu %s[%d] CPU%d security_file_open RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+/* === DIFF-4 narrowed wedge to async/exit/kthread layer. New probes: === */
+
+/* openat syscall stub — fires before path_openat */
+kprobe:do_sys_openat2 {
+    printf("[c1-t1] %llu %s[%d] CPU%d do_sys_openat2 ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:do_sys_openat2 {
+    printf("[c1-t1] %llu %s[%d] CPU%d do_sys_openat2 RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+/* Return-to-userspace deferred work — could fire chip-touching task_work */
+kprobe:task_work_run {
+    printf("[c1-t1] %llu %s[%d] CPU%d task_work_run ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:task_work_run {
+    printf("[c1-t1] %llu %s[%d] CPU%d task_work_run RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+/* File release path — fput chain runs on file close + process exit */
+kprobe:__fput {
+    printf("[c1-t1] %llu %s[%d] CPU%d __fput ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:__fput {
+    printf("[c1-t1] %llu %s[%d] CPU%d __fput RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+kprobe:filp_close {
+    printf("[c1-t1] %llu %s[%d] CPU%d filp_close ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:filp_close {
+    printf("[c1-t1] %llu %s[%d] CPU%d filp_close RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+/* Process exit chain */
+kprobe:do_exit {
+    printf("[c1-t1] %llu %s[%d] CPU%d do_exit ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+
+/* === nvidia.ko interrupt + bottom-half handlers === */
+
+kprobe:nvidia_isr {
+    printf("[c1-t1] %llu %s[%d] CPU%d nvidia_isr ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:nvidia_isr {
+    printf("[c1-t1] %llu %s[%d] CPU%d nvidia_isr RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+kprobe:nvidia_isr_bh_unlocked {
+    printf("[c1-t1] %llu %s[%d] CPU%d nvidia_isr_bh_unlocked ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:nvidia_isr_bh_unlocked {
+    printf("[c1-t1] %llu %s[%d] CPU%d nvidia_isr_bh_unlocked RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+kprobe:nvidia_isr_kthread_bh {
+    printf("[c1-t1] %llu %s[%d] CPU%d nvidia_isr_kthread_bh ENTER\n",
+           nsecs, comm, pid, cpu);
+}
+kretprobe:nvidia_isr_kthread_bh {
+    printf("[c1-t1] %llu %s[%d] CPU%d nvidia_isr_kthread_bh RETURN\n",
+           nsecs, comm, pid, cpu);
+}
+
+/* === Workqueue tracepoints — REMOVED for Test B v2.
+ *
+ *     Earlier Test B included tracepoint:workqueue:workqueue_execute_start
+ *     and workqueue_execute_end. They fired ~4000 times in 1 second on top
+ *     of 30+ other kprobes, overwhelming the bpftrace BPF infrastructure
+ *     and causing a kernel freeze BEFORE cycle 1 even ran. Removed here.
+ *     If we want workqueue visibility, run it as a SEPARATE bpftrace
+ *     session decoupled from the cycle-1+cycle-2 wedge test. === */
+
 END {
     printf("[c1-t1] bpftrace detached.\n");
 }

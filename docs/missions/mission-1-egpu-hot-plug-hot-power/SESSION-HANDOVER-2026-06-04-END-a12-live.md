@@ -44,8 +44,8 @@ Xid/BUG/wedge.
   **`a5`** = apnex.30. Both pushed to origin.
 - Injector `/root/nvidia-driver-injector` `main` **`54accb2`** (A12 patch + intent + manifest + deploy
   yaml apnex.30 + handovers + harness fix). Pushed.
-- `/root/fake-5090` **`1e50c4d`** (F46/F40/README — #301). Pushed? (verify; the larger F15–F45 backlog
-  remains uncommitted, user-review-gated — do NOT bundle-commit it.)
+- `/root/fake-5090` **`1e50c4d`** (F46/F40/README — #301), pushed to origin. The larger F15–F45 backlog
+  remains uncommitted, user-review-gated — do NOT bundle-commit it.
 
 ## REMAINING
 1. **apnex.30 14-day soak** — ongoing, automatic (`scripts/status.sh` to check; surrenders/qwd should
