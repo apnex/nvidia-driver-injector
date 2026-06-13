@@ -13,8 +13,15 @@
   disconnected pci_dev (`pci_pbi.c` — no TTL/0xFF-terminator; config space = a third I/O class outside the
   MMIO short-circuit and C7's table). Host survived it (contained 1-CPU spin); fix = TTL-48+0xFF terminator
   + `nv_pci_probe` early `-ENODEV` on `os_pci_is_disconnected`.
-- **ONE live item remains** (operator console session): the recover-disabled control + C7 n=3 top-up —
-  exact procedure in §NEXT below.
+- **Recover-disabled control + C7 n=3 top-up: DONE 2026-06-13 — n=3 ALL PASS.** With
+  `NVreg_TbEgpuRecoverEnable=0` (recover module disabled) and A14 disarmed, the #292 roll was contained by
+  C7/A13 identically all 3 cycles (A12 bounded open → AER → A13 DISCONNECT explicitly logging
+  `disabled (NVreg_TbEgpuRecoverEnable=0)` → C7 single-pass exit at `SET_GUEST_SYSTEM_INFO` →
+  `RmInitAdapter failed (0x62:0xf:2131)` → `rc=-5` bounded ~1 s, host alive, **zero storm**: 30 lines,
+  `_kgspRpcRecvPoll`=1, heartbeat=0). **Proves C7/A13 containment lives on `nvl`, independent of the
+  recover module.** Host restored to soaking baseline (apnex.33, recover=1, injector re-adopted the
+  running driver via "already loaded — skipping", capture disarmed). **No live items remain** — soak +
+  post-soak only (§NEXT 2-3).
 
 ## Version ledger
 | Build | Content | Live result |
@@ -26,8 +33,21 @@
 
 ## NEXT — precise steps, in order
 
-### 1. (Next console session, operator-gated) Recover-disabled control + C7 n=3 top-up
-Purpose: prove C7/A13 containment is independent of the recover module (they live on `nvl`), and reach
+### 1. ✅ DONE 2026-06-13 — Recover-disabled control + C7 n=3 top-up (n=3 ALL PASS)
+**Result:** with `NVreg_TbEgpuRecoverEnable=0` (drop-in `zz-tbegpu-control-test.conf`, lexically-last so it
+beat the injector's `=1` — verified via `modprobe -c`) and A14 disarmed (`echo 0 > tb_egpu_diverged_recovered`,
+which the store clears both atomics so `reopen_blocked→0`), all 3 rolls contained identically:
+`[F40b/A12] open scheduled (3000ms)` → `AER error_detected (state=1)` → `A13 marker: AER during in-flight
+bootstrap → early dead-bus marker` → `error_detected → DISCONNECT (disabled (NVreg_TbEgpuRecoverEnable=0))`
+→ C7 single-pass `SET_GUEST_SYSTEM_INFO failed: 0xf` → `RmInitAdapter failed! (0x62:0xf:2131)` →
+`open completed within budget rc=-5`, host alive ~1 s. Storm quant per cycle: ~30 NVRM lines,
+`_kgspRpcRecvPoll`=1, `RpcSanityCheckFailure`=1, heartbeat=0. **Conclusion: C7/A13 containment is
+independent of the recover module — it lives on `nvl`.** Cleanup: drop-in removed → chip recovered
+(deauth/reauth → fix-bar1 --bind, recover=1) → injector un-drained, **adopted the running driver
+("nvidia already loaded — skipping", no rmmod/reload, 0 restarts)** → capture+panics disarmed. Host =
+pre-test soaking baseline (apnex.33, P8 ~22W). The procedure below is retained as the validated playbook.
+
+Purpose (historical): prove C7/A13 containment is independent of the recover module (they live on `nvl`), and reach
 n≥3 C7 cycles. Runs on apnex.33. **Procedure (the udev race burned us once — follow exactly):**
 1. Arm capture: `tools/oa-harness/arm-wedge-capture.sh arm 192.168.1.241` (+ listener on .241:
    `nc -u -l 6666 | tee log`; emit `… test`; CONFIRM markers); `echo 1 > /proc/sys/kernel/{softlockup,hardlockup}_panic`.
