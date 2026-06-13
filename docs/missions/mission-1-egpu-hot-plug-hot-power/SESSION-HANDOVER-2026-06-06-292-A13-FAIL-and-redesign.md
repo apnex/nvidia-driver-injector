@@ -83,10 +83,17 @@
      both the MMIO short-circuit and C7's table). **Host SURVIVED** (contained 1-CPU spin, unkillable
      modprobe holding the device lock) → operator reboot to clear; post-reboot cold-plug clean, apnex.32
      restored, capture disarmed.
-   - **Residual to close:** (a) F48 fix — TTL-bound the PBI cap walk + probe-gate on
-     `pci_dev_is_disconnected` (+ consider an `osPciRead*` dead-bus class guard); (b) re-run the
-     recover-disabled control via a modprobe.d drop-in (not a raced CLI load); (c) C7 n≥3 top-up + the
-     dynpower-funnel repro (likely unreachable on this host: `pcie_port_pm=off`); (d) 14-day soak.
+   - **Residual to close:** (a) ✅ **F48 fix BUILT 2026-06-13 → apnex.33** (`C8-f48-pbi-capwalk-probe-gate`,
+     fork `ec178e5d`: TTL-48 + 0xFF-terminator on the PBI cap walk in `pci_pbi.c` + `nv_pci_probe` early
+     `-ENODEV` on `os_pci_is_disconnected`; intent `docs/patch-intents/C8-…md`; the `osPciRead*` class
+     guard deliberately deferred pending blast-radius audit — see the intent's Scope boundary); (b) re-run
+     the recover-disabled control — **procedure (avoids the udev race):**
+     `echo 'options nvidia NVreg_TbEgpuRecoverEnable=0' > /etc/modprobe.d/zz-tbegpu-control-test.conf`
+     BEFORE the substrate rebuild, then deauth/reauth → `fix-bar1 --bind` (its modprobe inherits the
+     drop-in) → verify `/sys/module/nvidia/parameters/NVreg_TbEgpuRecoverEnable == 0` → pm0 → disarm gate →
+     roll → expect identical C7 containment (A13/C7 live on nvl, independent of the recover module) →
+     **remove the drop-in after**; (c) C7 n≥3 top-up (rides the same session) + the dynpower-funnel repro
+     (likely unreachable on this host: `pcie_port_pm=off`); (d) 14-day soak (restarted on apnex.33 deploy).
 
 ## Where everything is
 - **Build spec:** `design-2026-06-06-292-redesign-C7-A13prime-A14.md` (+ RAW appendix). **FAIL forensics:**
