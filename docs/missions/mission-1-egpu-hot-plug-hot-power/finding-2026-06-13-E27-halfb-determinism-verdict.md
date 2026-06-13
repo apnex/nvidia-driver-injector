@@ -262,3 +262,27 @@ config-32 G/chip-256 M mismatch → the documented broken-BAR1 hard-wedge.
   retry, removed by `recover=0`; E1's first modprobe was contained). If it fails (predicted) → build the
   PERST automation (auto-trigger fix-bar1 now + A3 hardening; in-kernel slot-cycle module as the
   destination). The earlier optimistic FLR-fix banner is SUPERSEDED by this section.
+
+## E2 LIVE RESULT — 2026-06-13 (flr=1 + recover=0 on the REAL broken-256 M substrate → PASS, n=1) — THE FLR FIX WORKS; the A3-check prediction is REFUTED
+**Mechanism VIABLE.** Contained run (recover=0): deauth/reauth → broken 256 M → module `flr=1` (release 3
+siblings → `pci_resize_resource` rc=0 → `pci_reset_function`/FLR rc=0; BAR1 32 G @ `0x6000000000`,
+ReBAR CTRL=0xf21) → `modprobe --ignore-install nvidia` (recover=0) → **`RmInitAdapter` SUCCEEDED**
+(`open completed within budget rc=0`, no `kbusVerifyBar2`, no recover fire). `nvidia-smi`: RTX 5090,
+32607 MiB, P8; BAR1 PCI region `[size=32G]`; `/dev/nvidia*` + uvm present; **zero error-class lines**.
+- **Why the A3-check predicted FAIL but E2 PASSED:** the prediction rested on "two resets already failed +
+  FLR is weaker than the SBR." But neither prior was a clean FLR-*before*-init: E1's flr=0 was NO reset,
+  and A3's SBR ran *after* a failed init had already poisoned the chip. The variable was reset **TIMING
+  (clean fresh chip, before any init)**, not reset strength — exactly the residual the A3-check honestly
+  flagged. A `pci_reset_function` (FLR) applied to a freshly-resized, never-RM-initialized chip DOES
+  re-latch the 256 M→32 G size.
+- **REVISED MECHANISM (back to the light path):** broken-256 M recovery = decode-off → release sibling
+  prefetch windows → `pci_resize_resource(32 G)` → `pci_reset_function`/FLR → bind. NO slot-cycle/PERST
+  required. `recover=0` is needed only as a SAFETY BELT (so a *failed* recovery can't trigger A3's
+  wedge-prone retry); on a SUCCESSFUL recovery nvidia inits clean and A3 never fires.
+- **STILL OPEN:** (1) **n≥3 determinism** (this is n=1 — confirm it's reliable, incl. the
+  0x6000000000-vs-0x4000000000 placement variance and aged trees); (2) the A3 hardening (BAR-aware
+  RECOVERED gate + signature gating) so recover can stay ENABLED in production without wedging on a
+  failed recovery; (3) merge into the unified recovery. The "automate fix-bar1's slot-cycle" pivot is
+  DEMOTED to the fallback if n≥3 shows non-determinism. **Lesson: don't over-conclude failure from
+  source inference — the contained live check flipped a medium-confidence "doomed" to a working PASS
+  ([[feedback-dont-give-up-pursue-creative-solutions]]).**
