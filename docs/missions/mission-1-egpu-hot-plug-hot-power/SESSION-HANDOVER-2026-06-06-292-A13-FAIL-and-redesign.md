@@ -65,11 +65,28 @@
    `make modules` clean ×2; regen composed-stack compile OK; image
    `apnex/nvidia-driver-injector:595.71.05-apnex.32` (edbdb8ebc8e3) builds, all 22 patches apply cleanly.
    **NOT deployed; NOT live-validated.**
-3. **Live test (the §5 validation plan):** the exact apnex.31 Stage-5 repro (TB deauth/reauth → `fix-bar1
-   --bind` → `nvidia-smi -pm 0` → roll) at **both** `console_loglevel=8` AND minimised observability
-   (`echo 4 4 1 7 > /proc/sys/kernel/printk` + external liveness probe + passive sysrq-w/t/l), **n≥3**, on
-   **both** the open funnel and the **dynpower** funnel (idle→GC6→resume). Acceptance = host survives at
-   both loglevels + zero storm lines + every poll-site short-circuited + the no-regression matrix.
+3. ⮕ **LIVE TEST RUN 2026-06-13 — #292 CONTAINMENT VALIDATED (partial n; one new finding):**
+   - **A14 gate: PASS** — the apnex.30/31-killer roll refused in **13 ms** (`-EIO`, zero chip touch);
+     arming line + `reopen_blocked` semantics all correct; fix-bar1 assertion works end-to-end.
+   - **C7 cycle-1 (min-observability): PASS** — real AER cycle (~1.04 s): A13 marker → C7-e4 sanity-exit at
+     `SET_GUEST_SYSTEM_INFO` (the netcon3 storm RPC) in ONE iteration → `open completed within budget
+     rc=-5` → host alive. **Zero storm lines.**
+   - **C7 cycle-2 (loglevel 8): PASS — GAP-4 ANSWERED**: zero storm lines under the exact netcon3 amplifier
+     conditions ⇒ the storm is removed at SOURCE, not hidden.
+   - **Bonus regression set:** clean-chip matrix all green (deploy cold-init; persistence-ON ×3;
+     persistence-OFF healthy teardown→re-open 1947 ms, gate inert, zero false fires) + an accidental **R2
+     WPR2-fast-fail regression PASS** (bounded, NOT sunk, H2 gating correct, auto-OR correctly inert).
+   - **Cycle-3 (recover-disabled control): INCOMPLETE** — udev's modprobe raced the `Enable=0` param (the
+     raced roll itself was contained, rc=-5); the re-probe of the stale marked-disconnected pci_dev then hit
+     **F48** (`finding-2026-06-13-F48-pbi-capwalk-spin.md`): probe-time PBI capability-walk infinite spin on
+     0xFF config reads (`pci_pbi.c:88`, vendor latent bug, C6-class; config space = a third I/O class outside
+     both the MMIO short-circuit and C7's table). **Host SURVIVED** (contained 1-CPU spin, unkillable
+     modprobe holding the device lock) → operator reboot to clear; post-reboot cold-plug clean, apnex.32
+     restored, capture disarmed.
+   - **Residual to close:** (a) F48 fix — TTL-bound the PBI cap walk + probe-gate on
+     `pci_dev_is_disconnected` (+ consider an `osPciRead*` dead-bus class guard); (b) re-run the
+     recover-disabled control via a modprobe.d drop-in (not a raced CLI load); (c) C7 n≥3 top-up + the
+     dynpower-funnel repro (likely unreachable on this host: `pcie_port_pm=off`); (d) 14-day soak.
 
 ## Where everything is
 - **Build spec:** `design-2026-06-06-292-redesign-C7-A13prime-A14.md` (+ RAW appendix). **FAIL forensics:**
