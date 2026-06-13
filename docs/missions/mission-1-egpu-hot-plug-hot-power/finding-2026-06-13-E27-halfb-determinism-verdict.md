@@ -232,3 +232,33 @@ The size-relatch residual is REAL.** Chain (capture line refs):
    mechanism must do fix-bar1's slot-cycle/PERST" — automate fix-bar1, not replace its slot-cycle. **Process
    lesson:** the modprobe test ran with recover=1 — should have been recover=0 (recover-disabled-control
    discipline); that turned a contained init-fail into a host wedge.
+
+## A3 RESET-PATH CHECK — 2026-06-13 (workflow `e27-a3-reset-rebar-check`, medium confidence) — H-B resolved; FLR likely doomed; mechanism re-scoped to PERST
+**A3 DID restore the ReBAR to 32 G after its bus-reset — so the wedge was NOT a forgotten-restore; the
+Blackwell genuinely won't re-latch a 256 M→32 G SIZE change without a PERST.** A3's `pci_reset_bus`
+(nv-tb-egpu-recover.c:410) runs the kernel save/restore wrapper → `pci_restore_state` →
+`pci_restore_rebar_state` re-derived 32 G from the live `dev->resource[1]` and rewrote ReBAR CTRL=0xF
+*after* the link-down SBR (A3's own slot_reset/resume helpers are BAR0-only telemetry). The retry still
+wedged ⇒ the chip never re-fenced its internal aperture to 32 G; the retry's MMIO hit a
+config-32 G/chip-256 M mismatch → the documented broken-BAR1 hard-wedge.
+- **E2 (`flr=1`) odds: likely FAILS.** Two resets already failed to re-latch (the bare config write; the
+  SBR-plus-ReBAR-restore). FLR uses the *identical* restore wrapper but a *weaker* reset (no link-down)
+  than the SBR that failed. A size re-latch needs the chip to re-sample its BAR from a PERST/cold state.
+  Honest residual (why "medium" not "high"): E1's wedge happened on a chip *poisoned by a prior failed
+  init*; a clean-ordering `flr=1`+`recover=0` run on a fresh resize *might* still pass — but the
+  instant-hard-MMIO-wedge signature is the aperture-mismatch signature, not init-poisoning.
+- **REVISED MECHANISM:** the size relatch is not achievable by any in-kernel config-write + GPU/bridge
+  function-or-secondary-bus reset. E27 recovery must (a) decode-off; (b) program GPU ReBAR=32 G AND
+  release+widen+realign the root-port `00:07.0` prefetch window; (c) **slot power-cycle / PERST +
+  re-enumerate (fix-bar1's mechanism)**; (d) then bind. i.e. **automate fix-bar1's slot-cycle, not replace
+  it.** Not a defeat — an in-kernel/auto-triggered version still retires the userspace step.
+- **A3 HARDENING (needed regardless — real latent bug):** `tb_egpu_recover_slot_reset`
+  (nv-tb-egpu-recover.c:602-625) declares RECOVERED on a single BAR0 PMC_BOOT_0 read — *size-blind*, a
+  guaranteed false-positive for broken-BAR1, then lets a retry MMIO wedge. Fix: BAR-aware verification
+  (read ReBAR current size + a BAR2 sentinel before RECOVERED → surrender on mismatch); signature-gate the
+  broken-BAR1 class to slot-cycle-or-PERMANENT_FAIL (NEVER retry-MMIO a desynced chip); escalate (SBR→slot-
+  cycle) don't repeat; keep `recover=0` default until BAR-aware gating lands.
+- **NEXT:** one CONTAINED `flr=1`+`recover=0` run definitively closes FLR (the wedge was the recover
+  retry, removed by `recover=0`; E1's first modprobe was contained). If it fails (predicted) → build the
+  PERST automation (auto-trigger fix-bar1 now + A3 hardening; in-kernel slot-cycle module as the
+  destination). The earlier optimistic FLR-fix banner is SUPERSEDED by this section.
