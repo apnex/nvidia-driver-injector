@@ -57,10 +57,14 @@
    keys on PDB alone ⇒ **NEW REQUIRED C7-e7** (widen 5 guards to `osIsGpuBusLost`; `rpc.c:11530` is
    load-bearing — prevents a per-freed-object print-storm of the apnex.31 wedge class) + recommended C7-e8.
    DoR §3 amended in place with all deltas.
-2. **Build apnex.32:** carve `C7` on the fork (base, after C6), extend `A13` in place (A13′), add `A14`
-   addon; add patch-intent + review files (intents drafted this session — see below); manifest + version
-   bump (A5-branch commit, no cascade — see the apnex.31 build for the procedure). **Real `make modules`**
-   (the P5 lesson; `git apply --check` is NOT validation).
+2. ✅ **apnex.32 BUILT 2026-06-13** (injector commit `e8a2c74`). Fork stack (linear): a13 tip `690b336f`
+   (A13′: dynpower flag GAP-1 + comments GAP-5) → c7 `147285e6` (e1–e8, 10 files, +128) → a14 `a705623e`
+   (gate both funnels + per-nvl bits + always-on sysfs in nv-pci.c + auto-OR; addon-TU sovereignty kept —
+   arming uses the structural post-`nv_shutdown_adapter` signal, no A4-TU edit) → a5 `eba925ef`
+   (→ apnex.32). `fix-bar1 --bind` now asserts `tb_egpu_diverged_recovered`. Validation: per-branch
+   `make modules` clean ×2; regen composed-stack compile OK; image
+   `apnex/nvidia-driver-injector:595.71.05-apnex.32` (edbdb8ebc8e3) builds, all 22 patches apply cleanly.
+   **NOT deployed; NOT live-validated.**
 3. **Live test (the §5 validation plan):** the exact apnex.31 Stage-5 repro (TB deauth/reauth → `fix-bar1
    --bind` → `nvidia-smi -pm 0` → roll) at **both** `console_loglevel=8` AND minimised observability
    (`echo 4 4 1 7 > /proc/sys/kernel/printk` + external liveness probe + passive sysrq-w/t/l), **n≥3**, on
