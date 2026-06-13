@@ -198,3 +198,37 @@ reason.
   for the *size* re-latch — the one path back to "automate fix-bar1, not replace its slot-cycle." Source
   counter-evidence (nvidia resizes size with no reset on fresh chips; ReBAR spec forbids a link reset for
   size change) makes this unlikely, but **validate live — source already mispredicted the placement once.**
+
+## E1 LIVE RESULT — 2026-06-13 (flr=0 on the REAL broken-256 M substrate → HOST WEDGE) — capture `/root/netconsole-stage01-new.log`
+**E1 (resize, NO reset) FAILED on the real substrate, and the recover module's response wedged the host.
+The size-relatch residual is REAL.** Chain (capture line refs):
+- **Step B (module `flr=0`) succeeded cleanly** (L307-358): broken 256 M → released 3 siblings → resize →
+  BAR1 32 G @ `0x6000000000` (this time the window did NOT grow to 128 G — siblings re-placed higher;
+  `00:07.0` stayed 64 G), `RESULT=OK`, host alive.
+- **Step C (`modprobe nvidia`, recover=1) — init FAILED with a NEW, more fundamental error** (L359-381):
+  `kbusVerifyBar2_GB202: MMUTest BAR2 readback ... returned garbage 0xffffffff` → `NV_ERR_MEMORY_ERROR`
+  → `RmInitNvDevice: Cannot initialize the device` → `RmInitAdapter failed! (0x24:0x72:1307)`. This is the
+  **GPU's memory-aperture subsystem desynced** because the 256 M→32 G *size* change was never latched into
+  the chip (no reset) — distinct from Stage-1's base-only BOOT_0 failure; the *size* change is the deeper
+  problem the investigation flagged.
+- **THE WEDGE = the A3 recover module (recover=1), not my module** (L383-401): the init failure was first
+  *contained* (`open completed within budget rc=-5`), but `tb_egpu recover` then fired (attempt 1/3) and
+  did `pci_reset_bus(03:00.0)` (a secondary-bus / link-down reset — **NOT ReBAR-aware**, so it reverts the
+  chip toward 256 M without re-latching 32 G), reported "RECOVERED" (PMC_BOOT_0 read OK post-reset), then
+  **retried the open** (L400 "external GPU detected") — and the retry's MMIO against the now-re-desynced
+  32 G aperture **wedged the host** (completion-timeout class; capture ends mid-retry). Operator rebooted.
+
+**CONCLUSIONS:**
+1. **`flr=0` (resize without reset) does NOT work on the real size change** — confirms a reset IS required
+   (vindicates the FLR direction). Failure signature: `kbusVerifyBar2` BAR2 aperture garbage.
+2. **The recover module's generic bus-reset is dangerous on a ReBAR-resized chip** (not ReBAR-aware →
+   re-desync → retry wedge). Any E27 experiment that can leave a BAR/chip-size mismatch MUST run with
+   **`NVreg_TbEgpuRecoverEnable=0`** so the recover retry can't fire.
+3. **The size-relatch residual is now central, leaning toward the worst case:** even the recover's
+   *link-down* bus-reset did not cleanly re-latch 32 G here. fix-bar1's slot power-cycle (true PERST) is the
+   proven path. **NEXT = E2: `flr=1` (FLR, BAR/ReBAR-preserving via `pci_restore_rebar_state`) WITH
+   `recover=0`** — does a BAR-aware FLR applied *before* any init (resource tree at 32 G) re-latch the size
+   where the recover's after-the-fact SBR did not? If E2 also fails, the verdict shifts to "the in-kernel
+   mechanism must do fix-bar1's slot-cycle/PERST" — automate fix-bar1, not replace its slot-cycle. **Process
+   lesson:** the modprobe test ran with recover=1 — should have been recover=0 (recover-disabled-control
+   discipline); that turned a contained init-fail into a host wedge.
