@@ -321,6 +321,26 @@ snapshot() {
     log "snapshot: $out"
 }
 
+# ---------- BAR1 size helper (#304) ----------
+# GPU BAR1 (Region 1 = resource line 2) size in MiB as a strict INTEGER.
+# An UNSET / off-bus BAR (start==end==0) returns 0 — NOT the float
+# "9.53674e-07" that `(0-0+1)/1024/1024` produced, which silently defeated the
+# bash -lt / -ge size gates (a float operand makes `[[ -lt ]]` error, the
+# error is swallowed, the "RECOVERY FAILED" fatal is skipped) and let a doomed
+# 0-MiB recovery print "✓ recovered" then proceed to a wedge-prone modprobe
+# (#304 — this is the symptom that masked the E27 off-bus failure). Pure bash
+# 64-bit hex arithmetic; no awk/strtonum dependency.
+bar1_size_mib() {
+    local resfile="/sys/bus/pci/devices/$GPU/resource"
+    [[ -r "$resfile" ]] || { echo 0; return; }
+    local start end
+    read -r start end < <(awk 'NR==2 {print $1, $2; exit}' "$resfile") || { echo 0; return; }
+    if [[ ! "$start" =~ ^0x[0-9a-fA-F]+$ || ! "$end" =~ ^0x[0-9a-fA-F]+$ ]]; then echo 0; return; fi
+    if (( start == 0 && end == 0 )); then echo 0; return; fi   # unset / off-bus
+    if (( end < start )); then echo 0; return; fi              # malformed / inverted
+    echo $(( (end - start + 1) / 1024 / 1024 ))
+}
+
 # ---------- preconditions ----------
 log "=== preflight ==="
 
@@ -348,19 +368,45 @@ if [[ -L "/sys/bus/pci/devices/$GPU/driver" ]]; then
 fi
 log "GPU $GPU has no driver bound ✓"
 
+# Safety contract for the raw ReBAR CTRL write: the GPU's MEMORY decode must be
+# OFF (COMMAND bit 1 = Memory Space Enable) so nothing accesses the BAR window
+# mid-resize. The OTHER COMMAND bits (I/O bit 0, bus-master bit 2, …) do not
+# touch the memory BAR and are irrelevant to resize safety — the old
+# `!= "0000"` guard wrongly refused e.g. COMMAND=0x0404 / 0x0407 (#305, hit
+# live 2026-06-13). Relaxed to test bit 1 only. And since we have ALREADY
+# proven no driver is bound (above), if memory decode happens to be on we can
+# safely clear it ourselves (self-heal) rather than aborting — no driver,
+# nothing is using the window.
 CURRENT_CMD=$(setpci -s "${GPU#0000:}" COMMAND)
-if [[ "$CURRENT_CMD" != "0000" ]]; then
-    fatal "GPU COMMAND=$CURRENT_CMD (memory decoding still on); ReBAR CTRL write would violate kernel safety contract"
+[[ "$CURRENT_CMD" =~ ^[0-9a-fA-F]+$ ]] || fatal "unexpected COMMAND read from $GPU: '$CURRENT_CMD'"
+if (( (0x$CURRENT_CMD & 0x2) != 0 )); then
+    if [[ $DRY_RUN -eq 1 ]]; then
+        log "COMMAND=0x$CURRENT_CMD has memory decode ON; would self-heal (setpci COMMAND=0000) [dry-run: skipped]"
+    else
+        log "COMMAND=0x$CURRENT_CMD has memory decode ON; no driver bound → self-healing (setpci COMMAND=0000)"
+        setpci -s "${GPU#0000:}" COMMAND=0000
+        CURRENT_CMD=$(setpci -s "${GPU#0000:}" COMMAND)
+        [[ "$CURRENT_CMD" =~ ^[0-9a-fA-F]+$ ]] || fatal "unexpected COMMAND re-read from $GPU after self-heal: '$CURRENT_CMD'"
+        if (( (0x$CURRENT_CMD & 0x2) != 0 )); then
+            fatal "could not clear GPU memory decode (COMMAND=0x$CURRENT_CMD still has bit 1 set); ReBAR CTRL write unsafe"
+        fi
+    fi
 fi
-log "COMMAND=0x0000 (memory decoding off) ✓"
+# Only the --dry-run path can reach here with memory decode still on (the live
+# path either self-healed to 0 above or fataled). Don't print a green "off ✓"
+# that contradicts the "[dry-run: skipped]" line just above (#305 review).
+if (( (0x$CURRENT_CMD & 0x2) != 0 )); then
+    log "COMMAND=0x$CURRENT_CMD (memory decode STILL ON — dry-run skipped self-heal)"
+else
+    log "COMMAND=0x$CURRENT_CMD (memory decode off) ✓"
+fi
 
 snapshot "A-baseline"
 
 # ---------- read pre-state ----------
 log "=== pre-recovery state ==="
 PRE_CTRL=$(setpci -s "${GPU#0000:}" "${REBAR_CTRL_OFF}.l")
-PRE_BAR1_MIB=$(awk 'NR==2 {s=strtonum($1); e=strtonum($2); print (e-s+1)/1024/1024; exit}' \
-                  /sys/bus/pci/devices/$GPU/resource)
+PRE_BAR1_MIB=$(bar1_size_mib)   # #304: strict integer MiB; 0 = unset/off-bus
 log "current chip CTRL: 0x$PRE_CTRL"
 log "current BAR1:      $PRE_BAR1_MIB MiB"
 
@@ -429,12 +475,17 @@ snapshot "D-after-recovery"
 # ---------- verify ----------
 log "=== verification ==="
 
-POST_BAR1_MIB=$(awk 'NR==2 {s=strtonum($1); e=strtonum($2); print (e-s+1)/1024/1024; exit}' \
-                   /sys/bus/pci/devices/$GPU/resource)
+POST_BAR1_MIB=$(bar1_size_mib)   # #304: strict integer MiB; 0 = unset/off-bus
 POST_CTRL2=$(setpci -s "${GPU#0000:}" "${REBAR_CTRL_OFF}.l")
 log "post-recovery BAR1: $POST_BAR1_MIB MiB"
 log "post-recovery CTRL: 0x$POST_CTRL2"
 
+# #304: an UNSET BAR1 (0 MiB) is the E27 off-bus failure, NOT a chip-CTRL
+# problem — name it distinctly so it never reads as a recovery success.
+if [[ "$POST_BAR1_MIB" -eq 0 ]]; then
+    snapshot "D-after-recovery-OFFBUS"
+    fatal "RECOVERY FAILED (off-bus): BAR1 is unassigned (0 MiB) — the GPU got no usable BAR1 window. This is the E27 intermediate-bridge prefetch-window failure (the 32 GiB child cannot fit), NOT a chip-CTRL problem. A cold-plug at boot is the reliable 32 GiB path. State: $workdir/D-after-recovery-OFFBUS.txt + journalctl."
+fi
 if [[ "$POST_BAR1_MIB" -lt $(( MAX_GIB * 1024 )) ]]; then
     fatal "RECOVERY FAILED: BAR1 is $POST_BAR1_MIB MiB, expected ≥ $(( MAX_GIB * 1024 )) MiB. Check $workdir/D-after-recovery.txt + journalctl."
 fi

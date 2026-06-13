@@ -78,8 +78,11 @@ open failed — check dmesg `rc=`, not the CLI string.
 - **E27** — the second recovery gate (intermediate TB bridge `02:00.0` 256 MiB prefetch window).
   Finding: `finding-2026-06-05-E27-intermediate-bridge-window.md`; landing zone
   `pci_reassign_bridge_resources`. Reproduce/iterate per its doc.
-- **#304/#305** — fix-bar1 hardening bundle (BAR1=0 false-success; COMMAND auto-clear — note the guard
-  also rejects non-zero non-decode bits, hit live 2026-06-13; fold that in).
+- **#304/#305** — fix-bar1 hardening bundle. ✅ **DONE 2026-06-13** (`tools/fix-bar1.sh` +50/−7): #304
+  integer `bar1_size_mib()` + distinct off-bus fatal (kills the BAR1=0 "✓ recovered" float-swallow);
+  #305 COMMAND guard relaxed to memory-decode-bit-only + dry-run-safe self-heal (fixes the live-hit
+  `0x0404`/`0x0407` reject). Validated bash-n + shellcheck + synthetic unit tests + 3-reviewer opus
+  workflow (ship-with-fixes, 0 must-fix; should-fix folded in). Live integration on next real recovery.
 - **Upstream gate** (held, per policy): C7 + C8 are genuinely upstream-worthy (GSP polls honoring
   `pci_dev_is_disconnected`; bounded PBI cap walk). Only after soak + review.
 - **Deferred, documented:** `osPciRead*` dead-bus class guard (blast-radius audit first — C8 intent Scope
