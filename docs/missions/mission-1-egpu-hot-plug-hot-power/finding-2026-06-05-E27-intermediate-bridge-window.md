@@ -1,5 +1,15 @@
 # Finding — E27: intermediate TB bridge gets only 256 MiB prefetch window (2026-06-05)
 
+> ⚠ **ROOT-CAUSE CORRECTED 2026-06-13 — see `finding-2026-06-13-E27-halfb-determinism-verdict.md`.**
+> The "intermediate bridge `02:00.0` = 256 MiB bottleneck" below is an **artifact of `fix-bar1`'s own
+> slot-cycle** (the 256 MiB `02:00.0` window appears only after `fix-bar1` writes chip CTRL=0xF so the GPU
+> re-advertises 32 GiB; the native hot-add path is graceful with chip=256 MiB). The real binding cause is
+> the **root port `00:07.0`'s own prefetch window freezing at a 32 G-MISALIGNED base** on aged trees,
+> which the `resource_assigned()` skip then refuses to re-size. The fix is NOT growing `02:00.0` at
+> `pci_reassign_bridge_resources` — it's an out-of-tree module doing sibling-window-release +
+> `pci_resize_resource`. This doc is retained for the captured topology/evidence; treat its mechanism +
+> fix sections as superseded.
+
 **Class:** runtime/hot-plug PCIe resource-allocation failure. **Graceful (NO host wedge).** Categorically
 **distinct from #292** (the re-open RM bring-up deadlock) — different mechanism, blast radius, and fix.
 Do not conflate.
