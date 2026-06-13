@@ -1,6 +1,11 @@
-# Session handover — 2026-06-06 — #292 A13 live-FAIL + rigorous redesign (READ FIRST)
+# Session handover — 2026-06-06 — #292 A13 live-FAIL + rigorous redesign
 
-## TL;DR — current state
+> ⚠ **SUPERSEDED as the resume anchor (2026-06-13).** The TL;DR below is STALE (apnex.32/.33 were since
+> built, live-validated — **#292 is now CONTAINED** — and F48 was found+fixed). Current READ-FIRST:
+> **`SESSION-HANDOVER-2026-06-13-apnex32-33-validation-F48.md`**. This doc remains the provenance for the
+> A13 FAIL → redesign decision trail; its NEXT-STEPS ledger (items 1-3) carries the per-step results.
+
+## TL;DR — current state (⚠ STALE — see banner)
 - **apnex.31 is LIVE on obpc, healthy** (driver `595.71.05-apnex.31`, BAR1 32 GiB, P8, ~25 W, persistence
   engaged, injector un-drained, pod Ready). Capture disarmed. Soak runs on apnex.31.
 - **apnex.31 contains A13** (the first #292 fix). A13 is **dormant on the healthy path** but is
