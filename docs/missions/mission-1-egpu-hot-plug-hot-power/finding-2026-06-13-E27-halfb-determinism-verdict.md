@@ -1,6 +1,21 @@
 # Finding — 2026-06-13 — E27 half-(b) determinism: CONCLUSIVE (deterministic out-of-tree-module mechanism; conditional on n≥3 experiment)
 
-## Verdict
+> ⛔ **REFUTED BY LIVE TEST 2026-06-13 (Stage 1 wet run, n=1) — the determination below is WRONG on its
+> load-bearing conclusion.** The module ran correctly + safely (apnex.33 contained the aftermath, host
+> never wedged), BUT: (1) `pci_resize_resource` re-placed the window at **`0x6000000000`, not the
+> predicted firmware-constant `0x4000000000`** (and grew the root-port window to 128 G) — so the
+> "deterministic low-base placement" argument is false; (2) **the resulting layout left the GPU
+> un-initable** — the injector reload's `RmInitAdapter` failed (`Failed to enable MSI-X` →
+> `gpuSanityCheck 0x1` → `osInitNvMapping: Cannot attach gpu`, `0x22:0x38:859`), GPU declared lost;
+> recovery required a full **TB deauth/reauth + `fix-bar1 --bind` slot-cycle**. ⇒ **the in-kernel
+> `pci_resize_resource` approach does NOT retire `fix-bar1` — the pciehp slot-cycle / re-enumeration is
+> LOAD-BEARING for a working GPU, and `pci_resize_resource` alone does not do it.** The source analysis
+> (even on the real kernel, exports verified) could not predict the hardware MSI-X/init failure — exactly
+> the gap live testing exists to close. See the LIVE RESULT section appended at the bottom. Next: either
+> the in-kernel approach must replicate fix-bar1's chip-CTRL-write + slot-cycle (not `pci_resize_resource`),
+> or keep `fix-bar1` and just automate it. fix-bar1 (#304/#305-hardened) remains the working recovery.
+
+## Verdict (⛔ REFUTED — see banner above)
 **E27's broken-BAR1 recovery can be made fully deterministic from an out-of-tree kernel module — no
 kernel rebuild, no cmdline — and a SINGLE module sequence retires `fix-bar1` entirely (both halves).
 Confidence: high. Status: conditional, pending one live n≥3 aged-tree experiment.** Resolved against the
@@ -105,4 +120,39 @@ nvidia unbound; a hypothetical second `00:07.x` prefetch consumer. Per project b
 Survey: workflow `e27-survey-scoping`. Determinism: workflow `e27-halfb-determinism-7009` (real source).
 Real source: `/root/linux-7.0.9-pci` (upstream v7.0.9 `drivers/pci`; SRPM-diff before shipping a patch —
 load-bearing symbols already cross-checked vs Fedora `Module.symvers`/`ioport.h`). Experiment module +
-harness: `experiments/e27-bar1-rearm/` (this campaign). Stopgap: `tools/fix-bar1.sh` (#304/#305 hardened).
+harness: `tools/e27-bar1-rearm/` (this campaign). Stopgap: `tools/fix-bar1.sh` (#304/#305 hardened).
+
+## LIVE RESULT — 2026-06-13 (Stages 0 + 1; module `tbegpu_bar1_rearm`, reviewed, `pci_lock_rescan_remove`-bracketed)
+**Stage 0 (dry-run, n=1): PASS.** Survey correct — identified exactly the 3 empty downstream-port
+siblings (`03:01/02/03`) and their assigned prefetch windows; the plan (decode-off → release ×3 →
+`pci_resize_resource(04:00.0,1,15,0)`) is right; zero writes (PRE == POST); module loads/unloads clean;
+host alive. Confirms the module is *correct + safe* and the sibling-walk (the review must-fix) enumerates
+right under the lock.
+
+**Stage 1 (wet, aligned positive control, n=1): the module is SAFE but the APPROACH FAILS.**
+- Mechanism executed: decode cleared, 3 siblings released (rc=0 each), `pci_resize_resource` rc=0,
+  `RESULT=OK`, BAR1 32 G/32 G-aligned, host alive — no wedge (this is the *safety* pass).
+- **BUT the window moved to `0x6000000000`** (root-port window grew 64 G → 128 G), NOT the predicted
+  `0x4000000000`. The "deterministic firmware-constant low placement" argument is **falsified**.
+- **AND the moved layout broke the GPU:** the injector reload's `RmInitAdapter` failed (`Failed to
+  enable MSI-X`, `gpuSanityCheck 0x1`, `osInitNvMapping: Cannot attach gpu`, `0x22:0x38:859`), GPU
+  declared lost (apnex.33 F40b/A12 bounded it `rc=-5`, C5 sink PERMANENT_FAIL — host alive, contained).
+  Recovery needed a full **TB deauth/reauth + `fix-bar1 --bind` slot-cycle** (BAR0 MMIO still read fine
+  throughout — chip alive; it was the altered PCI resource layout that broke init).
+
+**CONCLUSION (refutes the verdict):** `pci_resize_resource` produces a sysfs-valid 32 G-aligned BAR1 but
+(a) places it non-deterministically and (b) leaves the GPU un-initable — it does **not** yield a working
+GPU and does **not** retire `fix-bar1`. **fix-bar1's pciehp slot-cycle re-enumeration is load-bearing**
+(it is what makes the GPU init after BAR recovery), and `pci_resize_resource` does not perform it. The
+source analysis was right about the PCI-resource algebra and wrong about the hardware outcome — the
+exact gap live testing exists to expose. Host left healthy on the `0x6000000000` layout (functional; a
+reboot would restore the pristine `0x4000000000` base). Soak clock reset by the run.
+
+**NEXT (re-scope):** (1) test the **fallback** path (explicit release chain +
+`pci_assign_unassigned_bridge_resources`) — but it likely hits the same no-re-enumeration wall; (2) more
+likely, an in-kernel E27 must replicate fix-bar1's actual mechanism (chip ReBAR-CTRL write **+ a pciehp
+slot power-cycle / FLR re-enumeration**), since the slot-cycle is the load-bearing step — i.e. the
+in-kernel version is "automate fix-bar1," not "replace its slot-cycle with `pci_resize_resource`"; (3)
+or keep `fix-bar1` and just automate it via a TB-attach udev/boltd trigger. The window-placement
+non-determinism (Stage 2's original question) is now moot for this approach — it failed for a more basic
+reason.
