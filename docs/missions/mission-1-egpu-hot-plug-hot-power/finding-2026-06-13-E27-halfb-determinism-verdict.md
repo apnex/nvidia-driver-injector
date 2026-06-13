@@ -14,8 +14,17 @@
 > the gap live testing exists to close. See the LIVE RESULT section appended at the bottom. Next: either
 > the in-kernel approach must replicate fix-bar1's chip-CTRL-write + slot-cycle (not `pci_resize_resource`),
 > or keep `fix-bar1` and just automate it. fix-bar1 (#304/#305-hardened) remains the working recovery.
+>
+> **⮕ RE-OPENED 2026-06-13 (do not treat as dead):** Stage 1 refuted the NAIVE single-`pci_resize_resource`
+> call run on a HEALTHY/aligned tree (it disrupted a *working* GPU) — that is NOT proof the mechanism is
+> unsalvageable. UNTESTED and load-bearing: (a) the REAL broken-256 M scenario (the actual use case,
+> reproducible via deauth/reauth — Stage 1 used the wrong substrate); (b) placement control (force
+> `0x4000000000` / prevent the 128 G window growth); (c) a LIGHTER post-resize re-enumeration (FLR /
+> secondary-bus-reset, not a full pciehp slot-cycle). **Pivotal open question: is the `RmInitAdapter`
+> failure caused by the ADDRESS MOVE or by DEVICE STATE after the resize?** Under active investigation —
+> the "slot-cycle is load-bearing" conclusion is an unverified inference, not established.
 
-## Verdict (⛔ REFUTED — see banner above)
+## Verdict (⛔ naive single-call REFUTED; mechanism viability RE-OPENED — see banner above)
 **E27's broken-BAR1 recovery can be made fully deterministic from an out-of-tree kernel module — no
 kernel rebuild, no cmdline — and a SINGLE module sequence retires `fix-bar1` entirely (both halves).
 Confidence: high. Status: conditional, pending one live n≥3 aged-tree experiment.** Resolved against the
